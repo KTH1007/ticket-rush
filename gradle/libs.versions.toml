@@ -8,7 +8,7 @@ resilience4j = "2.3.0"
 kotlinLogging = "8.0.4"
 mockk = "1.14.11"
 archunit = "1.5.0"
-detekt = "2.0.0-alpha.3"
+detekt = "2.0.0-alpha.6"
 ktlint = "14.2.0"
 logstashEncoder = "9.0"
 
