@@ -41,7 +41,7 @@ services:
   # Flyway 10부터 DB 지원이 모듈화됐다. 이미지에 PostgreSQL 모듈이 없으면
   # 여기서 막히므로 첫 실행 시 docker compose logs tr-flyway로 반드시 확인한다.
   flyway:
-    image: flyway/flyway:11-alpine
+    image: flyway/flyway:13-alpine
     container_name: tr-flyway
     depends_on:
       postgres: { condition: service_healthy }
