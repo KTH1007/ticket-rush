@@ -1,0 +1,30 @@
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!--
+      로컬은 사람이 읽고 컨테이너는 수집기가 읽는다.
+
+      traceId는 MDC에 자동으로 생기지 않는다. 요청 필터에서 직접 채우거나
+      Micrometer Tracing bridge를 붙여야 한다. 그 전까지는 빈 값으로 찍힌다.
+    -->
+
+    <springProfile name="local,test">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} %-5level [%X{traceId:-}] %logger{20} - %msg%n</pattern>
+            </encoder>
+        </appender>
+        <root level="INFO"><appender-ref ref="CONSOLE"/></root>
+    </springProfile>
+
+    <springProfile name="docker">
+        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <includeMdcKeyName>traceId</includeMdcKeyName>
+                <includeMdcKeyName>instanceId</includeMdcKeyName>
+                <customFields>{"app":"ticket-rush"}</customFields>
+            </encoder>
+        </appender>
+        <root level="INFO"><appender-ref ref="JSON"/></root>
+    </springProfile>
+</configuration>

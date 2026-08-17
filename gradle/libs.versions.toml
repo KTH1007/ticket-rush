@@ -1,0 +1,39 @@
+[versions]
+kotlin = "2.3.21"
+springBoot = "4.1.0"
+springDependencyManagement = "1.1.7"
+springModulith = "2.1.0"
+querydsl = "7.4.0"
+resilience4j = "2.3.0"
+kotlinLogging = "8.0.4"
+mockk = "1.14.11"
+archunit = "1.5.0"
+detekt = "2.0.0-alpha.3"
+ktlint = "14.2.0"
+logstashEncoder = "9.0"
+
+[libraries]
+resilience4j-spring-boot4 = { module = "io.github.resilience4j:resilience4j-spring-boot3", version.ref = "resilience4j" }
+modulith-bom = { module = "org.springframework.modulith:spring-modulith-bom", version.ref = "springModulith" }
+modulith-starter-core = { module = "org.springframework.modulith:spring-modulith-starter-core" }
+modulith-starter-insight = { module = "org.springframework.modulith:spring-modulith-starter-insight" }
+modulith-starter-jpa = { module = "org.springframework.modulith:spring-modulith-starter-jpa" }
+modulith-runtime = { module = "org.springframework.modulith:spring-modulith-runtime" }
+modulith-actuator = { module = "org.springframework.modulith:spring-modulith-actuator" }
+modulith-test = { module = "org.springframework.modulith:spring-modulith-starter-test" }
+querydsl-jpa = { module = "io.github.openfeign.querydsl:querydsl-jpa", version.ref = "querydsl" }
+querydsl-apt = { module = "io.github.openfeign.querydsl:querydsl-apt", version.ref = "querydsl" }
+kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = "kotlinLogging" }
+logstash-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstashEncoder" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+archunit = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-spring = { id = "org.jetbrains.kotlin.plugin.spring", version.ref = "kotlin" }
+kotlin-jpa = { id = "org.jetbrains.kotlin.plugin.jpa", version.ref = "kotlin" }
+kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
+spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
+spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "springDependencyManagement" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }

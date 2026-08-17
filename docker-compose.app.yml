@@ -1,0 +1,72 @@
+# 앱 2대 + nginx. 다중 인스턴스 검증에서만 쓴다.
+# 실행: docker compose -f docker-compose.yml -f docker-compose.app.yml up -d --build
+#
+# --scale을 안 쓰는 이유는 nginx가 시작 시 DNS를 한 번만 resolve하고
+# 캐싱해서 별도 resolver 설정이 필요해지기 때문이다.
+
+services:
+  app-1:
+    build: .
+    container_name: tr-app-1
+    # JVM의 -XX:MaxRAMPercentage는 컨테이너에 실제 메모리 제한이 있어야
+    # 의미가 생긴다. 제한이 없으면 Docker VM 전체 메모리를 기준으로 계산돼
+    # 인스턴스마다 수 GB씩 잡으려 든다. 앱 2대 동시 구동을 전제로 한
+    # 이 파일에서는 반드시 명시해야 한다.
+    mem_limit: 512m
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      INSTANCE_ID: app-1
+      DB_PASSWORD: localpassword
+      PHONE_HMAC_KEY: ${PHONE_HMAC_KEY}
+    # 검증 중에는 인스턴스별 직접 접근이 필요해 포트를 연다.
+    # 검증이 끝나면 expose: ["8080"]으로 바꿔 nginx 우회와 헤더 위조를 막고,
+    # Prometheus도 app-1:8080을 직접 scrape하도록 바꾼다.
+    ports: ["127.0.0.1:8081:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      flyway: { condition: service_completed_successfully }
+    healthcheck:
+      # depends_on은 기동 순서만 보장한다. 앱 기동이 수십 초 걸려
+      # nginx가 먼저 뜨면 초기 요청이 502가 나는 것을 막는다.
+      #
+      # 종료 시점은 이걸로 해결되지 않는다. 오픈소스 nginx는 능동 헬스체크가
+      # 없어 readiness를 주기적으로 확인하지 않고, max_fails로 실패한 요청
+      # 몇 건 뒤에야 감지한다. graceful shutdown이 진행 중인 요청을 마치게
+      # 하지만 종료 순간의 502를 완전히 막지는 못한다.
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 40s
+
+  app-2:
+    build: .
+    container_name: tr-app-2
+    mem_limit: 512m
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      INSTANCE_ID: app-2
+      DB_PASSWORD: localpassword
+      PHONE_HMAC_KEY: ${PHONE_HMAC_KEY}
+    ports: ["127.0.0.1:8082:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      flyway: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 40s
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: tr-nginx
+    ports: ["127.0.0.1:8080:80"]
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      app-1: { condition: service_healthy }
+      app-2: { condition: service_healthy }

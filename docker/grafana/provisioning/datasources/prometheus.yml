@@ -1,0 +1,9 @@
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # 컨테이너 간 통신이라 localhost가 아니라 서비스 이름을 쓴다
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

@@ -1,0 +1,38 @@
+name: concurrency
+
+# 매 PR마다 돌리기엔 느리고 CPU를 많이 쓴다.
+# main 병합과 야간에만 돌려 간헐적 실패를 잡는다.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 18 * * *" # UTC 18시 = KST 새벽 3시
+  workflow_dispatch: # 필요할 때 수동 실행
+
+jobs:
+  concurrency-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v6
+
+      # 한 번 통과는 우연일 수 있다. @RepeatedTest와 별개로
+      # CI에서도 반복해 타이밍 의존 실패를 잡는다.
+      - name: concurrency test
+        run: ./gradlew concurrencyTest --no-daemon
+        env:
+          PHONE_HMAC_KEY: ci-only-key-not-a-real-secret
+
+      - name: upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: concurrency-reports
+          path: build/reports/tests/concurrencyTest/
+          retention-days: 14

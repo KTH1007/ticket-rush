@@ -1,0 +1,20 @@
+# local과 다른 점은 호스트 이름, 프록시 헤더, 로그 포맷 셋뿐이다.
+# 값이 실제로 달라지지 않는 프로필은 만들지 않는다.
+
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/ticketrush
+    username: ticketrush
+    password: ${DB_PASSWORD}
+  data:
+    redis:
+      host: redis
+      port: 6379
+
+server:
+  forward-headers-strategy: native
+
+management:
+  metrics:
+    tags:
+      instance: ${INSTANCE_ID:unknown}

@@ -1,0 +1,102 @@
+spring:
+  application:
+    name: ticket-rush
+  profiles:
+    default: local
+
+  jpa:
+    open-in-view: false        # 결정 사항. 뷰까지 커넥션을 붙잡으면 풀이 고갈된다
+    hibernate: { ddl-auto: validate }   # 스키마는 Flyway가 만든다
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+        default_batch_fetch_size: 100
+
+  flyway:
+    enabled: false             # 전용 컨테이너가 실행. 2대 기동 시 겹침 방지
+
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+      connection-timeout: 3000   # 인프라 호출에는 예외 없이 타임아웃
+      validation-timeout: 2000
+      leak-detection-threshold: 5000
+
+  data:
+    redis:
+      timeout: 1s
+      connect-timeout: 1s
+      lettuce:
+        pool: { max-active: 32, max-idle: 16, min-idle: 4 }
+
+  lifecycle:
+    timeout-per-shutdown-phase: 30s   # 스케줄러가 처리 중인 청크를 마치도록
+
+  threads:
+    virtual: { enabled: true }   # false로 두면 Virtual Thread 비교 실험의 기준선
+
+server:
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,modulith
+  endpoint:
+    health:
+      # /actuator/health/readiness를 노출한다. 종료 시작 시 먼저 실패로 바뀐다.
+      # 다만 오픈소스 nginx는 이 엔드포인트를 능동적으로 확인하지 않으므로
+      # 현재 구성에서는 컨테이너 healthcheck 용도이고,
+      # 향후 K8s나 능동 헬스체크가 있는 LB로 갈 때 실제 효과가 난다.
+      probes:
+        enabled: true
+      show-details: when-authorized
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  metrics:
+    tags:
+      instance: ${INSTANCE_ID:local}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowType: COUNT_BASED # 횟수 기반
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50 # 실패율 차단
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+    instances:
+      paymentGateway: { baseConfig: default }
+  timelimiter:
+    instances:
+      paymentGateway: { timeoutDuration: 3s }
+
+# 운영 중 조정 대상은 전부 여기로. k6 결과로 재배포 없이 바꾼다
+ticket-rush:
+  queue: ## 대기열
+    token-ttl: 15m
+    active-ttl: 2m
+    heartbeat-timeout: 60s # 클라이언트측 생존신호
+    promotion-budget-per-second: 100 # 1초당 100명씩 통과
+    poll-interval: # 순번 확인
+      far: 15s          # 1000위 밖
+      near: 2s          # 100위 이내
+      jitter-ratio: 0.2 # 지터로 무작위
+    broadcast-cache-ttl: 1s # 남은 좌석수 등 캐싱해서 보여줌
+  seat:
+    hold-ttl: 5m
+    payment-failed-hold-ttl: 1m
+    max-per-phone: 2
+    bitmap-cache-ttl: 1s
+  outbox:
+    poll-interval: 1s
+    chunk-size: 100
+    max-attempts: 5
+  security:
+    phone-hmac-key: ${PHONE_HMAC_KEY}   # DB/Redis에서 전화번호 원문 대신 동일 사용자를 식별할 수 있는 결정적 식별자를 만들기 위함

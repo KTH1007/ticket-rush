@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # 개별 PR이 쏟아지면 안 보게 된다. 묶어서 하나로 받는다
+      spring:
+        patterns: ["org.springframework*"]
+      test:
+        patterns: ["io.mockk*", "org.testcontainers*", "com.tngtech.archunit*"]
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  # docker-compose.yml의 이미지 버전은 docker ecosystem이 스캔하지 않는다. 별도 ecosystem 필요
+  - package-ecosystem: docker-compose
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+

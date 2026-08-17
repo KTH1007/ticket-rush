@@ -1,0 +1,116 @@
+# 개발 중에는 앱을 IDE에서 실행하고 인프라만 컨테이너로 띄운다.
+#
+# 기본:          docker compose up -d
+# 관측 포함:      docker compose --profile observability up -d
+# UI 도구 포함:   docker compose --profile tools up -d
+# 부하테스트:     기본 + observability만. UI가 CPU를 나눠 쓰면 측정이 왜곡된다.
+#
+# 이미지 태그를 고정한 이유는 latest가 어느 날 바뀌면 설정이나 대시보드가
+# 깨져도 원인을 찾기 어렵기 때문이다.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tr-postgres
+    environment:
+      POSTGRES_DB: ticketrush
+      POSTGRES_USER: ticketrush
+      POSTGRES_PASSWORD: localpassword
+      # 인코딩과 로케일을 고정한다. 환경마다 정렬 순서가 달라지는 것을 막는다.
+      # 주의: 데이터 볼륨의 최초 생성 시에만 적용된다.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      TZ: UTC
+      PGTZ: UTC
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticketrush -d ticketrush"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    command:
+      - postgres
+      - -c
+      - log_min_duration_statement=200   # 인덱스 튜닝 시 느린 쿼리를 찾는 근거
+      - -c
+      - max_connections=200              # 앱 2대 x 풀 20 + 스케줄러 + 여유
+
+  # 마이그레이션은 전용 컨테이너가 실행한다.
+  # 앱 2대가 동시에 기동하면 같은 스키마에 마이그레이션이 겹친다.
+  #
+  # Flyway 10부터 DB 지원이 모듈화됐다. 이미지에 PostgreSQL 모듈이 없으면
+  # 여기서 막히므로 첫 실행 시 docker compose logs tr-flyway로 반드시 확인한다.
+  flyway:
+    image: flyway/flyway:11-alpine
+    container_name: tr-flyway
+    depends_on:
+      postgres: { condition: service_healthy }
+    volumes:
+      - ./src/main/resources/db/migration:/flyway/sql:ro
+    command:
+      - -url=jdbc:postgresql://postgres:5432/ticketrush
+      - -user=ticketrush
+      - -password=localpassword
+      - -connectRetries=10
+      - migrate
+
+  redis:
+    image: redis:7-alpine
+    container_name: tr-redis
+    ports: ["127.0.0.1:6379:6379"]
+    command:
+      - redis-server
+      - --maxmemory
+      - 512mb                # 대기열 ZSET 50만 + 좌석 키 + 비트맵의 3배 여유
+      - --maxmemory-policy
+      - noeviction           # evict되면 좌석 홀드가 조용히 사라진다. 차라리 쓰기를 실패시킨다
+      - --appendonly
+      - "no"                 # 캐시와 휘발성 상태만 담는다. 영구 기록은 DB에 있다
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 아래는 profiles. 기본 up에는 뜨지 않는다.
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: tr-prometheus
+    profiles: ["observability"]
+    ports: ["127.0.0.1:9090:9090"]
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-remote-write-receiver   # k6 결과를 여기로 밀어넣는다
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: tr-grafana
+    profiles: ["observability"]
+    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      # UI에서 만든 대시보드는 컨테이너를 내리면 사라진다. 파일로 관리한다
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on: [prometheus]
+
+  redis-insight:
+    image: redis/redisinsight:2.66
+    container_name: tr-redisinsight
+    profiles: ["tools"]
+    ports: ["127.0.0.1:5540:5540"]
+    volumes: [redisinsight-data:/data]
+
+volumes:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+  redisinsight-data:

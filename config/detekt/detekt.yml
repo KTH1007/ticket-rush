@@ -1,0 +1,46 @@
+complexity:
+  LongMethod:
+    active: true
+    allowedLines: 20
+  NestedBlockDepth:
+    active: true
+    allowedDepth: 3
+  LongParameterList:
+    active: true
+    allowedFunctionParameters: 6
+    ignoreDefaultParameters: true
+
+naming:
+  FunctionNaming:
+    active: true
+    ignoreAnnotated:
+      - "Test"
+      - "ParameterizedTest"
+      - "RepeatedTest"
+  # VariableNaming엔 ignoreAnnotated가 없다(FunctionNaming과 달리 지원 안 함).
+  # ArchUnit @ArchTest는 val 프로퍼티에 붙는데, 여기도 백틱 한글 문장형을 쓴다.
+  # 클래스명 패턴으로 대신 예외 처리한다.
+  VariableNaming:
+    active: true
+    excludeClassPattern: ".*Test.*"
+
+style:
+  MagicNumber:
+    active: true
+    ignoreNumbers: ["-1", "0", "1", "2"]
+    ignoreAnnotated: ["ConfigurationProperties"]
+  ReturnCount:
+    active: true
+    max: 4
+  MaxLineLength:
+    active: true
+    maxLineLength: 140
+  ForbiddenMethodCall:
+    active: true
+    methods:
+      - "java.time.LocalDateTime.now()"
+      - "java.time.Instant.now()"
+
+exceptions:
+  SwallowedException:
+    active: true

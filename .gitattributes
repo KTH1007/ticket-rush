@@ -1,0 +1,21 @@
+* text=auto eol=lf
+
+*.kt      text eol=lf
+*.kts     text eol=lf
+*.java    text eol=lf
+*.sql     text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.lua     text eol=lf
+*.sh      text eol=lf
+gradlew   text eol=lf
+
+*.bat     text eol=crlf
+
+*.jar     binary
+*.png     binary
+*.zip     binary
+
+# GitHub 언어 통계에서 제외한다
+docker/**    linguist-vendored
+k6/**        linguist-vendored

@@ -1,0 +1,16 @@
+spring:
+  flyway: { enabled: true }   # 테스트는 인스턴스가 하나라 겹치지 않는다
+  threads:
+    virtual: { enabled: false }   # 테스트는 결정적으로 돌아야 한다
+
+ticket-rush:
+  queue:
+    poll-interval: { jitter-ratio: 0.0 }   # 지터를 끈다
+    broadcast-cache-ttl: 0s
+  seat:
+    bitmap-cache-ttl: 0s
+  outbox:
+    poll-interval: 100ms
+    chunk-size: 10
+  security:
+    phone-hmac-key: test-hmac-key-for-local-only

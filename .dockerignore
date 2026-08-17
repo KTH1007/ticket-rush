@@ -1,0 +1,10 @@
+build/
+.gradle/
+.kotlin/
+out/
+bin/
+.idea/
+.vscode/
+.git/
+.env
+*.log
