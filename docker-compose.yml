@@ -55,7 +55,7 @@ services:
       - migrate
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     container_name: tr-redis
     ports: ["127.0.0.1:6379:6379"]
     command:
