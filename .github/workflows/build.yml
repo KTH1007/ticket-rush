@@ -38,7 +38,7 @@ jobs:
 
       - name: upload reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports-${{ github.run_id }}
           path: |
@@ -51,7 +51,7 @@ jobs:
       # PR에서 모듈 경계가 어떻게 바뀌었는지 그림으로 확인할 수 있다.
       - name: upload module docs
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: modulith-docs
           path: build/spring-modulith-docs/
