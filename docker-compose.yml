@@ -103,7 +103,7 @@ services:
     depends_on: [prometheus]
 
   redis-insight:
-    image: redis/redisinsight:2.66
+    image: redis/redisinsight:3.8
     container_name: tr-redisinsight
     profiles: ["tools"]
     ports: ["127.0.0.1:5540:5540"]
