@@ -20,7 +20,7 @@ abstract class IntegrationTest {
         // 싱글턴 재사용. @Testcontainers 방식은 클래스마다 컨테이너를 새로 띄워
         // 클래스가 늘면 기동 시간이 빌드 전체를 지배한다.
         private val postgres =
-            PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"))
+            PostgreSQLContainer(DockerImageName.parse("postgres:18-alpine"))
                 .withDatabaseName("ticketrush")
                 .withUsername("test")
                 .withPassword("test")
