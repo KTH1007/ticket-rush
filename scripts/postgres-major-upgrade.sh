@@ -56,7 +56,13 @@ echo "[3/5] ${TARGET_CONTAINER}로 백업 파일 복사 중..."
 docker cp "${DUMP_FILE}" "${TARGET_CONTAINER}:/tmp/pg-upgrade.dump"
 
 echo "[4/5] pg_restore 실행 중..."
-docker exec "${TARGET_CONTAINER}" pg_restore -U "${DB_USER}" -d "${DB_NAME}" --no-owner --no-privileges /tmp/pg-upgrade.dump
+# --single-transaction 없이 돌리면 중간에 에러가 나도 이미 반영된 테이블은
+# 그대로 남는다(실제로 재현해봄: event는 PK 충돌로 실패, grade/seat는 그대로
+# 반영돼서 grade/seat가 존재하지도 않는 event를 참조하는 깨진 상태가 됐다).
+# --single-transaction은 전체를 BEGIN/COMMIT으로 묶어서 하나라도 실패하면
+# 전부 롤백한다(--exit-on-error를 내포하므로 따로 안 줘도 된다). 이 프로젝트
+# 규모에서는 락 테이블 소진 걱정보다 부분 반영 방지가 훨씬 중요하다.
+docker exec "${TARGET_CONTAINER}" pg_restore -U "${DB_USER}" -d "${DB_NAME}" --no-owner --no-privileges --single-transaction /tmp/pg-upgrade.dump
 
 echo "[5/5] 검증: row count 비교"
 echo "  --- source (${SOURCE_CONTAINER}) ---"
