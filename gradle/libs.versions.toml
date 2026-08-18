@@ -1,5 +1,5 @@
 [versions]
-kotlin = "2.3.21"
+kotlin = "2.4.10"
 springBoot = "4.1.0"
 springDependencyManagement = "1.1.7"
 springModulith = "2.1.0"
@@ -9,7 +9,7 @@ kotlinLogging = "8.0.4"
 mockk = "1.14.11"
 archunit = "1.5.0"
 testcontainersRedis = "2.2.4"
-detekt = "2.0.0-alpha.3"
+detekt = "2.0.0-alpha.6"
 ktlint = "14.2.0"
 logstashEncoder = "9.0"
 
