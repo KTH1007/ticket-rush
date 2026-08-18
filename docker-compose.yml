@@ -75,7 +75,7 @@ services:
   # 아래는 profiles. 기본 up에는 뜨지 않는다.
 
   prometheus:
-    image: prom/prometheus:v3.1.0
+    image: prom/prometheus:v3.13.2
     container_name: tr-prometheus
     profiles: ["observability"]
     ports: ["127.0.0.1:9090:9090"]
