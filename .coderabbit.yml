@@ -14,6 +14,11 @@ reviews:
     enabled: true
     drafts: false
     auto_incremental_review: true
+    # Dependabot PR은 CI 로그로 직접 검증하는 방식이라(#1~#13 처리 때 실제로
+    # 그렇게 함) AI 리뷰가 필요 없다. 무료 티어 시간당 리뷰 할당량을 여기서
+    # 낭비하면 정작 사람이 올린 PR이 밀린다.
+    ignore_usernames:
+      - "dependabot[bot]"
 
   # 이 프로젝트의 핵심 설계 판단을 CodeRabbit이 알고 리뷰하도록 한다.
   # 이슈 템플릿의 "설계 문서 기준으로" 원칙과 같은 맥락.
