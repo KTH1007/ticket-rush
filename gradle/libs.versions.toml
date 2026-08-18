@@ -8,6 +8,7 @@ resilience4j = "2.3.0"
 kotlinLogging = "8.0.4"
 mockk = "1.14.11"
 archunit = "1.5.0"
+testcontainersRedis = "2.2.4"
 detekt = "2.0.0-alpha.3"
 ktlint = "14.2.0"
 logstashEncoder = "9.0"
@@ -27,6 +28,7 @@ kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = 
 logstash-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstashEncoder" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 archunit = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+testcontainers-redis = { module = "com.redis:testcontainers-redis", version.ref = "testcontainersRedis" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
