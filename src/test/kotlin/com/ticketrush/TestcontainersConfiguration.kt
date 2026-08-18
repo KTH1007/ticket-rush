@@ -17,5 +17,5 @@ class TestcontainersConfiguration {
 
     @Bean
     @ServiceConnection(name = "redis")
-    fun redisContainer(): GenericContainer<*> = GenericContainer(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379)
+    fun redisContainer(): GenericContainer<*> = GenericContainer(DockerImageName.parse("redis:8-alpine")).withExposedPorts(6379)
 }

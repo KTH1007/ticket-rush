@@ -10,7 +10,12 @@ updates:
       spring:
         patterns: ["org.springframework*"]
       test:
-        patterns: ["io.mockk*", "org.testcontainers*", "com.tngtech.archunit*"]
+        patterns: ["io.mockk*", "org.testcontainers*", "com.tngtech.archunit*", "com.redis*"]
+      # kotlin과 detekt는 서로 컴파일된 Kotlin 버전이 맞아야 한다. 어느 한쪽만
+      # 올라오면 "detekt was compiled with Kotlin X but is currently running
+      # with Y"로 깨진다. 실제로 겪은 문제라 묶어서 항상 같이 받는다
+      kotlin-toolchain:
+        patterns: ["org.jetbrains.kotlin*", "dev.detekt*"]
 
   - package-ecosystem: docker
     directory: "/"

@@ -28,7 +28,7 @@ abstract class IntegrationTest {
                 .apply { start() }
 
         private val redis =
-            RedisContainer(DockerImageName.parse("redis:7-alpine"))
+            RedisContainer(DockerImageName.parse("redis:8-alpine"))
                 .withReuse(true)
                 .apply { start() }
 
