@@ -27,6 +27,11 @@ services:
     # /var/lib/postgresql/18/docker에 버전별로 생긴다(pg_upgrade --link 지원 목적).
     # 옛 경로로 마운트하면 "PostgreSQL data in /var/lib/postgresql/data" 에러로
     # 기동 자체가 안 된다.
+    #
+    # 다음 메이저 버전업(19+) 때 주의: 이 볼륨에 실제 데이터가 있는 상태라면
+    # 절대 볼륨을 지우고 재초기화하지 않는다. 16->18 전환은 그때 운영 데이터가
+    # 없어서 재초기화가 정당했을 뿐이다. 데이터가 있으면
+    # scripts/postgres-major-upgrade.sh(pg_dump/pg_restore 기반, 실제 검증됨)를 쓴다.
     volumes: [postgres-data:/var/lib/postgresql]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ticketrush -d ticketrush"]
