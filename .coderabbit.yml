@@ -1,0 +1,84 @@
+# CodeRabbit 설정. Gemini Code Assist consumer 버전 종료(2026-07-17)로 대체 도입.
+# 스키마 참고: https://docs.coderabbit.ai/reference/configuration
+
+language: "ko-KR"
+
+reviews:
+  profile: "chill"
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+
+  # 이 프로젝트의 핵심 설계 판단을 CodeRabbit이 알고 리뷰하도록 한다.
+  # 이슈 템플릿의 "설계 문서 기준으로" 원칙과 같은 맥락.
+  # 지적해야 할 위반뿐 아니라, 일반 관행과 달라 보여도 의도된 결정이라
+  # 지적하지 말아야 할 것도 함께 적는다 — 후자가 없으면 CodeRabbit이 매 PR마다
+  # 같은 오탐을 반복하고, 무시당하는 리뷰 도구는 없는 것과 같아진다.
+  path_instructions:
+    - path: "src/main/kotlin/**/*.kt"
+      instructions: |
+        - 좌석 최종 정합성은 PostgreSQL 조건부 UPDATE로만 판정한다. Redis를
+          좌석 상태의 최종 판정자로 쓰는 코드가 있으면 지적한다.
+        - 멱등성은 Idempotency-Key 확인 + DB UNIQUE 제약 이중 방어가 원칙이다.
+          동시 요청에서 UNIQUE 제약 없이 존재 확인만으로 멱등성을 보장하려는
+          코드는 지적한다.
+        - 예매 완료 후처리(SMS, 정산 등)는 Outbox 패턴을 거쳐야 한다. 트랜잭션
+          안에서 외부 API를 직접 호출하는 코드는 지적한다.
+        - v1 범위에는 Kafka를 쓰지 않는다. 메시지 브로커 도입을 제안하지 않는다.
+
+        # 아래는 의도된 설계 결정이다. 일반 관행과 달라 보여도 지적하지 않는다.
+        - `@Entity`/`@MappedSuperclass`/`@Embeddable`은 build.gradle.kts의
+          allOpen 설정으로 open 처리된다. 별도로 open 키워드를 요구하지 않는다.
+        - Entity를 data class로 만들지 않는다. 자동 생성 equals/hashCode가
+          지연로딩 프록시와 충돌하고 copy()가 불변식을 우회한다.
+        - 도메인 모델이 JPA에 의존한다. 엔티티를 도메인 모델로 겸용하기로 한
+          결정이며 영속성 계층 분리를 제안하지 않는다. 다만 도메인이 웹,
+          Redis, QueryDSL에 의존하면 지적한다.
+        - 좌석 선점 조건부 UPDATE는 @Modifying 네이티브/JPQL 쿼리로 작성한다.
+          더티체킹으로 표현할 수 없으므로 엔티티 수정 방식을 제안하지 않는다.
+        - Outbox 처리는 claim 패턴이다. 소유권 획득(PROCESSING 커밋)과 실제
+          외부 호출을 일부러 다른 트랜잭션으로 나눈다. 하나로 합치도록
+          제안하지 않는다.
+        - 좌석 상태는 AVAILABLE, HELD, SOLD 셋뿐이다. CANCELED는 예약
+          (reservation) 상태고 좌석 상태가 아니다.
+        - reservation.reservation_no는 nullable이다. 결제 확정 시점에
+          발급하므로 HOLDING 상태에서는 값이 없다. 버그가 아니다.
+        - seat.reservation_id는 DEFERRABLE INITIALLY DEFERRED FK다.
+          즉시 검증 FK로 바꾸도록 제안하지 않는다.
+
+    - path: "src/main/resources/db/migration/**/*.sql"
+      instructions: |
+        - Flyway 마이그레이션이다. 이미 커밋된 마이그레이션 파일의 내용을
+          수정하도록 제안하지 않는다. 체크섬이 깨진다. 변경은 항상 새 버전
+          파일 추가로 유도한다.
+
+    - path: "src/test/**/*.kt"
+      instructions: |
+        - concurrency 태그가 붙은 동시성 테스트는 ./gradlew concurrencyTest로
+          별도 실행된다. 일반 test 태스크에 포함하도록 제안하지 않는다.
+        - 테스트 함수명은 백틱으로 감싼 한글 문장형을 쓴다. camelCase로
+          바꾸도록 제안하지 않는다.
+        - Mock 대신 인메모리 Fake 구현을 우선한다. 모든 Mock을 MockK로
+          대체하도록 일괄 제안하지 않는다. 반환값 없이 부작용만 검증하는
+          호출(발송 여부 등)에 한해 MockK verify를 쓰는 건 정상이다.
+        - 현재 시각은 Clock을 주입받는다. LocalDateTime.now() 직접 호출을
+          제안하지 않는다.
+
+  abort_on_close: true
+
+  # CI의 detektMain/detektTest는 머지를 막는 게이트, 이건 PR에 인라인 코멘트를
+  # 다는 별개 채널이다. 같은 위반이 두 군데서 보여도 낭비가 아니라, 인라인
+  # 쪽이 CI 로그를 뒤지는 것보다 고치기 쉽다는 실질적 이득이 있어 둘 다 켠다.
+  tools:
+    detekt:
+      enabled: true
+      config_file: "config/detekt/detekt.yml"
+
+chat:
+  auto_reply: true
