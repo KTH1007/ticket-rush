@@ -1,5 +1,5 @@
 ---
-name: 기능
+name: 기능 개발
 about: 구현할 기능
 labels: feature
 ---

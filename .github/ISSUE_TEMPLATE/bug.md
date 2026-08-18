@@ -1,5 +1,5 @@
 ---
-name: 버그
+name: 버그 신고
 about: 동작이 설계와 다름
 labels: bug
 ---
