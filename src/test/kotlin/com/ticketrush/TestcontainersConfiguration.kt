@@ -13,7 +13,7 @@ class TestcontainersConfiguration {
     // DB/캐시 버전이 다르면 버전 특이 동작을 테스트가 놓칠 수 있다.
     @Bean
     @ServiceConnection
-    fun postgresContainer(): PostgreSQLContainer = PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"))
+    fun postgresContainer(): PostgreSQLContainer = PostgreSQLContainer(DockerImageName.parse("postgres:18-alpine"))
 
     @Bean
     @ServiceConnection(name = "redis")

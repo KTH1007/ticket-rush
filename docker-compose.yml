@@ -10,7 +10,7 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: tr-postgres
     environment:
       POSTGRES_DB: ticketrush
@@ -22,7 +22,12 @@ services:
       TZ: UTC
       PGTZ: UTC
     ports: ["127.0.0.1:5432:5432"]
-    volumes: [postgres-data:/var/lib/postgresql/data]
+    # 18부터 이미지의 VOLUME 대상이 /var/lib/postgresql/data에서
+    # /var/lib/postgresql로 바뀌었다. 실제 데이터는 그 아래
+    # /var/lib/postgresql/18/docker에 버전별로 생긴다(pg_upgrade --link 지원 목적).
+    # 옛 경로로 마운트하면 "PostgreSQL data in /var/lib/postgresql/data" 에러로
+    # 기동 자체가 안 된다.
+    volumes: [postgres-data:/var/lib/postgresql]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ticketrush -d ticketrush"]
       interval: 5s
