@@ -25,6 +25,7 @@ src/main/resources/application-secret.yml
 # 로그, 산출물
 logs/
 *.log
+*.hprof
 k6/results/
 
 # OS

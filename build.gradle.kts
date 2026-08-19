@@ -78,10 +78,12 @@ dependencies {
     runtimeOnly(libs.modulith.starter.insight)
 
     implementation(libs.querydsl.jpa)
-    kapt(libs.querydsl.apt)
+    kapt(variantOf(libs.querydsl.apt) { classifier("jakarta") })
     kapt("jakarta.annotation:jakarta.annotation-api")
     kapt("jakarta.persistence:jakarta.persistence-api")
     kapt("org.springframework.boot:spring-boot-configuration-processor")
+    // 테스트 전용 엔티티(BaseEntityTestProbe 등)의 Q타입도 kapt가 생성하게 한다.
+    kaptTest(variantOf(libs.querydsl.apt) { classifier("jakarta") })
 
     implementation(libs.kotlin.logging)
     implementation(libs.logstash.encoder)
