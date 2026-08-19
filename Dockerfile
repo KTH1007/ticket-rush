@@ -70,7 +70,8 @@ USER app
 EXPOSE 8080
 
 ENV JAVA_TOOL_OPTIONS="\
--XX:MaxRAMPercentage=75.0 \
+-XX:MaxRAMPercentage=50.0 \
+-XX:MaxMetaspaceSize=256m \
 -XX:+ExitOnOutOfMemoryError \
 -XX:+HeapDumpOnOutOfMemoryError \
 -XX:HeapDumpPath=/app/dump \

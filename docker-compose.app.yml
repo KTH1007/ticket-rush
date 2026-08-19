@@ -12,7 +12,7 @@ services:
     # 의미가 생긴다. 제한이 없으면 Docker VM 전체 메모리를 기준으로 계산돼
     # 인스턴스마다 수 GB씩 잡으려 든다. 앱 2대 동시 구동을 전제로 한
     # 이 파일에서는 반드시 명시해야 한다.
-    mem_limit: 512m
+    mem_limit: 1g
     environment:
       SPRING_PROFILES_ACTIVE: docker
       INSTANCE_ID: app-1
@@ -43,7 +43,7 @@ services:
   app-2:
     build: .
     container_name: tr-app-2
-    mem_limit: 512m
+    mem_limit: 1g
     environment:
       SPRING_PROFILES_ACTIVE: docker
       INSTANCE_ID: app-2
