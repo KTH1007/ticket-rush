@@ -1,0 +1,51 @@
+name: gemini-review
+
+# CodeRabbit은 자동 트리거라 PR이 몰리면 무료 티어 쿼터가 금방 소진된다.
+# 이건 PR 댓글로 원할 때만 부르는 보조 리뷰어라 자동 실행하지 않는다.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    # issue_comment는 PR 댓글과 일반 이슈 댓글을 구분하지 않는다.
+    # pull_request 필드가 있어야 PR 댓글이다.
+    if: |
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/gemini-review')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 증분 diff 계산에 커밋 히스토리가 필요하다
+
+      # issue_comment 이벤트의 기본 체크아웃 대상은 PR 브랜치가 아니라
+      # 저장소 기본 브랜치다. gh pr checkout으로 실제 PR head로 전환해야 한다.
+      #
+      # PR_NUMBER는 GitHub가 매기는 정수라 인젝션 위험 자체는 낮지만,
+      # run: 스크립트에 ${{ }}를 직접 보간하지 않고 항상 env로 넘기는 걸
+      # 원칙으로 한다 (comment.body 같은 자유 텍스트 필드를 나중에 다루게
+      # 되어도 같은 패턴을 그대로 따르면 안전하다).
+      - name: PR 브랜치로 전환
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: gh pr checkout "$PR_NUMBER"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r .github/scripts/requirements.txt
+
+      - name: Gemini 리뷰 실행
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: python .github/scripts/gemini_review.py
