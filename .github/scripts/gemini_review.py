@@ -16,6 +16,7 @@ diff만 본다. 별도 DB 없이 PR 자체를 상태 저장소로 쓰는 방식�
 
 from __future__ import annotations
 
+import collections
 import fnmatch
 import json
 import os
@@ -95,6 +96,43 @@ def compute_diff(base_ref: str, last_reviewed_sha: str | None) -> tuple[str, lis
     diff_text = run("git", "diff", diff_range)
     changed_files = [f for f in run("git", "diff", "--name-only", diff_range).splitlines() if f]
     return diff_text, changed_files
+
+
+def valid_lines_by_file(diff_text: str) -> dict[str, set[int]]:
+    """유니파이드 diff에서, 새 파일 버전(diff의 + 쪽) 기준으로 실제 존재하는
+    줄 번호만 파일별로 뽑는다.
+
+    GitHub 리뷰 API는 diff에 나타나지 않는 줄에 코멘트를 달려고 하면 리뷰
+    등록 요청 전체를 거부한다(하나만 잘못돼도 나머지 정상 지적까지 다
+    날아간다). 모델이 존재하지 않는 줄 번호를 지어내는 경우를 제출 전에
+    걸러내기 위한 방어선이다.
+    """
+    valid: dict[str, set[int]] = collections.defaultdict(set)
+    current_file = None
+    new_line = None
+    hunk_header = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+    for line in diff_text.splitlines():
+        if line.startswith("+++ b/"):
+            current_file = line[len("+++ b/") :]
+            new_line = None
+            continue
+
+        match = hunk_header.match(line)
+        if match:
+            new_line = int(match.group(1))
+            continue
+
+        if new_line is None or current_file is None:
+            continue
+
+        if line.startswith("+") or line.startswith(" "):
+            valid[current_file].add(new_line)
+            new_line += 1
+        # "-"로 시작하는 삭제된 줄은 새 버전에 없으므로 카운터를 올리지 않는다.
+        # diff --git/index/--- a/ 같은 헤더 줄도 여기 안 걸린다.
+
+    return valid
 
 
 def load_path_instructions() -> list[dict]:
@@ -207,8 +245,19 @@ def main() -> None:
     prompt = build_prompt(diff_text, domain_rules, already_flagged)
     findings = call_gemini(prompt)
 
-    # 모델이 프롬프트 지시를 어기고 이미 지적한 위치를 또 지적했을 경우의 최종 방어선.
-    findings = [f for f in findings if (f["path"], f["line"]) not in already_flagged]
+    valid_lines = valid_lines_by_file(diff_text)
+    before = len(findings)
+    findings = [
+        f
+        for f in findings
+        # 모델이 프롬프트 지시를 어기고 이미 지적한 위치를 또 지적했을 경우의 최종 방어선.
+        if (f["path"], f["line"]) not in already_flagged
+        # diff에 실제로 없는 줄이면 리뷰 등록 자체가 통째로 거부되니 여기서 미리 뺀다.
+        and f["line"] in valid_lines.get(f["path"], set())
+    ]
+    dropped = before - len(findings)
+    if dropped:
+        print(f"경고: 유효하지 않은 지적 {dropped}건 제외함 (이미 지적됨 또는 diff에 없는 줄)")
 
     submit_review(findings, head_sha)
     print(f"리뷰 등록 완료: {len(findings)}건 지적")
