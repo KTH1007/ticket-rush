@@ -1,5 +1,9 @@
 spring:
-  flyway: { enabled: true }   # 테스트는 인스턴스가 하나라 겹치지 않는다
+  flyway:
+    enabled: true   # 테스트는 인스턴스가 하나라 겹치지 않는다
+    # 프로필별 locations는 기본값을 덮어쓴다(병합 안 됨). 그래서 db/migration을
+    # 명시적으로 다시 포함시켜야 실제 도메인 마이그레이션도 계속 적용된다.
+    locations: classpath:db/migration,classpath:db/testmigration
   threads:
     virtual: { enabled: false }   # 테스트는 결정적으로 돌아야 한다
 
