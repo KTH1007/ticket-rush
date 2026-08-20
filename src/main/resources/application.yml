@@ -9,7 +9,7 @@ spring:
     hibernate: { ddl-auto: validate }   # 스키마는 Flyway가 만든다
     properties:
       hibernate:
-        jdbc.time_zone: UTC
+        jdbc.time_zone: Asia/Seoul
         default_batch_fetch_size: 100
 
   flyway:
