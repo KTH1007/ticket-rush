@@ -10,9 +10,8 @@
 -- 실행 방법:
 --   docker exec -i tr-postgres psql -U ticketrush -d ticketrush < scripts/seed-event.sql
 --
--- 재실행 가능: event_title로 식별되는 기존 시드 데이터(seat -> grade -> event
--- 순서로 자식부터)만 지우고 다시 만든다. 다른 공연/예약 데이터는 건드리지
--- 않는다.
+-- 재실행 가능: event_title로 식별되는 기존 시드 데이터를 FK 자식부터 지우고
+-- 다시 만든다. 다른 공연/예약 데이터는 건드리지 않는다.
 --
 -- 규모를 바꾸려면 아래 sections_config VALUES의 row_count/seats_per_row만
 -- 고치면 된다. 기본값은 VIP 2,000 + R 10,000 + S 18,000 = 30,000석.
@@ -22,8 +21,31 @@
 
 BEGIN;
 
--- 기존 시드 데이터 정리. FK 방향이 seat -> grade -> event라 자식부터 지운다.
+-- 기존 시드 데이터 정리. FK 방향은
+--   event <- grade, seat, reservation, settlement_daily
+--   reservation <- seat(nullable), payment
+--   payment <- payment_history
+-- 라 자식부터 역순으로 지운다. 부하테스트로 이 이벤트에 실제 예약/결제가
+-- 쌓인 뒤 재실행해도(반복 재사용이 이 스크립트의 목적이다) FK 위반 없이
+-- 지워지게 하기 위함이다.
+DELETE FROM payment_history
+ WHERE payment_id IN (
+     SELECT id FROM payment
+      WHERE reservation_id IN (
+          SELECT id FROM reservation
+           WHERE event_id IN (SELECT id FROM event WHERE title = :'event_title')
+      )
+ );
+DELETE FROM payment
+ WHERE reservation_id IN (
+     SELECT id FROM reservation
+      WHERE event_id IN (SELECT id FROM event WHERE title = :'event_title')
+ );
 DELETE FROM seat
+ WHERE event_id IN (SELECT id FROM event WHERE title = :'event_title');
+DELETE FROM reservation
+ WHERE event_id IN (SELECT id FROM event WHERE title = :'event_title');
+DELETE FROM settlement_daily
  WHERE event_id IN (SELECT id FROM event WHERE title = :'event_title');
 DELETE FROM grade
  WHERE event_id IN (SELECT id FROM event WHERE title = :'event_title');
