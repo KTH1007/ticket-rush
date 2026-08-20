@@ -31,6 +31,8 @@ class Seat(
     holdExpiresAt: LocalDateTime? = null,
     version: Long = 0,
 ) : BaseEntity() {
+    // event_id/grade_id는 ID 간접참조다. 공연 하나에 좌석이 수만 개라 객체 참조로
+    // 두면 좌석 하나를 건드릴 때 거대한 애그리거트가 딸려온다 (V1__event_and_seat.sql 참고).
     @Column(name = "event_id", nullable = false)
     var eventId: Long = eventId
         protected set

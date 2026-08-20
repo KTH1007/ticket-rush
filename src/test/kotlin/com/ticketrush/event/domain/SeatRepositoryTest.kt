@@ -100,17 +100,17 @@ class SeatRepositoryTest : IntegrationTest() {
         val grade = 등급_하나_저장(event)
 
         // when & then
-        // status가 enum이라 정상 경로로는 잘못된 값을 만들 수 없어, Repository를 우회해
-        // JdbcTemplate으로 직접 잘못된 문자열을 넣어 DB 제약 자체를 검증한다.
+        // status는 enum이라 우회 INSERT로 검증. ck_seat_status와 V5의 ck_seat_lifecycle이 항상 같이 걸려 실제 보고되는 제약을 메시지로 확인한다.
         assertThatThrownBy {
             jdbcTemplate.update(
                 """
-                INSERT INTO seat (event_id, grade_id, section, row_label, seat_no, ordinal, status, created_at, updated_at)
-                VALUES (?, ?, 'A', '1', 1, 0, 'INVALID', now(), now())
+                INSERT INTO seat (event_id, grade_id, section, row_label, seat_no, ordinal, status, reservation_id, created_at, updated_at)
+                VALUES (?, ?, 'A', '1', 1, 0, 'INVALID', 1, now(), now())
                 """.trimIndent(),
                 event.id,
                 grade.id,
             )
         }.isInstanceOf(DataIntegrityViolationException::class.java)
+            .hasMessageContaining("ck_seat_lifecycle")
     }
 }
