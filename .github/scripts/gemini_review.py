@@ -28,7 +28,7 @@ import requests
 import yaml
 
 GITHUB_API = "https://api.github.com"
-GEMINI_MODEL = "gemini-3.1-pro-preview"
+GEMINI_MODEL = "gemini-3.7-flash"
 GEMINI_API = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 BOT_LOGIN = "github-actions[bot]"
 REVIEWED_SHA_MARKER = re.compile(r"<!-- gemini-review: reviewed-sha=([0-9a-f]{40}) -->")
