@@ -66,6 +66,8 @@ class Seat(
     var reservationId: Long? = reservationId
         protected set
 
+    // ByteArray는 ==가 내용이 아니라 참조를 비교한다. 1인 2매 제한 로직에서
+    // 비교할 땐 반드시 .contentEquals()를 쓴다.
     @Column(name = "phone_hash")
     var phoneHash: ByteArray? = phoneHash
         protected set

@@ -76,7 +76,7 @@ ENV JAVA_TOOL_OPTIONS="\
 -XX:+HeapDumpOnOutOfMemoryError \
 -XX:HeapDumpPath=/app/dump \
 -XX:+UseG1GC \
--Duser.timezone=UTC \
+-Duser.timezone=Asia/Seoul \
 -Dfile.encoding=UTF-8"
 
 ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]

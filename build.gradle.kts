@@ -1,5 +1,6 @@
 import dev.detekt.gradle.Detekt
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.springframework.boot.gradle.tasks.run.BootRun
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -120,6 +121,11 @@ dependencies {
 // 실행은 되지만 태그 붙은 테스트를 실제로는 하나도 안 도는 상태가 된다.
 // (경고: "The tag 'concurrency' is both included and excluded" 로 실측 확인)
 tasks.withType<Test> {
+    // Dockerfile은 -Duser.timezone=Asia/Seoul을 강제하지만 로컬 실행/CI는 호스트
+    // 기본 타임존을 그대로 쓴다. hibernate.jdbc.time_zone과 어긋나면 LocalDateTime.now()
+    // 비교가 오프셋만큼 어긋나므로 여기서도 동일하게 맞춘다.
+    systemProperty("user.timezone", "Asia/Seoul")
+
     testLogging {
         events("failed", "skipped")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
@@ -146,6 +152,11 @@ tasks.register<Test>("concurrencyTest") {
         events("passed", "failed", "skipped")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
+}
+
+// 로컬 bootRun도 Dockerfile과 같은 타임존을 쓰게 맞춘다.
+tasks.named<BootRun>("bootRun") {
+    systemProperty("user.timezone", "Asia/Seoul")
 }
 
 detekt {
