@@ -1,5 +1,9 @@
 package com.ticketrush.architecture
 
+import com.querydsl.core.annotations.Generated
+import com.tngtech.archunit.base.DescribedPredicate.not
+import com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage
+import com.tngtech.archunit.core.domain.properties.CanBeAnnotated.Predicates.annotatedWith
 import com.tngtech.archunit.core.importer.ImportOption
 import com.tngtech.archunit.junit.AnalyzeClasses
 import com.tngtech.archunit.junit.ArchTest
@@ -26,11 +30,13 @@ class DependencyRuleTest {
             .resideInAnyPackage("..infrastructure..", "..api..")
             .allowEmptyShould(true)
 
+    // QueryDSL이 생성하는 Q타입(QEvent 등)은 엔티티와 같은 패키지(domain)에 생성되고
+    // com.querydsl.. 타입을 그대로 참조한다. 우리가 작성한 코드가 아니라 kapt가
+    // 기계적으로 만든 산출물이라 이 규칙의 검사 대상에서 제외한다.
     @ArchTest
     val `도메인은 웹과 저장소 기술을 의존하지 않는다`: ArchRule =
         noClasses()
-            .that()
-            .resideInAPackage("..domain..")
+            .that(resideInAPackage("..domain..").and(not(annotatedWith(Generated::class.java))))
             .should()
             .dependOnClassesThat()
             .resideInAnyPackage(
