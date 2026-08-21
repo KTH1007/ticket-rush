@@ -1,4 +1,4 @@
-package com.ticketrush.shared
+package com.ticketrush.shared.config
 
 import com.querydsl.jpa.impl.JPAQueryFactory
 import jakarta.persistence.EntityManager
