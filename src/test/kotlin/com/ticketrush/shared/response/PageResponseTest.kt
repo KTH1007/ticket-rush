@@ -1,6 +1,7 @@
 package com.ticketrush.shared.response
 
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
 import kotlin.test.Test
@@ -59,5 +60,31 @@ class PageResponseTest {
         assertThat(response.totalElements).isEqualTo(0)
         assertThat(response.totalPages).isEqualTo(0)
         assertThat(response.hasNext).isFalse()
+    }
+
+    @Test
+    fun `큰 값에서도 정수 오버플로 없이 hasNext를 계산한다`() {
+        // given: page + 1로 계산하면 Int.MAX_VALUE에서 오버플로해 hasNext가 잘못 true가 된다
+        val response =
+            PageResponse(
+                content = emptyList<String>(),
+                page = Int.MAX_VALUE,
+                size = 10,
+                totalElements = 0,
+                totalPages = Int.MAX_VALUE,
+            )
+
+        // when & then
+        assertThat(response.hasNext).isFalse()
+    }
+
+    @Test
+    fun `unpaged Page를 넘기면 예외가 발생한다`() {
+        // given: Pageable 없이 만들면 size=0, totalPages=1이 되어 불변식과 안 맞는다
+        val page = PageImpl(emptyList<String>())
+
+        // when & then
+        assertThatThrownBy { PageResponse.from(page) }
+            .isInstanceOf(IllegalArgumentException::class.java)
     }
 }
