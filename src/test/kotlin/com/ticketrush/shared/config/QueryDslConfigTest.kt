@@ -1,6 +1,9 @@
-package com.ticketrush.shared
+package com.ticketrush.shared.config
 
 import com.querydsl.jpa.impl.JPAQueryFactory
+import com.ticketrush.shared.BaseEntityTestProbe
+import com.ticketrush.shared.BaseEntityTestProbeRepository
+import com.ticketrush.shared.QBaseEntityTestProbe
 import com.ticketrush.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.springframework.beans.factory.annotation.Autowired

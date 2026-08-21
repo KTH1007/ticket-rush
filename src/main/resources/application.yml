@@ -4,6 +4,10 @@ spring:
   profiles:
     default: local
 
+  mvc:
+    problemdetails:
+      enabled: true   # 컨트롤러 예외 핸들러를 안 거치는 에러(예: 없는 URL 404)도 ProblemDetail로 통일
+
   jpa:
     open-in-view: false        # 결정 사항. 뷰까지 커넥션을 붙잡으면 풀이 고갈된다
     hibernate: { ddl-auto: validate }   # 스키마는 Flyway가 만든다
