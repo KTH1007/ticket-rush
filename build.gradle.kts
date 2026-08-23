@@ -210,6 +210,22 @@ tasks.named<BootJar>("bootJar") {
 // 로컬 bootRun도 Dockerfile과 같은 타임존을 쓰게 맞춘다.
 tasks.named<BootRun>("bootRun") {
     systemProperty("user.timezone", "Asia/Seoul")
+    // bootRun은 bootJar를 안 타서 REST Docs/openapi3 산출물이 클래스패스에 없다.
+    // 미리 만들어둔 build 산출물 경로를 알려줘서 LocalDocsConfig가 직접 서빙하게 한다.
+    systemProperty(
+        "ticket-rush.docs.asciidoc-dir",
+        layout.buildDirectory
+            .dir("docs/asciidoc")
+            .get()
+            .asFile.absolutePath,
+    )
+    systemProperty(
+        "ticket-rush.docs.api-spec-dir",
+        layout.buildDirectory
+            .dir("api-spec")
+            .get()
+            .asFile.absolutePath,
+    )
 }
 
 detekt {
