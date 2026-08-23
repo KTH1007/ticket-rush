@@ -15,6 +15,7 @@ import org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath
 import org.springframework.restdocs.payload.PayloadDocumentation.responseFields
 import org.springframework.restdocs.request.RequestDocumentation.parameterWithName
 import org.springframework.restdocs.request.RequestDocumentation.pathParameters
+import org.springframework.restdocs.request.RequestDocumentation.queryParameters
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -40,16 +41,7 @@ class EventControllerTest {
     @Test
     fun `공연 목록을 조회하면 페이지네이션된 응답을 반환한다`() {
         // given
-        val summary =
-            EventSummaryResponse(
-                id = 1L,
-                title = "아이유 콘서트",
-                venue = "잠실종합운동장",
-                opensAt = LocalDateTime.of(2026, 9, 1, 10, 0),
-                startsAt = LocalDateTime.of(2026, 9, 20, 19, 0),
-            )
-        every { eventQueryService.findEvents(any()) } returns
-            PageResponse(content = listOf(summary), page = 0, size = 10, totalElements = 1, totalPages = 1)
+        every { eventQueryService.findEvents(any()) } returns 공연_목록()
 
         // when & then
         mockMvc
@@ -57,7 +49,14 @@ class EventControllerTest {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.content[0].title").value("아이유 콘서트"))
             .andExpect(jsonPath("$.totalElements").value(1))
-            .andDo(MockMvcRestDocumentationWrapper.document("event-list", snippets = arrayOf(eventListResponseFields)))
+            .andDo(
+                MockMvcRestDocumentationWrapper.document(
+                    "event-list",
+                    summary = "공연 목록 조회",
+                    description = "페이지네이션된 공연 목록을 조회한다.",
+                    snippets = arrayOf(eventListQueryParameters, eventListResponseFields),
+                ),
+            )
     }
 
     @Test
@@ -74,6 +73,8 @@ class EventControllerTest {
             .andDo(
                 MockMvcRestDocumentationWrapper.document(
                     "event-detail",
+                    summary = "공연 상세 조회",
+                    description = "공연 상세 정보와 등급 목록을 조회한다.",
                     snippets = arrayOf(eventDetailPathParameters, eventDetailResponseFields),
                 ),
             )
@@ -92,6 +93,24 @@ class EventControllerTest {
 
     // 필드 설명과 픽스처가 길어 테스트 메서드 본문과 분리했다.
     companion object {
+        private fun 공연_목록(): PageResponse<EventSummaryResponse> =
+            PageResponse(
+                content =
+                    listOf(
+                        EventSummaryResponse(
+                            id = 1L,
+                            title = "아이유 콘서트",
+                            venue = "잠실종합운동장",
+                            opensAt = LocalDateTime.of(2026, 9, 1, 10, 0),
+                            startsAt = LocalDateTime.of(2026, 9, 20, 19, 0),
+                        ),
+                    ),
+                page = 0,
+                size = 10,
+                totalElements = 1,
+                totalPages = 1,
+            )
+
         private fun 공연_상세(grades: List<GradeResponse>) =
             EventDetailResponse(
                 id = 1L,
@@ -116,6 +135,13 @@ class EventControllerTest {
                 fieldWithPath("totalElements").description("전체 공연 수"),
                 fieldWithPath("totalPages").description("전체 페이지 수"),
                 fieldWithPath("hasNext").description("다음 페이지 존재 여부"),
+            )
+
+        private val eventListQueryParameters =
+            queryParameters(
+                parameterWithName("page").description("조회할 페이지 (0부터 시작, 기본값 0)").optional(),
+                parameterWithName("size").description("페이지 크기 (기본값 20)").optional(),
+                parameterWithName("sort").description("정렬 기준 (예: title,asc)").optional(),
             )
 
         private val eventDetailPathParameters = pathParameters(parameterWithName("id").description("공연 id"))

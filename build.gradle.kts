@@ -125,14 +125,6 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-// testLogging은 모든 Test 태스크에 공통으로 적용해도 안전하다.
-// 태그 필터는 여기 두지 않는다. withType<Test>는 나중에 등록되는
-// concurrencyTest에도 그대로 적용되는데, useJUnitPlatform은 여러 번 호출하면
-// 옵션이 누적된다. excludeTags("concurrency")가 여기 있으면 concurrencyTest의
-// includeTags("concurrency")와 충돌하고, JUnit Platform은 같은 태그가
-// include/exclude에 동시에 있으면 exclude를 우선시한다 — concurrencyTest가
-// 실행은 되지만 태그 붙은 테스트를 실제로는 하나도 안 도는 상태가 된다.
-// (경고: "The tag 'concurrency' is both included and excluded" 로 실측 확인)
 tasks.withType<Test> {
     // Dockerfile은 -Duser.timezone=Asia/Seoul을 강제하지만 로컬 실행/CI는 호스트
     // 기본 타임존을 그대로 쓴다. hibernate.jdbc.time_zone과 어긋나면 LocalDateTime.now()
@@ -210,22 +202,6 @@ tasks.named<BootJar>("bootJar") {
 // 로컬 bootRun도 Dockerfile과 같은 타임존을 쓰게 맞춘다.
 tasks.named<BootRun>("bootRun") {
     systemProperty("user.timezone", "Asia/Seoul")
-    // bootRun은 bootJar를 안 타서 REST Docs/openapi3 산출물이 클래스패스에 없다.
-    // 미리 만들어둔 build 산출물 경로를 알려줘서 LocalDocsConfig가 직접 서빙하게 한다.
-    systemProperty(
-        "ticket-rush.docs.asciidoc-dir",
-        layout.buildDirectory
-            .dir("docs/asciidoc")
-            .get()
-            .asFile.absolutePath,
-    )
-    systemProperty(
-        "ticket-rush.docs.api-spec-dir",
-        layout.buildDirectory
-            .dir("api-spec")
-            .get()
-            .asFile.absolutePath,
-    )
 }
 
 detekt {

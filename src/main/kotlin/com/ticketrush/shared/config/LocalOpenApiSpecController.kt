@@ -14,8 +14,7 @@ import java.io.File
 class LocalOpenApiSpecController {
     @GetMapping("/openapi3.yml", produces = ["application/yaml"])
     fun openapi3Spec(): ResponseEntity<FileSystemResource> {
-        val dir = System.getProperty("ticket-rush.docs.api-spec-dir") ?: return ResponseEntity.notFound().build()
-        val file = File(dir, "openapi3.yaml")
+        val file = File("build/api-spec/openapi3.yaml")
         if (!file.exists()) return ResponseEntity.notFound().build()
         return ResponseEntity.ok(FileSystemResource(file))
     }
