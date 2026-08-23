@@ -9,4 +9,6 @@ class GradeRepositoryAdapter(
     private val jpaRepository: GradeJpaRepository,
 ) : GradeRepositoryPort {
     override fun save(grade: Grade): Grade = jpaRepository.saveAndFlush(grade)
+
+    override fun findAllByEventId(eventId: Long): List<Grade> = jpaRepository.findAllByEventId(eventId)
 }
