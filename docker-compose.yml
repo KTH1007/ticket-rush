@@ -87,7 +87,7 @@ services:
   # 아래는 profiles. 기본 up에는 뜨지 않는다.
 
   prometheus:
-    image: prom/prometheus:v3.13.2
+    image: prom/prometheus:v3.14.0
     container_name: tr-prometheus
     mem_limit: 512m
     profiles: ["observability"]
