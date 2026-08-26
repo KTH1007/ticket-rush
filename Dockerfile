@@ -26,7 +26,7 @@ COPY src src
 # CI가 이미 test, detekt, ktlint를 통과시킨 산출물만 이미지로 만든다.
 # 여기서 또 돌리면 빌드 시간만 두 배가 된다.
 RUN --mount=type=cache,target=/root/.gradle,sharing=locked \
-    ./gradlew bootJar --no-daemon -x test -x detektMain -x detektTest -x ktlintCheck
+    ./gradlew bootJar --no-daemon -x test -x detektMain -x detektTest -x ktlintCheck -x asciidoctor -x openapi3
 
 # =========================================
 # 2단계: 레이어 추출
