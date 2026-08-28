@@ -6,11 +6,15 @@ import com.ticketrush.event.domain.EventNotFoundException
 import com.ticketrush.shared.response.PageResponse
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
+import org.assertj.core.api.Assertions.assertThat
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.restdocs.test.autoconfigure.AutoConfigureRestDocs
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
 import org.springframework.context.annotation.Bean
+import org.springframework.data.domain.Pageable
 import org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath
 import org.springframework.restdocs.payload.PayloadDocumentation.responseFields
 import org.springframework.restdocs.request.RequestDocumentation.parameterWithName
@@ -57,6 +61,20 @@ class EventControllerTest {
                     snippets = arrayOf(eventListQueryParameters, eventListResponseFields),
                 ),
             )
+    }
+
+    @Test
+    fun `정렬 파라미터 없이 조회하면 id 기준 기본 정렬이 적용된다`() {
+        // given
+        every { eventQueryService.findEvents(any()) } returns 공연_목록()
+
+        // when
+        mockMvc.perform(get("/api/events")).andExpect(status().isOk)
+
+        // then
+        val pageable = slot<Pageable>()
+        verify { eventQueryService.findEvents(capture(pageable)) }
+        assertThat(pageable.captured.sort.isSorted).isTrue()
     }
 
     @Test
