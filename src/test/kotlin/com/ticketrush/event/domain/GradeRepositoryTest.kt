@@ -1,6 +1,6 @@
 package com.ticketrush.event.domain
 
-import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.TransactionalIntegrationTest
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
 import org.assertj.core.api.Assertions.assertThat
@@ -9,7 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.DataIntegrityViolationException
 import kotlin.test.Test
 
-class GradeRepositoryTest : IntegrationTest() {
+class GradeRepositoryTest : TransactionalIntegrationTest() {
     @Autowired
     lateinit var eventRepository: EventRepositoryPort
 
@@ -40,5 +40,31 @@ class GradeRepositoryTest : IntegrationTest() {
         assertThatThrownBy {
             gradeRepository.등급_하나_저장(event, price = 150_000)
         }.isInstanceOf(DataIntegrityViolationException::class.java)
+    }
+
+    @Test
+    fun `Event id로 Grade 목록을 조회`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        gradeRepository.등급_하나_저장(event, name = "VIP", price = 200_000)
+        gradeRepository.등급_하나_저장(event, name = "R", price = 150_000)
+
+        // when
+        val grades = gradeRepository.findAllByEventId(event.id)
+
+        // then
+        assertThat(grades).extracting("name").containsExactlyInAnyOrder("VIP", "R")
+    }
+
+    @Test
+    fun `등급이 없는 Event는 빈 리스트를 반환`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+
+        // when
+        val grades = gradeRepository.findAllByEventId(event.id)
+
+        // then
+        assertThat(grades).isEmpty()
     }
 }

@@ -1,5 +1,8 @@
+import com.epages.restdocs.apispec.gradle.OpenApi3Task
 import dev.detekt.gradle.Detekt
+import org.asciidoctor.gradle.jvm.AsciidoctorTask
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.springframework.boot.gradle.tasks.bundling.BootJar
 import org.springframework.boot.gradle.tasks.run.BootRun
 
 plugins {
@@ -15,6 +18,8 @@ plugins {
     alias(libs.plugins.spring.dependency.management)
     alias(libs.plugins.detekt)
     alias(libs.plugins.ktlint)
+    alias(libs.plugins.asciidoctor)
+    alias(libs.plugins.restdocs.api.spec)
 }
 
 group = "com.ticketrush"
@@ -66,6 +71,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
+    // Swagger UI 서빙 전용으로만 쓴다. 자체 리플렉션 스캔은 꺼두고
+    // openapi3 태스크가 만든 스펙(REST Docs로 검증됨)을 대신 읽게 한다.
+    implementation(libs.springdoc.openapi.webmvc.ui)
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")
@@ -98,6 +106,11 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-flyway-test")
     testImplementation("org.springframework.boot:spring-boot-starter-validation-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-restdocs")
+    testImplementation("org.springframework.restdocs:spring-restdocs-mockmvc")
+    // MockMvcRestDocumentationWrapper.document(...)가 .adoc 스니펫과 함께
+    // openapi3 태스크가 읽는 resource-*.json도 같이 만들어준다.
+    testImplementation(libs.restdocs.api.spec.mockmvc)
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
 
     testImplementation(libs.modulith.test)
@@ -112,14 +125,6 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-// testLogging은 모든 Test 태스크에 공통으로 적용해도 안전하다.
-// 태그 필터는 여기 두지 않는다. withType<Test>는 나중에 등록되는
-// concurrencyTest에도 그대로 적용되는데, useJUnitPlatform은 여러 번 호출하면
-// 옵션이 누적된다. excludeTags("concurrency")가 여기 있으면 concurrencyTest의
-// includeTags("concurrency")와 충돌하고, JUnit Platform은 같은 태그가
-// include/exclude에 동시에 있으면 exclude를 우선시한다 — concurrencyTest가
-// 실행은 되지만 태그 붙은 테스트를 실제로는 하나도 안 도는 상태가 된다.
-// (경고: "The tag 'concurrency' is both included and excluded" 로 실측 확인)
 tasks.withType<Test> {
     // Dockerfile은 -Duser.timezone=Asia/Seoul을 강제하지만 로컬 실행/CI는 호스트
     // 기본 타임존을 그대로 쓴다. hibernate.jdbc.time_zone과 어긋나면 LocalDateTime.now()
@@ -132,7 +137,12 @@ tasks.withType<Test> {
     }
 }
 
+// REST Docs 스니펫 출력 위치. 컨트롤러 테스트의 document(...)가
+// API별로 .adoc/.json 조각을 여기 쌓는다.
+val snippetsDir = layout.buildDirectory.dir("generated-snippets")
+
 tasks.named<Test>("test") {
+    outputs.dir(snippetsDir)
     useJUnitPlatform {
         // 동시성 테스트는 스레드를 여러 개 띄워 느리고 CPU를 많이 쓴다.
         // 매 빌드에 넣으면 피드백 주기가 길어진다.
@@ -151,6 +161,41 @@ tasks.register<Test>("concurrencyTest") {
     testLogging {
         events("passed", "failed", "skipped")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+// 테스트가 만든 스니펫을 모아 HTML 문서로 렌더링한다. {snippets} 속성으로
+// .adoc 파일 안의 include::{snippets}/...가 실제 경로를 찾게 한다.
+tasks.named<AsciidoctorTask>("asciidoctor") {
+    inputs.dir(snippetsDir)
+    dependsOn(tasks.named("test"))
+    attributes(mapOf("snippets" to snippetsDir.get()))
+}
+
+openapi3 {
+    setServer("http://localhost:8080")
+    title = "Ticket Rush API"
+    description = "티켓 예매 시스템 API 문서"
+    version = project.version.toString()
+    format = "yaml"
+}
+
+// openapi3 태스크는 afterEvaluate 시점에 등록돼 tasks.named("openapi3")로는
+// 못 찾는다. withType은 나중에 등록되는 태스크도 잡아준다.
+tasks.withType<OpenApi3Task>().configureEach {
+    dependsOn(tasks.named("test"))
+}
+
+// REST Docs HTML과 openapi3 스펙을 jar 안 정적 리소스로 담는다.
+// HTML은 /docs/index.html로, 스펙은 /openapi3.yml로 서빙된다.
+tasks.named<BootJar>("bootJar") {
+    dependsOn(tasks.named("asciidoctor"), tasks.withType<OpenApi3Task>())
+    from(tasks.named<AsciidoctorTask>("asciidoctor").map { it.outputDir }) {
+        into("static/docs")
+    }
+    from(layout.buildDirectory.dir("api-spec")) {
+        into("static")
+        rename("openapi3.yaml", "openapi3.yml")
     }
 }
 

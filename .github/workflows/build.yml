@@ -14,6 +14,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v7
@@ -56,3 +58,46 @@ jobs:
           name: modulith-docs
           path: build/spring-modulith-docs/
           retention-days: 7
+
+      # REST Docs HTML + openapi3 스펙 + 정적 Swagger UI를 한 폴더로 모아
+      # GitHub Pages 배포 잡으로 넘긴다. Docker 이미지는 문서를 안 담기로 했으니
+      # 팀원이 로컬 빌드 없이 볼 수 있는 경로는 이것뿐이다.
+      - name: assemble docs site
+        if: success()
+        run: |
+          mkdir -p docs-site
+          cp build/docs/asciidoc/index.html docs-site/
+          cp build/api-spec/openapi3.yaml docs-site/
+          cp src/docs/swagger.html docs-site/
+
+      - name: upload docs site
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-site
+          path: docs-site/
+          retention-days: 7
+
+  # main에 머지된 것만 배포한다. PR 브랜치 문서까지 공개 URL에 올릴 필요는 없다.
+  deploy-docs:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: docs-site
+          path: docs-site
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs-site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

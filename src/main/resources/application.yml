@@ -65,6 +65,10 @@ management:
     tags:
       instance: ${INSTANCE_ID:local}
 
+springdoc:
+  swagger-ui:
+    url: /openapi3.yml
+
 resilience4j:
   circuitbreaker:
     configs:
