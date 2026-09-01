@@ -19,7 +19,7 @@ jobs:
       contains(github.event.comment.body, '/gemini-review')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # 증분 diff 계산에 커밋 히스토리가 필요하다
 
