@@ -23,3 +23,13 @@ include::{snippets}/event-detail/http-request.adoc[]
 ==== 응답
 include::{snippets}/event-detail/http-response.adoc[]
 include::{snippets}/event-detail/response-fields.adoc[]
+
+=== 좌석 배치도 조회
+
+==== 요청
+include::{snippets}/event-seats/path-parameters.adoc[]
+include::{snippets}/event-seats/http-request.adoc[]
+
+==== 응답
+include::{snippets}/event-seats/http-response.adoc[]
+include::{snippets}/event-seats/response-fields.adoc[]

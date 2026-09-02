@@ -9,4 +9,6 @@ interface EventRepositoryPort {
     fun findById(id: Long): Event?
 
     fun findAll(pageable: Pageable): Page<Event>
+
+    fun existsById(id: Long): Boolean
 }

@@ -23,4 +23,9 @@ class EventController(
     fun findEvent(
         @PathVariable id: Long,
     ): EventDetailResponse = eventQueryService.findEvent(id)
+
+    @GetMapping("/{id}/seats")
+    fun findSeats(
+        @PathVariable id: Long,
+    ): List<SeatResponse> = eventQueryService.findSeats(id)
 }

@@ -15,4 +15,6 @@ class EventRepositoryAdapter(
     override fun findById(id: Long): Event? = jpaRepository.findById(id).orElse(null)
 
     override fun findAll(pageable: Pageable): Page<Event> = jpaRepository.findAll(pageable)
+
+    override fun existsById(id: Long): Boolean = jpaRepository.existsById(id)
 }
