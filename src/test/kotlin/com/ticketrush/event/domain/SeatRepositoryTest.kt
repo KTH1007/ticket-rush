@@ -143,9 +143,15 @@ class SeatRepositoryTest : IntegrationTest() {
         // given
         val event = eventRepository.공연_하나_저장()
         val grade = gradeRepository.등급_하나_저장(event)
-        seatRepository.save(
-            Seat(eventId = event.id, gradeId = grade.id, section = "A", rowLabel = "1", seatNo = 1, ordinal = 0),
-        )
+        val otherEvent = eventRepository.공연_하나_저장(title = "다른 공연")
+        val otherGrade = gradeRepository.등급_하나_저장(otherEvent)
+
+        // 좌석 1건짜리 테이블에선 플래너 선택이 통계/비용 상수에 따라 우연히 갈릴 수 있다.
+        // 공연당 수만 건이라는 실제 규모를 흉내내야 안정적으로 검증된다. 건별 save()는
+        // 수천 건에서 너무 느려 배치 INSERT로 채운다.
+        좌석_대량_저장(event.id, grade.id, count = 1000, ordinalOffset = 0)
+        좌석_대량_저장(otherEvent.id, otherGrade.id, count = 1000, ordinalOffset = 1000)
+        jdbcTemplate.execute("ANALYZE seat")
 
         // when
         val plan =
@@ -161,5 +167,22 @@ class SeatRepositoryTest : IntegrationTest() {
         // WHERE+ORDER BY와 정확히 일치해서 별도 Sort 없이 처리되는 더 나은 플랜이다.
         assertThat(plan).contains("Index Scan")
         assertThat(plan).doesNotContain("Seq Scan")
+    }
+
+    private fun 좌석_대량_저장(
+        eventId: Long,
+        gradeId: Long,
+        count: Int,
+        ordinalOffset: Int,
+    ) {
+        jdbcTemplate.batchUpdate(
+            """
+            INSERT INTO seat (event_id, grade_id, section, row_label, seat_no, ordinal, status, created_at, updated_at)
+            VALUES (?, ?, 'A', ?, ?, ?, 'AVAILABLE', now(), now())
+            """.trimIndent(),
+            (0 until count).map { n ->
+                arrayOf<Any>(eventId, gradeId, (n / 30).toString(), (n % 30) + 1, n + ordinalOffset)
+            },
+        )
     }
 }
