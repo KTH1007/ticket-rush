@@ -9,4 +9,6 @@ class SeatRepositoryAdapter(
     private val jpaRepository: SeatJpaRepository,
 ) : SeatRepositoryPort {
     override fun save(seat: Seat): Seat = jpaRepository.saveAndFlush(seat)
+
+    override fun findAllByEventId(eventId: Long): List<Seat> = jpaRepository.findAllByEventIdOrderBySectionAscRowLabelAscSeatNoAsc(eventId)
 }

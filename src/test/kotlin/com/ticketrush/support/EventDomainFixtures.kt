@@ -4,6 +4,8 @@ import com.ticketrush.event.domain.Event
 import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.event.domain.Grade
 import com.ticketrush.event.domain.GradeRepositoryPort
+import com.ticketrush.event.domain.Seat
+import com.ticketrush.event.domain.SeatRepositoryPort
 import java.time.LocalDateTime
 
 // EventRepositoryTest/GradeRepositoryTest/SeatRepositoryTest가 공통으로 쓰던
@@ -30,3 +32,22 @@ fun GradeRepositoryPort.등급_하나_저장(
     name: String = "VIP",
     price: Int = 200_000,
 ): Grade = save(Grade(event = event, name = name, price = price))
+
+fun SeatRepositoryPort.좌석_하나_저장(
+    event: Event,
+    grade: Grade,
+    section: String = "A",
+    rowLabel: String = "1",
+    seatNo: Short = 1,
+    ordinal: Int = 0,
+): Seat =
+    save(
+        Seat(
+            eventId = event.id,
+            gradeId = grade.id,
+            section = section,
+            rowLabel = rowLabel,
+            seatNo = seatNo,
+            ordinal = ordinal,
+        ),
+    )

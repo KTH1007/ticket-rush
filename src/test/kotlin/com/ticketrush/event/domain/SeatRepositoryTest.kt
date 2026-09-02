@@ -5,6 +5,7 @@ import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.tuple
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -101,5 +102,64 @@ class SeatRepositoryTest : IntegrationTest() {
             )
         }.isInstanceOf(DataIntegrityViolationException::class.java)
             .hasMessageContaining("ck_seat_lifecycle")
+    }
+
+    @Test
+    fun `findAllByEventId로 좌석을 위치 순서로 조회`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        seatRepository.save(Seat(eventId = event.id, gradeId = grade.id, section = "A", rowLabel = "2", seatNo = 1, ordinal = 2))
+        seatRepository.save(Seat(eventId = event.id, gradeId = grade.id, section = "A", rowLabel = "1", seatNo = 2, ordinal = 1))
+        seatRepository.save(Seat(eventId = event.id, gradeId = grade.id, section = "A", rowLabel = "1", seatNo = 1, ordinal = 0))
+
+        // when
+        val seats = seatRepository.findAllByEventId(event.id)
+
+        // then
+        assertThat(seats)
+            .extracting("rowLabel", "seatNo")
+            .containsExactly(
+                tuple("1", 1.toShort()),
+                tuple("1", 2.toShort()),
+                tuple("2", 1.toShort()),
+            )
+    }
+
+    @Test
+    fun `좌석이 없는 이벤트는 빈 리스트를 반환`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+
+        // when
+        val seats = seatRepository.findAllByEventId(event.id)
+
+        // then
+        assertThat(seats).isEmpty()
+    }
+
+    @Test
+    fun `조회 쿼리가 인덱스를 타고 시퀀셜 스캔을 하지 않는다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        seatRepository.save(
+            Seat(eventId = event.id, gradeId = grade.id, section = "A", rowLabel = "1", seatNo = 1, ordinal = 0),
+        )
+
+        // when
+        val plan =
+            jdbcTemplate
+                .queryForList(
+                    "EXPLAIN SELECT * FROM seat WHERE event_id = ? ORDER BY section, row_label, seat_no",
+                    event.id,
+                ).joinToString("\n") { it.values.first().toString() }
+
+        // then
+        // ix_seat_event_status(event_id, status)가 아니라 uk_seat_position
+        // (event_id, section, row_label, seat_no)이 잡힌다. 컬럼 순서가 이 쿼리의
+        // WHERE+ORDER BY와 정확히 일치해서 별도 Sort 없이 처리되는 더 나은 플랜이다.
+        assertThat(plan).contains("Index Scan")
+        assertThat(plan).doesNotContain("Seq Scan")
     }
 }

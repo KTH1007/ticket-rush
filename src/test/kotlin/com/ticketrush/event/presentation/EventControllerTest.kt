@@ -3,6 +3,7 @@ package com.ticketrush.event.presentation
 import com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper
 import com.ticketrush.event.application.EventQueryService
 import com.ticketrush.event.domain.EventNotFoundException
+import com.ticketrush.event.domain.SeatStatus
 import com.ticketrush.shared.response.PageResponse
 import io.mockk.every
 import io.mockk.mockk
@@ -109,6 +110,38 @@ class EventControllerTest {
             .andExpect(status().isNotFound)
     }
 
+    @Test
+    fun `좌석 배치도를 조회하면 좌석 목록을 반환한다`() {
+        // given
+        every { eventQueryService.findSeats(1L) } returns 좌석_목록()
+
+        // when & then
+        mockMvc
+            .perform(get("/api/events/{id}/seats", 1L))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[0].section").value("A"))
+            .andExpect(jsonPath("$[0].status").value("AVAILABLE"))
+            .andDo(
+                MockMvcRestDocumentationWrapper.document(
+                    "event-seats",
+                    summary = "좌석 배치도 조회",
+                    description = "공연의 좌석 목록을 위치 순서로 조회한다. 상태(AVAILABLE/HELD/SOLD)를 포함하되 예약자 정보는 노출하지 않는다.",
+                    snippets = arrayOf(eventSeatsPathParameters, eventSeatsResponseFields),
+                ),
+            )
+    }
+
+    @Test
+    fun `존재하지 않는 공연 id로 좌석을 조회하면 404를 반환한다`() {
+        // given
+        every { eventQueryService.findSeats(999L) } throws EventNotFoundException(999L)
+
+        // when & then
+        mockMvc
+            .perform(get("/api/events/{id}/seats", 999L))
+            .andExpect(status().isNotFound)
+    }
+
     // 필드 설명과 픽스처가 길어 테스트 메서드 본문과 분리했다.
     companion object {
         private fun 공연_목록(): PageResponse<EventSummaryResponse> =
@@ -175,6 +208,30 @@ class EventControllerTest {
                 fieldWithPath("grades[]").description("등급 목록"),
                 fieldWithPath("grades[].name").description("등급명"),
                 fieldWithPath("grades[].price").description("가격"),
+            )
+
+        private fun 좌석_목록(): List<SeatResponse> =
+            listOf(
+                SeatResponse(
+                    id = 1L,
+                    section = "A",
+                    rowLabel = "1",
+                    seatNo = 1,
+                    gradeName = "VIP",
+                    status = SeatStatus.AVAILABLE,
+                ),
+            )
+
+        private val eventSeatsPathParameters = pathParameters(parameterWithName("id").description("공연 id"))
+
+        private val eventSeatsResponseFields =
+            responseFields(
+                fieldWithPath("[].id").description("좌석 id"),
+                fieldWithPath("[].section").description("구역"),
+                fieldWithPath("[].rowLabel").description("열"),
+                fieldWithPath("[].seatNo").description("좌석 번호"),
+                fieldWithPath("[].gradeName").description("등급명"),
+                fieldWithPath("[].status").description("좌석 상태 (AVAILABLE, HELD, SOLD)"),
             )
     }
 }
