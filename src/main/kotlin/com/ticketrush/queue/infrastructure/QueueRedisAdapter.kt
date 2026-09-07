@@ -1,6 +1,7 @@
 package com.ticketrush.queue.infrastructure
 
 import com.ticketrush.queue.domain.QueueRepositoryPort
+import com.ticketrush.queue.domain.QueueStatus
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.io.ClassPathResource
 import org.springframework.data.redis.core.StringRedisTemplate
@@ -14,6 +15,7 @@ class QueueRedisAdapter(
     private val redisTemplate: StringRedisTemplate,
     @Value("\${ticket-rush.queue.active-ttl}") private val activeTtl: Duration,
     @Value("\${ticket-rush.queue.token-ttl}") private val tokenTtl: Duration,
+    @Value("\${ticket-rush.queue.promotion-budget-per-second}") private val budgetPerSecond: Int,
 ) : QueueRepositoryPort {
     override fun register(
         eventId: Long,
@@ -52,18 +54,26 @@ class QueueRedisAdapter(
         return (result as? List<String>).orEmpty()
     }
 
-    override fun findSequence(
+    override fun findStatus(
         eventId: Long,
         token: String,
-    ): Long? = redisTemplate.opsForValue().get("queue:$eventId:token:$token")?.toLong()
+    ): QueueStatus? {
+        val keys =
+            listOf(
+                "queue:$eventId:token:$token",
+                "queue:$eventId:active:$token",
+                "queue:$eventId:lastPromotedSeq",
+            )
 
-    override fun isActive(
-        eventId: Long,
-        token: String,
-    ): Boolean = redisTemplate.hasKey("queue:$eventId:active:$token") == true
-
-    override fun lastPromotedSequence(eventId: Long): Long =
-        redisTemplate.opsForValue().get("queue:$eventId:lastPromotedSeq")?.toLong() ?: 0L
+        @Suppress("UNCHECKED_CAST")
+        val result = redisTemplate.execute(statusScript, keys) as? List<Long> ?: return null
+        if (result[0] != 1L) return null
+        return QueueStatus(
+            sequence = result[1],
+            active = result[2] == 1L,
+            lastPromotedSequence = result[3],
+        )
+    }
 
     override fun activeEventIds(): Set<Long> =
         redisTemplate
@@ -73,7 +83,26 @@ class QueueRedisAdapter(
             .map { it.toLong() }
             .toSet()
 
+    override fun reserveGlobalBudget(count: Int): Int {
+        val currentSecond = System.currentTimeMillis() / 1000
+        val keys = listOf("queue:promotionBudget:$currentSecond")
+        val granted = redisTemplate.execute(budgetReserveScript, keys, count.toString(), budgetPerSecond.toString(), "5")
+        return granted?.toInt() ?: 0
+    }
+
     companion object {
+        private val statusScript: RedisScript<List<*>> =
+            DefaultRedisScript<List<*>>().apply {
+                setLocation(ClassPathResource("scripts/queue-status.lua"))
+                resultType = List::class.java
+            }
+
+        private val budgetReserveScript: RedisScript<Long> =
+            DefaultRedisScript<Long>().apply {
+                setLocation(ClassPathResource("scripts/queue-budget-reserve.lua"))
+                resultType = Long::class.java
+            }
+
         private const val ACTIVE_EVENT_IDS_KEY = "queue:activeEventIds"
 
         private val registerScript: RedisScript<Long> =

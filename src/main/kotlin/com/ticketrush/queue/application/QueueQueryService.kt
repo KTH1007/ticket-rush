@@ -17,14 +17,13 @@ class QueueQueryService(
         eventId: Long,
         token: String,
     ): QueueStatusResponse {
-        val sequence = queueRepository.findSequence(eventId, token) ?: throw InvalidQueueTokenException()
+        val status = queueRepository.findStatus(eventId, token) ?: throw InvalidQueueTokenException()
 
-        if (queueRepository.isActive(eventId, token)) {
+        if (status.active) {
             return QueueStatusResponse(rank = 0, nextPollIntervalMs = 0)
         }
 
-        val lastPromoted = queueRepository.lastPromotedSequence(eventId)
-        val rank = sequence - lastPromoted
+        val rank = status.sequence - status.lastPromotedSequence
         val interval = if (rank <= NEAR_THRESHOLD) nearInterval else farInterval
         return QueueStatusResponse(rank = rank, nextPollIntervalMs = interval.toMillis())
     }

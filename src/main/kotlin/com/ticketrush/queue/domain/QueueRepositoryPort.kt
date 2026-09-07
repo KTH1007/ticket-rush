@@ -11,17 +11,12 @@ interface QueueRepositoryPort {
         count: Int,
     ): List<String>
 
-    fun findSequence(
+    fun findStatus(
         eventId: Long,
         token: String,
-    ): Long?
+    ): QueueStatus?
 
-    fun isActive(
-        eventId: Long,
-        token: String,
-    ): Boolean
-
-    fun lastPromotedSequence(eventId: Long): Long
+    fun reserveGlobalBudget(count: Int): Int
 
     fun activeEventIds(): Set<Long>
 }

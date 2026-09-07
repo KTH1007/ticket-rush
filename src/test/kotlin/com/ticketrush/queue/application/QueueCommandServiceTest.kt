@@ -22,7 +22,7 @@ class QueueCommandServiceTest : IntegrationTest() {
         val token = queueCommandService.register(eventId)
 
         // then
-        assertThat(queueRepository.findSequence(eventId, token)).isNotNull()
+        assertThat(queueRepository.findStatus(eventId, token)).isNotNull()
     }
 
     @Test

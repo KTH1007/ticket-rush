@@ -13,7 +13,10 @@ class QueuePromotionScheduler(
     @Scheduled(fixedRate = 1000)
     fun promote() {
         queueRepository.activeEventIds().forEach { eventId ->
-            queueRepository.promote(eventId, budgetPerSecond)
+            val granted = queueRepository.reserveGlobalBudget(budgetPerSecond)
+            if (granted > 0) {
+                queueRepository.promote(eventId, granted)
+            }
         }
     }
 }

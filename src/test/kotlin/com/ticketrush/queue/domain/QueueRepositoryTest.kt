@@ -97,16 +97,16 @@ class QueueRepositoryTest : IntegrationTest() {
         val seq = queueRepository.register(eventId, token)
 
         // then
-        assertThat(queueRepository.findSequence(eventId, token)).isEqualTo(seq)
+        assertThat(queueRepository.findStatus(eventId, token)?.sequence).isEqualTo(seq)
     }
 
     @Test
-    fun `등록하지 않은 토큰은 순번 조회 시 null을 반환한다`() {
+    fun `등록하지 않은 토큰은 상태 조회 시 null을 반환한다`() {
         // given
         val eventId = System.nanoTime()
 
         // when & then
-        assertThat(queueRepository.findSequence(eventId, UUID.randomUUID().toString())).isNull()
+        assertThat(queueRepository.findStatus(eventId, UUID.randomUUID().toString())).isNull()
     }
 
     @Test
@@ -117,7 +117,7 @@ class QueueRepositoryTest : IntegrationTest() {
         queueRepository.register(eventId, token)
 
         // when & then
-        assertThat(queueRepository.isActive(eventId, token)).isFalse()
+        assertThat(queueRepository.findStatus(eventId, token)?.active).isFalse()
     }
 
     @Test
@@ -129,16 +129,18 @@ class QueueRepositoryTest : IntegrationTest() {
         queueRepository.promote(eventId, 1)
 
         // when & then
-        assertThat(queueRepository.isActive(eventId, token)).isTrue()
+        assertThat(queueRepository.findStatus(eventId, token)?.active).isTrue()
     }
 
     @Test
     fun `아직 아무도 승격되지 않았으면 마지막 승격 순번은 0이다`() {
         // given
         val eventId = System.nanoTime()
+        val token = UUID.randomUUID().toString()
+        queueRepository.register(eventId, token)
 
         // when & then
-        assertThat(queueRepository.lastPromotedSequence(eventId)).isEqualTo(0L)
+        assertThat(queueRepository.findStatus(eventId, token)?.lastPromotedSequence).isEqualTo(0L)
     }
 
     @Test
@@ -146,12 +148,13 @@ class QueueRepositoryTest : IntegrationTest() {
         // given
         val eventId = System.nanoTime()
         queueRepository.register(eventId, UUID.randomUUID().toString())
-        val seq2 = queueRepository.register(eventId, UUID.randomUUID().toString())
+        val token2 = UUID.randomUUID().toString()
+        val seq2 = queueRepository.register(eventId, token2)
 
         // when
         queueRepository.promote(eventId, 2)
 
         // then
-        assertThat(queueRepository.lastPromotedSequence(eventId)).isEqualTo(seq2)
+        assertThat(queueRepository.findStatus(eventId, token2)?.lastPromotedSequence).isEqualTo(seq2)
     }
 }
