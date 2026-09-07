@@ -64,6 +64,12 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(problem)
     }
 
+    @ExceptionHandler(UnauthorizedException::class)
+    fun handleUnauthorized(e: UnauthorizedException): ResponseEntity<ProblemDetail> {
+        val problem = problemDetail(HttpStatus.UNAUTHORIZED, e.code, e.message ?: e.code)
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(problem)
+    }
+
     // title은 RFC 9457 의미대로 사람이 읽는 문구(상태 코드의 reasonPhrase)로 둔다. code는
     // 클라이언트가 분기할 기계 판독용 식별자라 성격이 달라서 확장 속성으로 분리한다.
     private fun problemDetail(
