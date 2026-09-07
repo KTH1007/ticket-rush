@@ -19,8 +19,14 @@ class QueueRedisAdapter(
         eventId: Long,
         token: String,
     ): Long {
-        val keys = listOf("queue:$eventId:seq", "queue:$eventId:waiting", "queue:$eventId:token:$token")
-        return redisTemplate.execute(registerScript, keys, token, tokenTtl.toSeconds().toString())
+        val keys =
+            listOf(
+                "queue:$eventId:seq",
+                "queue:$eventId:waiting",
+                "queue:$eventId:token:$token",
+                ACTIVE_EVENT_IDS_KEY,
+            )
+        return redisTemplate.execute(registerScript, keys, token, tokenTtl.toSeconds().toString(), eventId.toString())
             ?: error("대기열 등록 실패 : seq 반환값 없음")
     }
 
@@ -28,7 +34,12 @@ class QueueRedisAdapter(
         eventId: Long,
         count: Int,
     ): List<String> {
-        val keys = listOf("queue:$eventId:waiting", "queue:$eventId:lastPromotedSeq")
+        val keys =
+            listOf(
+                "queue:$eventId:waiting",
+                "queue:$eventId:lastPromotedSeq",
+                ACTIVE_EVENT_IDS_KEY,
+            )
         val result =
             redisTemplate.execute(
                 promoteScript,
@@ -54,7 +65,17 @@ class QueueRedisAdapter(
     override fun lastPromotedSequence(eventId: Long): Long =
         redisTemplate.opsForValue().get("queue:$eventId:lastPromotedSeq")?.toLong() ?: 0L
 
+    override fun activeEventIds(): Set<Long> =
+        redisTemplate
+            .opsForSet()
+            .members(ACTIVE_EVENT_IDS_KEY)
+            .orEmpty()
+            .map { it.toLong() }
+            .toSet()
+
     companion object {
+        private const val ACTIVE_EVENT_IDS_KEY = "queue:activeEventIds"
+
         private val registerScript: RedisScript<Long> =
             DefaultRedisScript<Long>().apply {
                 setLocation(ClassPathResource("scripts/queue-register.lua"))

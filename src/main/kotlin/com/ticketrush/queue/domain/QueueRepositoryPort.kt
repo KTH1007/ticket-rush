@@ -22,4 +22,6 @@ interface QueueRepositoryPort {
     ): Boolean
 
     fun lastPromotedSequence(eventId: Long): Long
+
+    fun activeEventIds(): Set<Long>
 }
