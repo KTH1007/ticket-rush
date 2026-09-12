@@ -1,14 +1,21 @@
-package com.ticketrush.event.domain
+package com.ticketrush.reservation.domain
 
+import com.ticketrush.event.domain.Event
+import com.ticketrush.event.domain.EventRepositoryPort
+import com.ticketrush.event.domain.Grade
+import com.ticketrush.event.domain.GradeRepositoryPort
+import com.ticketrush.shared.PhoneHash
 import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
+import com.ticketrush.support.예약_하나_저장
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.Assertions.tuple
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
+import java.time.LocalDateTime
 import kotlin.test.Test
 
 class SeatRepositoryTest : IntegrationTest() {
@@ -20,6 +27,9 @@ class SeatRepositoryTest : IntegrationTest() {
 
     @Autowired
     lateinit var seatRepository: SeatRepositoryPort
+
+    @Autowired
+    lateinit var reservationRepository: ReservationRepositoryPort
 
     @Autowired
     lateinit var jdbcTemplate: JdbcTemplate
@@ -169,6 +179,171 @@ class SeatRepositoryTest : IntegrationTest() {
         assertThat(plan).doesNotContain("Seq Scan")
     }
 
+    @Test
+    fun `HELD 또는 SOLD 좌석의 slot 번호를 반환한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        이미_홀드된_좌석_저장(event, grade, seatNo = 1, slotNo = 1, phoneHash = phoneHash)
+        이미_홀드된_좌석_저장(event, grade, seatNo = 2, slotNo = 2, phoneHash = phoneHash, status = SeatStatus.SOLD)
+
+        // when
+        val slotNos = seatRepository.findHeldOrSoldSlotNos(event.id, phoneHash)
+
+        // then
+        assertThat(slotNos).containsExactlyInAnyOrder(1, 2)
+    }
+
+    @Test
+    fun `AVAILABLE 좌석은 포함하지 않는다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        좌석_저장(event, grade, seatNo = 1)
+
+        // when
+        val slotNos = seatRepository.findHeldOrSoldSlotNos(event.id, PhoneHash(ByteArray(32) { 1 }))
+
+        // then
+        assertThat(slotNos).isEmpty()
+    }
+
+    @Test
+    fun `다른 전화번호의 좌석은 포함하지 않는다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        이미_홀드된_좌석_저장(event, grade, seatNo = 1, slotNo = 1, phoneHash = PhoneHash(ByteArray(32) { 9 }))
+
+        // when
+        val slotNos = seatRepository.findHeldOrSoldSlotNos(event.id, PhoneHash(ByteArray(32) { 1 }))
+
+        // then
+        assertThat(slotNos).isEmpty()
+    }
+
+    @Test
+    fun `다른 이벤트의 좌석은 포함하지 않는다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val otherEvent = eventRepository.공연_하나_저장(title = "다른 공연")
+        val otherGrade = gradeRepository.등급_하나_저장(otherEvent)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        이미_홀드된_좌석_저장(otherEvent, otherGrade, seatNo = 1, slotNo = 1, phoneHash = phoneHash)
+
+        // when
+        val slotNos = seatRepository.findHeldOrSoldSlotNos(event.id, phoneHash)
+
+        // then
+        assertThat(slotNos).isEmpty()
+    }
+
+    @Test
+    fun `AVAILABLE 좌석은 홀드에 성공한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val seat = 좌석_저장(event, grade, seatNo = 1)
+        val reservation = reservationRepository.예약_하나_저장(event)
+
+        // when
+        val result =
+            seatRepository.holdIfAvailable(
+                eventId = event.id,
+                seatId = seat.id,
+                reservationId = reservation.id,
+                phoneHash = PhoneHash(ByteArray(32) { 1 }),
+                slotNo = 1,
+                holdExpiresAt = FIXED_HOLD_EXPIRES_AT,
+            )
+
+        // then
+        assertThat(result).isTrue()
+        val held = seatRepository.findAllByEventId(event.id).single { it.id == seat.id }
+        assertThat(held.status).isEqualTo(SeatStatus.HELD)
+    }
+
+    @Test
+    fun `이미 HELD인 좌석은 홀드에 실패한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val seat = 이미_홀드된_좌석_저장(event, grade, seatNo = 1, slotNo = 1, phoneHash = PhoneHash(ByteArray(32) { 9 }))
+        val reservation = reservationRepository.예약_하나_저장(event)
+
+        // when
+        val result =
+            seatRepository.holdIfAvailable(
+                eventId = event.id,
+                seatId = seat.id,
+                reservationId = reservation.id,
+                phoneHash = PhoneHash(ByteArray(32) { 1 }),
+                slotNo = 2,
+                holdExpiresAt = FIXED_HOLD_EXPIRES_AT,
+            )
+
+        // then
+        assertThat(result).isFalse()
+    }
+
+    @Test
+    fun `다른 이벤트 소속 좌석이면 홀드에 실패한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val otherEvent = eventRepository.공연_하나_저장(title = "다른 공연")
+        val otherGrade = gradeRepository.등급_하나_저장(otherEvent)
+        val seatInOtherEvent = 좌석_저장(otherEvent, otherGrade, seatNo = 1)
+        val reservation = reservationRepository.예약_하나_저장(event)
+
+        // when
+        val result =
+            seatRepository.holdIfAvailable(
+                eventId = event.id,
+                seatId = seatInOtherEvent.id,
+                reservationId = reservation.id,
+                phoneHash = PhoneHash(ByteArray(32) { 1 }),
+                slotNo = 1,
+                holdExpiresAt = FIXED_HOLD_EXPIRES_AT,
+            )
+
+        // then
+        assertThat(result).isFalse()
+    }
+
+    private fun 좌석_저장(
+        event: Event,
+        grade: Grade,
+        seatNo: Short,
+    ): Seat =
+        seatRepository.save(
+            Seat(eventId = event.id, gradeId = grade.id, section = "A", rowLabel = "1", seatNo = seatNo, ordinal = seatNo.toInt()),
+        )
+
+    private fun 이미_홀드된_좌석_저장(
+        event: Event,
+        grade: Grade,
+        seatNo: Short,
+        slotNo: Short,
+        phoneHash: PhoneHash,
+        status: SeatStatus = SeatStatus.HELD,
+    ): Seat =
+        seatRepository.save(
+            Seat(
+                eventId = event.id,
+                gradeId = grade.id,
+                section = "A",
+                rowLabel = "1",
+                seatNo = seatNo,
+                ordinal = seatNo.toInt(),
+                status = status,
+                reservationId = reservationRepository.예약_하나_저장(event).id,
+                phoneHash = phoneHash,
+                slotNo = slotNo,
+                holdExpiresAt = FIXED_HOLD_EXPIRES_AT,
+            ),
+        )
+
     private fun 좌석_대량_저장(
         eventId: Long,
         gradeId: Long,
@@ -184,5 +359,9 @@ class SeatRepositoryTest : IntegrationTest() {
                 arrayOf<Any>(eventId, gradeId, (n / 30).toString(), (n % 30) + 1, n + ordinalOffset)
             },
         )
+    }
+
+    companion object {
+        private val FIXED_HOLD_EXPIRES_AT: LocalDateTime = LocalDateTime.of(2030, 1, 1, 0, 0)
     }
 }

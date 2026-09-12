@@ -3,7 +3,7 @@ package com.ticketrush.event.presentation
 import com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper
 import com.ticketrush.event.application.EventQueryService
 import com.ticketrush.event.domain.EventNotFoundException
-import com.ticketrush.event.domain.SeatStatus
+import com.ticketrush.reservation.domain.SeatStatus
 import com.ticketrush.shared.response.PageResponse
 import io.mockk.every
 import io.mockk.mockk

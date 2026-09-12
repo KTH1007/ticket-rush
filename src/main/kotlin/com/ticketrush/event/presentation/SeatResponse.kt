@@ -1,7 +1,7 @@
 package com.ticketrush.event.presentation
 
-import com.ticketrush.event.domain.Seat
-import com.ticketrush.event.domain.SeatStatus
+import com.ticketrush.reservation.domain.Seat
+import com.ticketrush.reservation.domain.SeatStatus
 
 data class SeatResponse(
     val id: Long,

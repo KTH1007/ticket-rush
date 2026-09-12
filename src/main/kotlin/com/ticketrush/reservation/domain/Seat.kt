@@ -1,7 +1,10 @@
-package com.ticketrush.event.domain
+package com.ticketrush.reservation.domain
 
 import com.ticketrush.shared.BaseEntity
+import com.ticketrush.shared.PhoneHash
+import com.ticketrush.shared.PhoneHashConverter
 import jakarta.persistence.Column
+import jakarta.persistence.Convert
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
@@ -26,7 +29,7 @@ class Seat(
     ordinal: Int,
     status: SeatStatus = SeatStatus.AVAILABLE,
     reservationId: Long? = null,
-    phoneHash: ByteArray? = null,
+    phoneHash: PhoneHash? = null,
     slotNo: Short? = null,
     holdExpiresAt: LocalDateTime? = null,
     version: Long = 0,
@@ -66,10 +69,9 @@ class Seat(
     var reservationId: Long? = reservationId
         protected set
 
-    // ByteArray는 ==가 내용이 아니라 참조를 비교한다. 1인 2매 제한 로직에서
-    // 비교할 땐 반드시 .contentEquals()를 쓴다.
+    @Convert(converter = PhoneHashConverter::class)
     @Column(name = "phone_hash")
-    var phoneHash: ByteArray? = phoneHash
+    var phoneHash: PhoneHash? = phoneHash
         protected set
 
     @Column(name = "slot_no")
@@ -84,4 +86,12 @@ class Seat(
     @Column(nullable = false)
     var version: Long = version
         protected set
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is Seat) return false
+        return id != 0L && id == other.id
+    }
+
+    override fun hashCode(): Int = javaClass.hashCode()
 }
