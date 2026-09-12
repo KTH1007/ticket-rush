@@ -18,11 +18,13 @@ interface SeatJpaRepository : JpaRepository<Seat, Long> {
         statuses: List<SeatStatus>,
     ): List<Seat>
 
+    // JPQL 벌크 UPDATE는 @Version을 자동으로 올려주지 않는다. 명시적으로 추가
     @Modifying(clearAutomatically = true)
     @Query(
         """
         UPDATE Seat s SET s.status = com.ticketrush.reservation.domain.SeatStatus.HELD,
-            s.reservationId = :reservationId, s.phoneHash = :phoneHash, s.slotNo = :slotNo, s.holdExpiresAt = :holdExpiresAt
+            s.reservationId = :reservationId, s.phoneHash = :phoneHash, s.slotNo = :slotNo,
+            s.holdExpiresAt = :holdExpiresAt, s.version = s.version + 1
         WHERE s.id = :seatId AND s.eventId = :eventId AND s.status = com.ticketrush.reservation.domain.SeatStatus.AVAILABLE
         """,
     )

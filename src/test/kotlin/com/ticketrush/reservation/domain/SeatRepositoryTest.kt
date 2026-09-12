@@ -260,6 +260,7 @@ class SeatRepositoryTest : IntegrationTest() {
         assertThat(result).isTrue()
         val held = seatRepository.findAllByEventId(event.id).single { it.id == seat.id }
         assertThat(held.status).isEqualTo(SeatStatus.HELD)
+        assertThat(held.version).isEqualTo(seat.version + 1)
     }
 
     @Test
