@@ -82,5 +82,5 @@ class Reservation(
         return id != 0L && id == other.id
     }
 
-    override fun hashCode(): Int = javaClass.hashCode()
+    override fun hashCode(): Int = Reservation::class.java.hashCode()
 }

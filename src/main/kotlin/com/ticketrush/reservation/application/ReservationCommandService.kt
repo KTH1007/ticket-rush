@@ -15,6 +15,8 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Clock
 import java.time.LocalDateTime
 import java.util.UUID
@@ -40,14 +42,28 @@ class ReservationCommandService(
         if (!seatHoldFilter.tryClaim(eventId, seatSelection.seatIds, holdToken.toString())) {
             throw SeatAlreadyHeldException()
         }
-        var succeeded = false
-        try {
-            val reservation = holdSeatsInDb(eventId, seatSelection, phoneHash, holdToken)
-            succeeded = true
-            return reservation
-        } finally {
-            if (!succeeded) releaseQuietly(eventId, seatSelection.seatIds, holdToken)
-        }
+        releaseOnRollback(eventId, seatSelection.seatIds, holdToken)
+        return holdSeatsInDb(eventId, seatSelection, phoneHash, holdToken)
+    }
+
+    // @Transactional은 AOP 프록시라 실제 커밋은 이 메서드가 리턴한 "다음"에 일어난다. 그래서
+    // try/finally로는 메서드 본문 실패만 잡을 수 있고, 커밋 자체의 실패(seat.reservation_id가
+    // DEFERRABLE INITIALLY DEFERRED FK라 참조 무결성 검증이 커밋 시점으로 미뤄짐)는 못 잡는다.
+    // afterCompletion은 커밋/롤백이 실제로 끝난 뒤 호출되므로 두 실패 경로를 전부 덮는다.
+    private fun releaseOnRollback(
+        eventId: Long,
+        seatIds: List<Long>,
+        holdToken: UUID,
+    ) {
+        TransactionSynchronizationManager.registerSynchronization(
+            object : TransactionSynchronization {
+                override fun afterCompletion(status: Int) {
+                    if (status != TransactionSynchronization.STATUS_COMMITTED) {
+                        releaseQuietly(eventId, seatIds, holdToken)
+                    }
+                }
+            },
+        )
     }
 
     // 실패 종류를 가리지 않고 전부 여기로 온다. release 자체가 실패해도 원래 예외를 삼키지 않도록 별도로 감싸고, 그 실패는 로그로만 남긴다.
