@@ -339,6 +339,21 @@ class SeatRepositoryTest : IntegrationTest() {
         assertThat(seats).extracting("id").containsExactly(seat.id)
     }
 
+    @Test
+    fun `ux_seat_slot 위반 시(같은 전화번호가 같은 slot을 중복 사용) 예외 발생`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        이미_홀드된_좌석_저장(event, grade, seatNo = 1, slotNo = 1, phoneHash = phoneHash)
+
+        // when & then
+        assertThatThrownBy {
+            이미_홀드된_좌석_저장(event, grade, seatNo = 2, slotNo = 1, phoneHash = phoneHash)
+        }.isInstanceOf(DataIntegrityViolationException::class.java)
+            .hasMessageContaining("ux_seat_slot")
+    }
+
     private fun 좌석_저장(
         event: Event,
         grade: Grade,

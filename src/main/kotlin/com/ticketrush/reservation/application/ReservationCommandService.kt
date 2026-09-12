@@ -7,15 +7,19 @@ import com.ticketrush.reservation.domain.ReservationLimitExceededException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.SeatAlreadyHeldException
 import com.ticketrush.reservation.domain.SeatHoldFilterPort
+import com.ticketrush.reservation.domain.SeatNotFoundException
 import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.reservation.domain.SeatSelection
 import com.ticketrush.shared.PhoneHash
-import com.ticketrush.shared.exception.ConflictException
+import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.LocalDateTime
 import java.util.UUID
+
+private val logger = KotlinLogging.logger {}
 
 @Service
 class ReservationCommandService(
@@ -36,11 +40,30 @@ class ReservationCommandService(
         if (!seatHoldFilter.tryClaim(eventId, seatSelection.seatIds, holdToken.toString())) {
             throw SeatAlreadyHeldException()
         }
-        return try {
-            holdSeatsInDb(eventId, seatSelection, phoneHash, holdToken)
-        } catch (e: ConflictException) {
-            seatHoldFilter.release(eventId, seatSelection.seatIds, holdToken.toString())
-            throw e
+        var succeeded = false
+        try {
+            val reservation = holdSeatsInDb(eventId, seatSelection, phoneHash, holdToken)
+            succeeded = true
+            return reservation
+        } finally {
+            if (!succeeded) releaseQuietly(eventId, seatSelection.seatIds, holdToken)
+        }
+    }
+
+    // 실패 종류를 가리지 않고 전부 여기로 온다. release 자체가 실패해도 원래 예외를 삼키지 않도록 별도로 감싸고, 그 실패는 로그로만 남긴다.
+    @Suppress("TooGenericExceptionCaught")
+    private fun releaseQuietly(
+        eventId: Long,
+        seatIds: List<Long>,
+        holdToken: UUID,
+    ) {
+        try {
+            seatHoldFilter.release(eventId, seatIds, holdToken.toString())
+        } catch (e: Exception) {
+            logger.error(e) {
+                "홀드 실패 후 Redis 클레임 해제 실패. eventId=$eventId, seatIds=$seatIds, holdToken=$holdToken " +
+                    "- TTL(${seatPolicy.holdTtl}) 만료 전까지 좌석이 잘못 점유 표시될 수 있음"
+            }
         }
     }
 
@@ -58,12 +81,17 @@ class ReservationCommandService(
         return reservation
     }
 
+    // 존재하지 않거나 다른 공연 소속인 좌석 id가 섞여 있으면 조용히 넘어가지 않고 즉시 실패시킨다.
     private fun computeAmount(
         eventId: Long,
         seatIds: List<Long>,
     ): Int {
         val priceByGradeId = gradeRepository.findAllByEventId(eventId).associate { it.id to it.price }
-        return seatRepository.findAllByIds(seatIds).sumOf { priceByGradeId.getValue(it.gradeId) }
+        val seatById = seatRepository.findAllByIds(seatIds).associateBy { it.id }
+        return seatIds.sumOf { seatId ->
+            val seat = seatById[seatId]?.takeIf { it.eventId == eventId } ?: throw SeatNotFoundException(seatId)
+            priceByGradeId.getValue(seat.gradeId)
+        }
     }
 
     private fun availableSlots(
@@ -107,16 +135,30 @@ class ReservationCommandService(
         holdExpiresAt: LocalDateTime,
     ) {
         seatSelection.seatIds.zip(slots).forEach { (seatId, slotNo) ->
-            val held =
-                seatRepository.holdIfAvailable(
-                    eventId = eventId,
-                    seatId = seatId,
-                    reservationId = reservation.id,
-                    phoneHash = phoneHash,
-                    slotNo = slotNo,
-                    holdExpiresAt = holdExpiresAt,
-                )
+            val held = holdSeatOrTranslateConflict(eventId, seatId, reservation, phoneHash, slotNo, holdExpiresAt)
             if (!held) throw SeatAlreadyHeldException()
         }
     }
+
+    private fun holdSeatOrTranslateConflict(
+        eventId: Long,
+        seatId: Long,
+        reservation: Reservation,
+        phoneHash: PhoneHash,
+        slotNo: Short,
+        holdExpiresAt: LocalDateTime,
+    ): Boolean =
+        try {
+            seatRepository.holdIfAvailable(
+                eventId = eventId,
+                seatId = seatId,
+                reservationId = reservation.id,
+                phoneHash = phoneHash,
+                slotNo = slotNo,
+                holdExpiresAt = holdExpiresAt,
+            )
+        } catch (e: DataIntegrityViolationException) {
+            if (e.message?.contains("ux_seat_slot") == true) throw ReservationLimitExceededException()
+            throw e
+        }
 }

@@ -8,6 +8,7 @@ import com.ticketrush.reservation.domain.ReservationLimitExceededException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.Seat
 import com.ticketrush.reservation.domain.SeatAlreadyHeldException
+import com.ticketrush.reservation.domain.SeatNotFoundException
 import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.reservation.domain.SeatSelection
 import com.ticketrush.reservation.domain.SeatStatus
@@ -145,6 +146,24 @@ class ReservationCommandServiceTest : IntegrationTest() {
 
         // then
         assertThat(reservation.amount).isEqualTo(300_000)
+    }
+
+    @Test
+    fun `다른 공연 소속 좌석 id가 섞이면 좌석을 찾을 수 없다는 예외가 발생하고 아무것도 바뀌지 않는다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val seat = seatRepository.save(좌석(event, grade, seatNo = 1))
+        val otherEvent = eventRepository.공연_하나_저장(title = "다른 공연")
+        val otherGrade = gradeRepository.등급_하나_저장(otherEvent)
+        val seatInOtherEvent = seatRepository.save(좌석(otherEvent, otherGrade, seatNo = 1))
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+
+        // when & then
+        assertThatThrownBy { 홀드(event.id, listOf(seat.id, seatInOtherEvent.id), phoneHash) }
+            .isInstanceOf(SeatNotFoundException::class.java)
+
+        assertThat(좌석_다시_조회(event.id, seat.id).status).isEqualTo(SeatStatus.AVAILABLE)
     }
 
     private fun 홀드(
