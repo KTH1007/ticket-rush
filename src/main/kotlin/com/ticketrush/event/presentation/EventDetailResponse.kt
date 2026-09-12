@@ -1,7 +1,7 @@
 package com.ticketrush.event.presentation
 
 import com.ticketrush.event.domain.Event
-import com.ticketrush.event.domain.Grade
+import com.ticketrush.reservation.domain.Grade
 import java.time.LocalDateTime
 
 data class EventDetailResponse(

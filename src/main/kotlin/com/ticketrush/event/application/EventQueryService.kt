@@ -2,10 +2,10 @@ package com.ticketrush.event.application
 
 import com.ticketrush.event.domain.EventNotFoundException
 import com.ticketrush.event.domain.EventRepositoryPort
-import com.ticketrush.event.domain.GradeRepositoryPort
 import com.ticketrush.event.presentation.EventDetailResponse
 import com.ticketrush.event.presentation.EventSummaryResponse
 import com.ticketrush.event.presentation.SeatResponse
+import com.ticketrush.reservation.domain.GradeRepositoryPort
 import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.shared.response.PageResponse
 import org.springframework.data.domain.Pageable

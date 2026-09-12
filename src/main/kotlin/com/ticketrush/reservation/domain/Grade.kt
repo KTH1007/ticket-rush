@@ -1,14 +1,11 @@
-package com.ticketrush.event.domain
+package com.ticketrush.reservation.domain
 
 import com.ticketrush.shared.BaseEntity
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
-import jakarta.persistence.FetchType
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
-import jakarta.persistence.JoinColumn
-import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 
 @Entity
@@ -17,13 +14,15 @@ class Grade(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
-    event: Event,
+    eventId: Long,
     name: String,
     price: Int,
 ) : BaseEntity() {
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "event_id", nullable = false)
-    var event: Event = event
+    // event 객체 참조 대신 ID 간접참조로 둔다. Grade가 reservation 모듈로
+    // 옮겨오면서, event 모듈의 Event 엔티티를 직접 참조하면 event <-> reservation
+    // 순환 의존이 생긴다(event가 이미 Seat 조회 때문에 reservation을 참조 중).
+    @Column(name = "event_id", nullable = false)
+    var eventId: Long = eventId
         protected set
 
     @Column(nullable = false, length = 50)

@@ -2,7 +2,7 @@ package com.ticketrush.event.application
 
 import com.ticketrush.event.domain.EventNotFoundException
 import com.ticketrush.event.domain.EventRepositoryPort
-import com.ticketrush.event.domain.GradeRepositoryPort
+import com.ticketrush.reservation.domain.GradeRepositoryPort
 import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.support.TransactionalIntegrationTest
 import com.ticketrush.support.공연_하나_저장

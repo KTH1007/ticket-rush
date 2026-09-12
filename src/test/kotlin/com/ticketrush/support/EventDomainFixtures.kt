@@ -2,8 +2,8 @@ package com.ticketrush.support
 
 import com.ticketrush.event.domain.Event
 import com.ticketrush.event.domain.EventRepositoryPort
-import com.ticketrush.event.domain.Grade
-import com.ticketrush.event.domain.GradeRepositoryPort
+import com.ticketrush.reservation.domain.Grade
+import com.ticketrush.reservation.domain.GradeRepositoryPort
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.Seat
@@ -36,7 +36,7 @@ fun GradeRepositoryPort.등급_하나_저장(
     event: Event,
     name: String = "VIP",
     price: Int = 200_000,
-): Grade = save(Grade(event = event, name = name, price = price))
+): Grade = save(Grade(eventId = event.id, name = name, price = price))
 
 fun SeatRepositoryPort.좌석_하나_저장(
     event: Event,

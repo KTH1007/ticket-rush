@@ -1,6 +1,6 @@
-package com.ticketrush.event.infrastructure
+package com.ticketrush.reservation.infrastructure
 
-import com.ticketrush.event.domain.Grade
+import com.ticketrush.reservation.domain.Grade
 import org.springframework.data.jpa.repository.JpaRepository
 
 interface GradeJpaRepository : JpaRepository<Grade, Long> {

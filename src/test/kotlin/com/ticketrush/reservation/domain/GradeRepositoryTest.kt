@@ -1,5 +1,6 @@
-package com.ticketrush.event.domain
+package com.ticketrush.reservation.domain
 
+import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.support.TransactionalIntegrationTest
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
@@ -25,7 +26,7 @@ class GradeRepositoryTest : TransactionalIntegrationTest() {
         val saved = gradeRepository.등급_하나_저장(event)
 
         // then
-        assertThat(saved.event.id).isEqualTo(event.id)
+        assertThat(saved.eventId).isEqualTo(event.id)
         assertThat(saved.name).isEqualTo("VIP")
         assertThat(saved.price).isEqualTo(200_000)
     }

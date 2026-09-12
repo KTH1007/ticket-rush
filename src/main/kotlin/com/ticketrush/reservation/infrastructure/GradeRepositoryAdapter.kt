@@ -1,7 +1,7 @@
-package com.ticketrush.event.infrastructure
+package com.ticketrush.reservation.infrastructure
 
-import com.ticketrush.event.domain.Grade
-import com.ticketrush.event.domain.GradeRepositoryPort
+import com.ticketrush.reservation.domain.Grade
+import com.ticketrush.reservation.domain.GradeRepositoryPort
 import org.springframework.stereotype.Repository
 
 @Repository
