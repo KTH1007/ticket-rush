@@ -1,14 +1,19 @@
 package com.ticketrush.reservation.application
 
+import com.ticketrush.reservation.SeatPolicyProperties
+import com.ticketrush.reservation.domain.GradeRepositoryPort
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationLimitExceededException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.SeatAlreadyHeldException
+import com.ticketrush.reservation.domain.SeatHoldFilterPort
 import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.reservation.domain.SeatSelection
 import com.ticketrush.shared.PhoneHash
+import com.ticketrush.shared.exception.ConflictException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Clock
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -16,21 +21,49 @@ import java.util.UUID
 class ReservationCommandService(
     private val seatRepository: SeatRepositoryPort,
     private val reservationRepository: ReservationRepositoryPort,
+    private val gradeRepository: GradeRepositoryPort,
+    private val seatHoldFilter: SeatHoldFilterPort,
+    private val clock: Clock,
+    private val seatPolicy: SeatPolicyProperties,
 ) {
-    // amount/holdExpiresAt은 이미 계산된 값을 받는다. 이 서비스의 책임은 slot 배정과
-    // all-or-nothing 판단이지, 금액 계산이나 만료 시각 계산이 아니다.
     @Transactional
     fun holdSeats(
         eventId: Long,
         seatSelection: SeatSelection,
         phoneHash: PhoneHash,
-        amount: Int,
-        holdExpiresAt: LocalDateTime,
+    ): Reservation {
+        val holdToken = UUID.randomUUID()
+        if (!seatHoldFilter.tryClaim(eventId, seatSelection.seatIds, holdToken.toString())) {
+            throw SeatAlreadyHeldException()
+        }
+        return try {
+            holdSeatsInDb(eventId, seatSelection, phoneHash, holdToken)
+        } catch (e: ConflictException) {
+            seatHoldFilter.release(eventId, seatSelection.seatIds, holdToken.toString())
+            throw e
+        }
+    }
+
+    private fun holdSeatsInDb(
+        eventId: Long,
+        seatSelection: SeatSelection,
+        phoneHash: PhoneHash,
+        holdToken: UUID,
     ): Reservation {
         val slots = availableSlots(eventId, phoneHash, seatSelection.seatIds.size)
-        val reservation = saveHoldingReservation(eventId, seatSelection, phoneHash, amount, holdExpiresAt)
+        val amount = computeAmount(eventId, seatSelection.seatIds)
+        val holdExpiresAt = LocalDateTime.now(clock).plus(seatPolicy.holdTtl)
+        val reservation = saveHoldingReservation(eventId, seatSelection, phoneHash, amount, holdExpiresAt, holdToken)
         holdEachSeat(eventId, seatSelection, slots, reservation, phoneHash, holdExpiresAt)
         return reservation
+    }
+
+    private fun computeAmount(
+        eventId: Long,
+        seatIds: List<Long>,
+    ): Int {
+        val priceByGradeId = gradeRepository.findAllByEventId(eventId).associate { it.id to it.price }
+        return seatRepository.findAllByIds(seatIds).sumOf { priceByGradeId.getValue(it.gradeId) }
     }
 
     private fun availableSlots(
@@ -39,7 +72,8 @@ class ReservationCommandService(
         requiredCount: Int,
     ): List<Short> {
         val usedSlots = seatRepository.findHeldOrSoldSlotNos(eventId, phoneHash).toSet()
-        val available = ALL_SLOTS.filterNot { it in usedSlots }
+        val allSlots = (1..seatPolicy.maxPerPhone).map { it.toShort() }
+        val available = allSlots.filterNot { it in usedSlots }
         if (available.size < requiredCount) throw ReservationLimitExceededException()
         return available
     }
@@ -50,6 +84,7 @@ class ReservationCommandService(
         phoneHash: PhoneHash,
         amount: Int,
         holdExpiresAt: LocalDateTime,
+        holdToken: UUID,
     ): Reservation =
         reservationRepository.save(
             Reservation(
@@ -57,7 +92,7 @@ class ReservationCommandService(
                 phoneHash = phoneHash,
                 quantity = seatSelection.seatIds.size.toShort(),
                 amount = amount,
-                holdToken = UUID.randomUUID(),
+                holdToken = holdToken,
                 idempotencyKey = UUID.randomUUID(),
                 holdExpiresAt = holdExpiresAt,
             ),
@@ -83,9 +118,5 @@ class ReservationCommandService(
                 )
             if (!held) throw SeatAlreadyHeldException()
         }
-    }
-
-    companion object {
-        private val ALL_SLOTS: List<Short> = listOf(1, 2)
     }
 }

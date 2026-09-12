@@ -2,8 +2,8 @@ package com.ticketrush.reservation.application
 
 import com.ticketrush.event.domain.Event
 import com.ticketrush.event.domain.EventRepositoryPort
-import com.ticketrush.event.domain.Grade
-import com.ticketrush.event.domain.GradeRepositoryPort
+import com.ticketrush.reservation.domain.Grade
+import com.ticketrush.reservation.domain.GradeRepositoryPort
 import com.ticketrush.reservation.domain.ReservationLimitExceededException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.Seat
@@ -21,7 +21,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
-import java.time.LocalDateTime
 import kotlin.test.Test
 
 class ReservationCommandServiceTest : IntegrationTest() {
@@ -132,17 +131,30 @@ class ReservationCommandServiceTest : IntegrationTest() {
         assertThat(좌석_다시_조회(event.id, seat3.id).status).isEqualTo(SeatStatus.AVAILABLE)
     }
 
+    @Test
+    fun `등급 가격을 합산해서 예약 금액을 계산한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event, price = 150_000)
+        val seat1 = seatRepository.save(좌석(event, grade, seatNo = 1))
+        val seat2 = seatRepository.save(좌석(event, grade, seatNo = 2))
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+
+        // when
+        val reservation = 홀드(event.id, listOf(seat1.id, seat2.id), phoneHash)
+
+        // then
+        assertThat(reservation.amount).isEqualTo(300_000)
+    }
+
     private fun 홀드(
         eventId: Long,
         seatIds: List<Long>,
         phoneHash: PhoneHash,
-        amount: Int = 100_000,
     ) = reservationCommandService.holdSeats(
         eventId = eventId,
         seatSelection = SeatSelection(seatIds),
         phoneHash = phoneHash,
-        amount = amount,
-        holdExpiresAt = FIXED_HOLD_EXPIRES_AT,
     )
 
     private fun 좌석(
@@ -203,8 +215,4 @@ class ReservationCommandServiceTest : IntegrationTest() {
             eventId,
             phoneHash.value,
         ) ?: 0L
-
-    companion object {
-        private val FIXED_HOLD_EXPIRES_AT: LocalDateTime = LocalDateTime.of(2030, 1, 1, 0, 0)
-    }
 }
