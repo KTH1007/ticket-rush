@@ -32,8 +32,9 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem)
     }
 
-    // NotFoundException이 아닌 나머지 도메인 예외(좌석 중복 선점, 잔액 부족 등). 기본 400으로
-    // 처리한다. 구체적인 상태 코드(409 등)가 필요한 도메인이 생기면 그 예외 전용 핸들러를 추가한다.
+    // NotFoundException/ConflictException/UnauthorizedException처럼 전용 핸들러가 있는 것들을
+    // 뺀 나머지 도메인 예외(예: InvalidSeatSelectionException처럼 사용자 입력 자체가 문제인 경우).
+    // 기본 400으로 처리한다. 구체적인 상태 코드가 더 필요한 도메인이 생기면 그 예외 전용 핸들러를 추가한다.
     @ExceptionHandler(BusinessException::class)
     fun handleBusiness(e: BusinessException): ResponseEntity<ProblemDetail> {
         val problem = problemDetail(HttpStatus.BAD_REQUEST, e.code, e.message ?: e.code)

@@ -166,6 +166,25 @@ class ReservationCommandServiceTest : IntegrationTest() {
         assertThat(좌석_다시_조회(event.id, seat.id).status).isEqualTo(SeatStatus.AVAILABLE)
     }
 
+    @Test
+    fun `slot이 1개만 남았는데 1석을 요청하면 성공하고 남은 slot이 배정된다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        일인분_홀드_완료(event, grade, phoneHash, slotNo = 1)
+        val seat2 = seatRepository.save(좌석(event, grade, seatNo = 2))
+
+        // when
+        val reservation = 홀드(event.id, listOf(seat2.id), phoneHash)
+
+        // then
+        assertThat(reservation.quantity).isEqualTo(1)
+        val held = 좌석_다시_조회(event.id, seat2.id)
+        assertThat(held.status).isEqualTo(SeatStatus.HELD)
+        assertThat(held.slotNo).isEqualTo(2.toShort())
+    }
+
     private fun 홀드(
         eventId: Long,
         seatIds: List<Long>,
