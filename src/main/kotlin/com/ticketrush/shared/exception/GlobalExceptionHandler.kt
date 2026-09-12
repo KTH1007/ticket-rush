@@ -76,12 +76,6 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem)
     }
 
-    @ExceptionHandler(IllegalArgumentException::class)
-    fun handleIllegalArgument(e: IllegalArgumentException): ResponseEntity<ProblemDetail> {
-        val problem = problemDetail(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", e.message ?: "요청 값이 유효하지 않습니다")
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem)
-    }
-
     // title은 RFC 9457 의미대로 사람이 읽는 문구(상태 코드의 reasonPhrase)로 둔다. code는
     // 클라이언트가 분기할 기계 판독용 식별자라 성격이 달라서 확장 속성으로 분리한다.
     private fun problemDetail(

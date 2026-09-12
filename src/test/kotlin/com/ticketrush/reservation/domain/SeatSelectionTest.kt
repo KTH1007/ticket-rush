@@ -27,20 +27,20 @@ class SeatSelectionTest {
     fun `좌석 0개로는 만들 수 없다`() {
         // when & then
         assertThatThrownBy { SeatSelection(emptyList()) }
-            .isInstanceOf(IllegalArgumentException::class.java)
+            .isInstanceOf(InvalidSeatSelectionException::class.java)
     }
 
     @Test
     fun `좌석 3개 이상으로는 만들 수 없다`() {
         // when & then
         assertThatThrownBy { SeatSelection(listOf(1L, 2L, 3L)) }
-            .isInstanceOf(IllegalArgumentException::class.java)
+            .isInstanceOf(InvalidSeatSelectionException::class.java)
     }
 
     @Test
     fun `중복된 좌석 id로는 만들 수 없다`() {
         // when & then
         assertThatThrownBy { SeatSelection(listOf(1L, 1L)) }
-            .isInstanceOf(IllegalArgumentException::class.java)
+            .isInstanceOf(InvalidSeatSelectionException::class.java)
     }
 }
