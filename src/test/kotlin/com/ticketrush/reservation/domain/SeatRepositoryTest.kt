@@ -2,8 +2,6 @@ package com.ticketrush.reservation.domain
 
 import com.ticketrush.event.domain.Event
 import com.ticketrush.event.domain.EventRepositoryPort
-import com.ticketrush.event.domain.Grade
-import com.ticketrush.event.domain.GradeRepositoryPort
 import com.ticketrush.shared.PhoneHash
 import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.공연_하나_저장
@@ -309,6 +307,36 @@ class SeatRepositoryTest : IntegrationTest() {
 
         // then
         assertThat(result).isFalse()
+    }
+
+    @Test
+    fun `여러 id로 좌석을 한 번에 조회한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val seat1 = 좌석_저장(event, grade, seatNo = 1)
+        좌석_저장(event, grade, seatNo = 2)
+        val seat3 = 좌석_저장(event, grade, seatNo = 3)
+
+        // when
+        val seats = seatRepository.findAllByIds(listOf(seat1.id, seat3.id))
+
+        // then
+        assertThat(seats).extracting("id").containsExactlyInAnyOrder(seat1.id, seat3.id)
+    }
+
+    @Test
+    fun `존재하지 않는 id는 결과에서 빠진다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val seat = 좌석_저장(event, grade, seatNo = 1)
+
+        // when
+        val seats = seatRepository.findAllByIds(listOf(seat.id, 999_999L))
+
+        // then
+        assertThat(seats).extracting("id").containsExactly(seat.id)
     }
 
     private fun 좌석_저장(

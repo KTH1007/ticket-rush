@@ -24,4 +24,6 @@ interface SeatRepositoryPort {
         slotNo: Short,
         holdExpiresAt: LocalDateTime,
     ): Boolean
+
+    fun findAllByIds(seatIds: List<Long>): List<Seat>
 }
