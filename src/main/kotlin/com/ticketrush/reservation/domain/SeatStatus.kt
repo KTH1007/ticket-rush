@@ -1,4 +1,4 @@
-package com.ticketrush.event.domain
+package com.ticketrush.reservation.domain
 
 enum class SeatStatus(
     val description: String,

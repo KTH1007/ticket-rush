@@ -47,6 +47,35 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    fun `ConflictException 발생 시 409와 ProblemDetail을 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/conflict")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(409)
+        val body = objectMapper.readValue(result.response.contentAsString, ProblemDetail::class.java)
+        assertThat(body.title).isEqualTo("Conflict")
+        assertThat(body.detail).isEqualTo("샘플이 이미 존재합니다")
+        assertThat(body.properties?.get("code")).isEqualTo("SAMPLE_ALREADY_EXISTS")
+    }
+
+    // IllegalArgumentException 전담 핸들러는 없다. require()는 사용자 입력 검증과 내부
+    // 불변식 검증에 동시에 쓰이는데, 타입만으로는 둘을 구분할 수 없어 전담 핸들러를 두면
+    // 내부 버그(예: PhoneHash 크기 불일치)까지 400으로 위장돼 로그도 안 남고 조용히 삼켜진다.
+    // 그래서 catch-all(handleUnexpected)로 흘려보내 500 + 에러 로그로 남긴다. 사용자 입력이
+    // 원인인 검증은 도메인이 명시적 예외(예: InvalidSeatSelectionException)를 던지게 한다.
+    @Test
+    fun `전담 핸들러 없는 IllegalArgumentException은 500과 ProblemDetail을 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/illegal-argument")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(500)
+        val body = objectMapper.readValue(result.response.contentAsString, ProblemDetail::class.java)
+        assertThat(body.properties?.get("code")).isEqualTo("INTERNAL_SERVER_ERROR")
+    }
+
+    @Test
     fun `Bean Validation 실패 시 400과 필드별 에러를 반환한다`() {
         // given
         val invalidRequest = objectMapper.writeValueAsString(SampleRequest(name = ""))

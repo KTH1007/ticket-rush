@@ -16,10 +16,11 @@ import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
     importOptions = [ImportOption.DoNotIncludeTests::class],
 )
 class DependencyRuleTest {
-    // 아직 domain/infrastructure/api 패키지가 없어 매칭 대상이 0개다.
-    // ArchUnit 1.5.0은 매칭 대상 0개를 기본적으로 실패 처리한다(오타로 아무것도 못
-    // 찾은 것과 구분이 안 되기 때문). 실제 도메인 모듈이 생기면 allowEmptyShould를
-    // 지우고 이 안전장치를 다시 살려야 한다.
+    // 설계 문서는 이 계층 이름을 api로 쓰지만, 실제 구현은 presentation으로
+    // 통일했다(레이어드 아키텍처에서 흔한 이름이라 그대로 채택, 문서 쪽을 안
+    // 맞추기로 함 - 이미 병합된 패키지를 리네임할 실익이 없음). 실제 도메인
+    // 모듈이 다 생겼으므로 allowEmptyShould는 걷어내 이 규칙들이 진짜로
+    // 검증되게 한다.
     @ArchTest
     val `도메인은 인프라 구현체와 API 계층을 의존하지 않는다`: ArchRule =
         noClasses()
@@ -27,8 +28,7 @@ class DependencyRuleTest {
             .resideInAPackage("..domain..")
             .should()
             .dependOnClassesThat()
-            .resideInAnyPackage("..infrastructure..", "..api..")
-            .allowEmptyShould(true)
+            .resideInAnyPackage("..infrastructure..", "..presentation..")
 
     // QueryDSL이 생성하는 Q타입(QEvent 등)은 엔티티와 같은 패키지(domain)에 생성되고
     // com.querydsl.. 타입을 그대로 참조한다. 우리가 작성한 코드가 아니라 kapt가
@@ -43,17 +43,16 @@ class DependencyRuleTest {
                 "org.springframework.web..",
                 "org.springframework.data.redis..",
                 "com.querydsl..",
-            ).allowEmptyShould(true)
+            )
 
     @ArchTest
     val `API 계층은 리포지토리를 직접 호출하지 않는다`: ArchRule =
         noClasses()
             .that()
-            .resideInAPackage("..api..")
+            .resideInAPackage("..presentation..")
             .should()
             .dependOnClassesThat()
             .haveSimpleNameEndingWith("Repository")
-            .allowEmptyShould(true)
 
     @ArchTest
     val `Port 인터페이스는 도메인 계층에 둔다`: ArchRule =
@@ -62,5 +61,4 @@ class DependencyRuleTest {
             .haveSimpleNameEndingWith("Port")
             .should()
             .resideInAPackage("..domain..")
-            .allowEmptyShould(true)
 }

@@ -1,6 +1,6 @@
 package com.ticketrush.event.presentation
 
-import com.ticketrush.event.domain.Grade
+import com.ticketrush.reservation.domain.Grade
 
 data class GradeResponse(
     val name: String,

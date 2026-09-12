@@ -43,4 +43,12 @@ class Event(
     @Column(name = "starts_at", nullable = false)
     var startsAt: LocalDateTime = startsAt
         protected set
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is Event) return false
+        return id != 0L && id == other.id
+    }
+
+    override fun hashCode(): Int = Event::class.java.hashCode()
 }

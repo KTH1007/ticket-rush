@@ -1,12 +1,12 @@
 package com.ticketrush.event.application
 
 import com.ticketrush.event.domain.EventNotFoundException
-import com.ticketrush.event.domain.EventRepositoryPort
-import com.ticketrush.event.domain.GradeRepositoryPort
-import com.ticketrush.event.domain.SeatRepositoryPort
+import com.ticketrush.event.domain.EventQueryPort
 import com.ticketrush.event.presentation.EventDetailResponse
 import com.ticketrush.event.presentation.EventSummaryResponse
 import com.ticketrush.event.presentation.SeatResponse
+import com.ticketrush.reservation.domain.GradeQueryPort
+import com.ticketrush.reservation.domain.SeatQueryPort
 import com.ticketrush.shared.response.PageResponse
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
@@ -15,9 +15,9 @@ import org.springframework.transaction.annotation.Transactional
 @Service
 @Transactional(readOnly = true)
 class EventQueryService(
-    private val eventRepository: EventRepositoryPort,
-    private val gradeRepository: GradeRepositoryPort,
-    private val seatRepository: SeatRepositoryPort,
+    private val eventRepository: EventQueryPort,
+    private val gradeRepository: GradeQueryPort,
+    private val seatRepository: SeatQueryPort,
 ) {
     fun findEvents(pageable: Pageable): PageResponse<EventSummaryResponse> =
         PageResponse.from(eventRepository.findAll(pageable).map { EventSummaryResponse.from(it) })
