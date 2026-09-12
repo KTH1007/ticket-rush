@@ -47,6 +47,31 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    fun `ConflictException 발생 시 409와 ProblemDetail을 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/conflict")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(409)
+        val body = objectMapper.readValue(result.response.contentAsString, ProblemDetail::class.java)
+        assertThat(body.title).isEqualTo("Conflict")
+        assertThat(body.detail).isEqualTo("샘플이 이미 존재합니다")
+        assertThat(body.properties?.get("code")).isEqualTo("SAMPLE_ALREADY_EXISTS")
+    }
+
+    @Test
+    fun `IllegalArgumentException 발생 시 400과 ProblemDetail을 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/illegal-argument")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(400)
+        val body = objectMapper.readValue(result.response.contentAsString, ProblemDetail::class.java)
+        assertThat(body.detail).isEqualTo("샘플 값이 유효하지 않습니다")
+        assertThat(body.properties?.get("code")).isEqualTo("INVALID_REQUEST")
+    }
+
+    @Test
     fun `Bean Validation 실패 시 400과 필드별 에러를 반환한다`() {
         // given
         val invalidRequest = objectMapper.writeValueAsString(SampleRequest(name = ""))

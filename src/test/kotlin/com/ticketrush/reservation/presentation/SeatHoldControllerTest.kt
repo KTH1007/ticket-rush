@@ -97,6 +97,18 @@ class SeatHoldControllerTest {
         mockMvc.perform(홀드_요청(seatIds = emptyList())).andExpect(status().isBadRequest)
     }
 
+    @Test
+    fun `좌석을 3개 이상 선택하면 400을 반환한다`() {
+        // when & then
+        mockMvc.perform(홀드_요청(seatIds = listOf(10L, 11L, 12L))).andExpect(status().isBadRequest)
+    }
+
+    @Test
+    fun `전화번호 형식이 올바르지 않으면 400을 반환한다`() {
+        // when & then
+        mockMvc.perform(홀드_요청(seatIds = listOf(10L), phoneNumber = "010-1234-5678")).andExpect(status().isBadRequest)
+    }
+
     private fun 홀드_요청(
         eventId: Long = 1L,
         seatIds: List<Long>,

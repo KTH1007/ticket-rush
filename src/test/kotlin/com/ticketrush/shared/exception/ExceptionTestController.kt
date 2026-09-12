@@ -18,6 +18,12 @@ class ExceptionTestController {
     @PostMapping("/business")
     fun business(): Nothing = throw SampleBusinessException()
 
+    @PostMapping("/conflict")
+    fun conflict(): Nothing = throw SampleConflictException()
+
+    @PostMapping("/illegal-argument")
+    fun illegalArgument(): Nothing = throw IllegalArgumentException("샘플 값이 유효하지 않습니다")
+
     @PostMapping("/unexpected")
     fun unexpected(): Nothing = error("boom")
 
@@ -30,6 +36,8 @@ class ExceptionTestController {
 class SampleNotFoundException : NotFoundException(code = "SAMPLE_NOT_FOUND", message = "샘플을 찾을 수 없습니다")
 
 class SampleBusinessException : BusinessException(code = "SAMPLE_CONFLICT", message = "샘플 충돌이 발생했습니다")
+
+class SampleConflictException : ConflictException(code = "SAMPLE_ALREADY_EXISTS", message = "샘플이 이미 존재합니다")
 
 data class SampleRequest(
     @field:NotBlank
