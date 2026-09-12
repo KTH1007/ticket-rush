@@ -31,6 +31,9 @@ class EventRepositoryTest : TransactionalIntegrationTest() {
     @Test
     fun `여러 Event를 페이지네이션으로 조회`() {
         // given
+        // 컨테이너를 테스트 클래스끼리 공유하므로(기동 시간 절약), 이 테이블이
+        // 비어있다고 가정하면 안 된다. 이 테스트가 만든 만큼 늘었는지(델타)로 검증한다.
+        val before = eventRepository.findAll(PageRequest.of(0, 1)).totalElements
         eventRepository.공연_하나_저장(title = "공연1")
         eventRepository.공연_하나_저장(title = "공연2")
         eventRepository.공연_하나_저장(title = "공연3")
@@ -40,7 +43,6 @@ class EventRepositoryTest : TransactionalIntegrationTest() {
 
         // then
         assertThat(page.content).hasSize(2)
-        assertThat(page.totalElements).isEqualTo(3)
-        assertThat(page.totalPages).isEqualTo(2)
+        assertThat(page.totalElements).isEqualTo(before + 3)
     }
 }

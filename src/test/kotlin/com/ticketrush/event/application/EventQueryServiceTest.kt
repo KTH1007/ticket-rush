@@ -3,7 +3,7 @@ package com.ticketrush.event.application
 import com.ticketrush.event.domain.EventNotFoundException
 import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.event.domain.GradeRepositoryPort
-import com.ticketrush.event.domain.SeatRepositoryPort
+import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.support.TransactionalIntegrationTest
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
@@ -31,14 +31,18 @@ class EventQueryServiceTest : TransactionalIntegrationTest() {
     @Test
     fun `공연 목록을 페이지네이션으로 조회한다`() {
         // given
+        // 컨테이너를 테스트 클래스끼리 공유하므로(기동 시간 절약), 이 테이블이
+        // 비어있다고 가정하면 안 된다. 방금 만든 게 늘어난 개수와 조회 결과에
+        // 둘 다 포함되는지로 검증한다.
+        val before = eventQueryService.findEvents(PageRequest.of(0, 1)).totalElements
         eventRepository.공연_하나_저장(title = "아이유 콘서트")
 
         // when
-        val result = eventQueryService.findEvents(PageRequest.of(0, 10))
+        val result = eventQueryService.findEvents(PageRequest.of(0, (before + 1).toInt()))
 
         // then
-        assertThat(result.content).extracting("title").containsExactly("아이유 콘서트")
-        assertThat(result.totalElements).isEqualTo(1)
+        assertThat(result.totalElements).isEqualTo(before + 1)
+        assertThat(result.content).extracting("title").contains("아이유 콘서트")
     }
 
     @Test

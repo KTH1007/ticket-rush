@@ -33,4 +33,12 @@ class Grade(
     @Column(nullable = false)
     var price: Int = price
         protected set
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is Grade) return false
+        return id != 0L && id == other.id
+    }
+
+    override fun hashCode(): Int = javaClass.hashCode()
 }
