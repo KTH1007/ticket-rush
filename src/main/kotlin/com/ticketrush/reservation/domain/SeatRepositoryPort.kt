@@ -16,4 +16,7 @@ interface SeatRepositoryPort : SeatQueryPort {
         slotNo: Short,
         holdExpiresAt: LocalDateTime,
     ): Boolean
+
+    // 만료된 홀드를 일괄 해제 (스케줄러 전용)
+    fun releaseExpiredHolds(now: LocalDateTime): Int
 }
