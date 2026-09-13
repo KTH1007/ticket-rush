@@ -1,5 +1,6 @@
 package com.ticketrush.reservation.presentation
 
+import com.ticketrush.queue.application.QueueQueryService
 import com.ticketrush.reservation.application.ReservationCommandService
 import com.ticketrush.reservation.domain.SeatSelection
 import com.ticketrush.shared.PhoneHasher
@@ -9,6 +10,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
@@ -17,12 +19,15 @@ import org.springframework.web.bind.annotation.RestController
 class SeatHoldController(
     private val reservationCommandService: ReservationCommandService,
     private val phoneHasher: PhoneHasher,
+    private val queueQueryService: QueueQueryService,
 ) {
     @PostMapping("/hold")
     fun hold(
         @PathVariable eventId: Long,
+        @RequestHeader("X-Queue-Token", required = false) queueToken: String?,
         @Valid @RequestBody request: SeatHoldRequest,
     ): ResponseEntity<SeatHoldResponse> {
+        queueQueryService.requireActive(eventId, queueToken)
         val phoneHash = phoneHasher.hash(request.phoneNumber)
         val reservation =
             reservationCommandService.holdSeats(
