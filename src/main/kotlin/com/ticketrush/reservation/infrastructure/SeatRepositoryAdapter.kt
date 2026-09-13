@@ -35,4 +35,7 @@ class SeatRepositoryAdapter(
     ): Boolean = jpaRepository.holdIfAvailable(seatId, eventId, reservationId, phoneHash, slotNo, holdExpiresAt) > 0
 
     override fun findAllByIds(seatIds: List<Long>): List<Seat> = jpaRepository.findAllById(seatIds)
+
+    @Transactional
+    override fun releaseExpiredHolds(now: LocalDateTime): Int = jpaRepository.releaseExpiredHolds(now)
 }

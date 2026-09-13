@@ -114,6 +114,39 @@ class ReservationRepositoryTest : IntegrationTest() {
             .hasMessageContaining("ck_reservation_status")
     }
 
+    @Test
+    fun `홀드 만료 시각이 지난 HOLDING 예약은 EXPIRED로 전이된다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.save(예약(eventId = event.id, holdExpiresAt = EXPIRED_HOLD_EXPIRES_AT))
+
+        // when
+        val expired = reservationRepository.expireHoldingReservations(now = SWEEP_NOW)
+
+        // then
+        assertThat(expired).isEqualTo(1)
+        assertThat(상태_조회(reservation.id)).isEqualTo(ReservationStatus.EXPIRED)
+    }
+
+    @Test
+    fun `홀드 만료 시각이 아직 안 지난 HOLDING 예약은 그대로 유지된다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.save(예약(eventId = event.id))
+
+        // when
+        val expired = reservationRepository.expireHoldingReservations(now = SWEEP_NOW)
+
+        // then
+        assertThat(expired).isEqualTo(0)
+        assertThat(상태_조회(reservation.id)).isEqualTo(ReservationStatus.HOLDING)
+    }
+
+    private fun 상태_조회(id: Long): ReservationStatus =
+        ReservationStatus.valueOf(
+            jdbcTemplate.queryForObject("SELECT status FROM reservation WHERE id = ?", String::class.java, id)!!,
+        )
+
     private fun 예약(
         eventId: Long,
         phoneHash: PhoneHash = PhoneHash(ByteArray(32) { 1 }),
@@ -141,5 +174,7 @@ class ReservationRepositoryTest : IntegrationTest() {
 
     companion object {
         private val FIXED_HOLD_EXPIRES_AT: LocalDateTime = LocalDateTime.of(2030, 1, 1, 0, 0)
+        private val EXPIRED_HOLD_EXPIRES_AT: LocalDateTime = LocalDateTime.of(2020, 1, 1, 0, 0)
+        private val SWEEP_NOW: LocalDateTime = LocalDateTime.of(2025, 1, 1, 0, 0)
     }
 }
