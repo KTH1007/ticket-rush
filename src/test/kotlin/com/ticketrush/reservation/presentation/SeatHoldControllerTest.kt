@@ -118,9 +118,12 @@ class SeatHoldControllerTest {
     }
 
     @Test
-    fun `대기열 토큰이 없으면 400을 반환한다`() {
+    fun `대기열 토큰이 없으면 401을 반환한다`() {
+        // given
+        every { queueQueryService.requireActive(1L, null) } throws InvalidQueueTokenException()
+
         // when & then
-        mockMvc.perform(홀드_요청(seatIds = listOf(10L), queueToken = null)).andExpect(status().isBadRequest)
+        mockMvc.perform(홀드_요청(seatIds = listOf(10L), queueToken = null)).andExpect(status().isUnauthorized)
     }
 
     @Test

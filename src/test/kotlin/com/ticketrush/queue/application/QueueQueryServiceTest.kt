@@ -111,4 +111,14 @@ class QueueQueryServiceTest : IntegrationTest() {
         // when & then
         queueQueryService.requireActive(eventId, token)
     }
+
+    @Test
+    fun `토큰이 null이면 requireActive를 호출했을 때 InvalidQueueTokenException이 발생한다`() {
+        // given
+        val eventId = System.nanoTime()
+
+        // when & then
+        assertThatThrownBy { queueQueryService.requireActive(eventId, null) }
+            .isInstanceOf(InvalidQueueTokenException::class.java)
+    }
 }

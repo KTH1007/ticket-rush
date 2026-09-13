@@ -24,7 +24,7 @@ class SeatHoldController(
     @PostMapping("/hold")
     fun hold(
         @PathVariable eventId: Long,
-        @RequestHeader("X-Queue-Token") queueToken: String,
+        @RequestHeader("X-Queue-Token", required = false) queueToken: String?,
         @Valid @RequestBody request: SeatHoldRequest,
     ): ResponseEntity<SeatHoldResponse> {
         queueQueryService.requireActive(eventId, queueToken)

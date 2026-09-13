@@ -31,9 +31,9 @@ class QueueQueryService(
 
     fun requireActive(
         eventId: Long,
-        token: String,
+        token: String?,
     ) {
-        val status = queueRepository.findStatus(eventId, token) ?: throw InvalidQueueTokenException()
+        val status = token?.let { queueRepository.findStatus(eventId, it) } ?: throw InvalidQueueTokenException()
         if (!status.active) throw QueueNotActiveException()
     }
 
