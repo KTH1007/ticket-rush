@@ -431,30 +431,6 @@ class SeatRepositoryTest : IntegrationTest() {
             Seat(eventId = event.id, gradeId = grade.id, section = "A", rowLabel = "1", seatNo = seatNo, ordinal = seatNo.toInt()),
         )
 
-    private fun 이미_홀드된_좌석_저장(
-        event: Event,
-        grade: Grade,
-        seatNo: Short,
-        slotNo: Short,
-        phoneHash: PhoneHash,
-        status: SeatStatus = SeatStatus.HELD,
-    ): Seat =
-        seatRepository.save(
-            Seat(
-                eventId = event.id,
-                gradeId = grade.id,
-                section = "A",
-                rowLabel = "1",
-                seatNo = seatNo,
-                ordinal = seatNo.toInt(),
-                status = status,
-                reservationId = reservationRepository.예약_하나_저장(event).id,
-                phoneHash = phoneHash,
-                slotNo = slotNo,
-                holdExpiresAt = FIXED_HOLD_EXPIRES_AT,
-            ),
-        )
-
     private fun 좌석_대량_저장(
         eventId: Long,
         gradeId: Long,
