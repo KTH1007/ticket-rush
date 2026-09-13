@@ -137,4 +137,17 @@ class GlobalExceptionHandlerTest {
         val body = objectMapper.readValue(result.response.contentAsString, ProblemDetail::class.java)
         assertThat(body.properties?.get("traceId") as String?).isNotBlank()
     }
+
+    @Test
+    fun `ForbiddenException 발생 시 403과 ProblemDetail을 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/forbidden")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(403)
+        val body = objectMapper.readValue(result.response.contentAsString, ProblemDetail::class.java)
+        assertThat(body.title).isEqualTo("Forbidden")
+        assertThat(body.detail).isEqualTo("샘플 접근이 지금은 허용되지 않습니다")
+        assertThat(body.properties?.get("code")).isEqualTo("SAMPLE_FORBIDDEN")
+    }
 }

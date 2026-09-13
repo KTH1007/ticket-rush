@@ -1,6 +1,7 @@
 package com.ticketrush.queue.application
 
 import com.ticketrush.queue.domain.InvalidQueueTokenException
+import com.ticketrush.queue.domain.QueueNotActiveException
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
@@ -75,5 +76,39 @@ class QueueQueryServiceTest : IntegrationTest() {
         // then
         assertThat(status.rank).isEqualTo(101)
         assertThat(status.nextPollIntervalMs).isEqualTo(Duration.ofSeconds(15).toMillis())
+    }
+
+    @Test
+    fun `존재하지 않는 토큰으로 requireActive를 호출하면 InvalidQueueTokenException이 발생한다`() {
+        // given
+        val eventId = System.nanoTime()
+
+        // when & then
+        assertThatThrownBy { queueQueryService.requireActive(eventId, UUID.randomUUID().toString()) }
+            .isInstanceOf(InvalidQueueTokenException::class.java)
+    }
+
+    @Test
+    fun `등록됐지만 아직 승격되지 않은 토큰으로 requireActive를 호출하면 QueueNotActiveException이 발생한다`() {
+        // given
+        val eventId = System.nanoTime()
+        val token = UUID.randomUUID().toString()
+        queueRepository.register(eventId, token)
+
+        // when & then
+        assertThatThrownBy { queueQueryService.requireActive(eventId, token) }
+            .isInstanceOf(QueueNotActiveException::class.java)
+    }
+
+    @Test
+    fun `승격된 토큰으로 requireActive를 호출하면 예외 없이 통과한다`() {
+        // given
+        val eventId = System.nanoTime()
+        val token = UUID.randomUUID().toString()
+        queueRepository.register(eventId, token)
+        queueRepository.promote(eventId, 1)
+
+        // when & then
+        queueQueryService.requireActive(eventId, token)
     }
 }
