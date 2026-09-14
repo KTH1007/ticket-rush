@@ -12,7 +12,7 @@ testcontainersRedis = "2.2.4"
 detekt = "2.0.0-alpha.6"
 ktlint = "14.2.0"
 logstashEncoder = "9.0"
-springdocOpenapi = "3.1.0"
+springdocOpenapi = "3.1.1"
 asciidoctor = "4.0.5"
 restdocsApiSpec = "0.20.1"
 
