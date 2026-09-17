@@ -76,6 +76,25 @@ class Reservation(
     var version: Long = version
         protected set
 
+    // 결제 확정 상태 전이. 서비스 계층이 HOLDING인지 이미 확인하고 호출해야 한다.
+    fun confirmPayment() {
+        check(status == ReservationStatus.HOLDING) { "HOLDING 상태에서만 결제를 확정할 수 있습니다: $status" }
+        status = ReservationStatus.PAID
+    }
+
+    // 예매번호 배정
+    // confirmPayment()는 한 번만 호출되고, 이건 저장이 성공할 때까지 여러 번 호출될 수 있다.
+    fun assignReservationNo(reservationNo: String) {
+        check(status == ReservationStatus.PAID) { "PAID 상태에서만 예매번호를 배정할 수 있습니다: $status" }
+        this.reservationNo = reservationNo
+    }
+
+    // 결제 실패 시 홀드 재시도 창을 좁힘
+    fun shortenHoldOnPaymentFailure(newExpiresAt: LocalDateTime) {
+        check(status == ReservationStatus.HOLDING) { "HOLDING 상태에서만 홀드 시간을 줄일 수 있습니다: $status" }
+        holdExpiresAt = newExpiresAt
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is Reservation) return false

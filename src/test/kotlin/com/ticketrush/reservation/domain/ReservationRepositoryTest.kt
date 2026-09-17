@@ -142,6 +142,28 @@ class ReservationRepositoryTest : IntegrationTest() {
         assertThat(상태_조회(reservation.id)).isEqualTo(ReservationStatus.HOLDING)
     }
 
+    @Test
+    fun `id로 예약을 조회한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val saved = reservationRepository.save(예약(eventId = event.id))
+
+        // when
+        val found = reservationRepository.findById(saved.id)
+
+        // then
+        assertThat(found).isEqualTo(saved)
+    }
+
+    @Test
+    fun `존재하지 않는 id로 조회하면 null을 반환한다`() {
+        // when
+        val found = reservationRepository.findById(999_999L)
+
+        // then
+        assertThat(found).isNull()
+    }
+
     private fun 상태_조회(id: Long): ReservationStatus =
         ReservationStatus.valueOf(
             jdbcTemplate.queryForObject("SELECT status FROM reservation WHERE id = ?", String::class.java, id)!!,

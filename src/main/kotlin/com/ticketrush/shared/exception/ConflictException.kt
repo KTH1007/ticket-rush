@@ -6,4 +6,5 @@ package com.ticketrush.shared.exception
 abstract class ConflictException(
     code: String,
     message: String,
-) : BusinessException(code, message)
+    cause: Throwable? = null,
+) : BusinessException(code, message, cause)

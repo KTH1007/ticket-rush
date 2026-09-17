@@ -12,6 +12,10 @@ class ReservationRepositoryAdapter(
 ) : ReservationRepositoryPort {
     override fun save(reservation: Reservation): Reservation = jpaRepository.saveAndFlush(reservation)
 
+    override fun findById(id: Long): Reservation? = jpaRepository.findById(id).orElse(null)
+
+    override fun existsByReservationNo(reservationNo: String): Boolean = jpaRepository.existsByReservationNo(reservationNo)
+
     @Transactional
     override fun expireHoldingReservations(now: LocalDateTime): Int = jpaRepository.expireHoldingReservations(now)
 }
