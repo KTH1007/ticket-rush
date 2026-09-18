@@ -23,4 +23,17 @@ class ReservationNoGeneratorTest {
         // then
         assertThat(generated.toSet()).hasSize(1000)
     }
+
+    @Test
+    fun `헷갈리는 문자 0, 1, O, I를 포함하지 않는다`() {
+        // when
+        val generated = (1..1000).map { generator.generate() }.joinToString("")
+
+        // then
+        CONFUSABLE_CHARS.forEach { assertThat(generated).doesNotContain(it.toString()) }
+    }
+
+    companion object {
+        private val CONFUSABLE_CHARS = listOf('0', '1', 'O', 'I')
+    }
 }
