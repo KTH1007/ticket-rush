@@ -76,4 +76,16 @@ interface SeatJpaRepository : JpaRepository<Seat, Long> {
         @Param("reservationId") reservationId: Long,
         @Param("newExpiresAt") newExpiresAt: LocalDateTime,
     ): Int
+
+    @Modifying(clearAutomatically = true)
+    @Query(
+        """
+        UPDATE Seat s SET s.status = com.ticketrush.reservation.domain.SeatStatus.AVAILABLE,
+            s.reservationId = NULL, s.phoneHash = NULL, s.slotNo = NULL, s.holdExpiresAt = NULL, s.version = s.version + 1
+        WHERE s.reservationId = :reservationId AND s.status = com.ticketrush.reservation.domain.SeatStatus.SOLD
+        """,
+    )
+    fun returnToAvailable(
+        @Param("reservationId") reservationId: Long,
+    ): Int
 }

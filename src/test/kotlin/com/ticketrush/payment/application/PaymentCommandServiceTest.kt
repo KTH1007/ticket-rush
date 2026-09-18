@@ -4,6 +4,7 @@ import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentHistoryRepositoryPort
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.GradeRepositoryPort
@@ -51,6 +52,9 @@ class PaymentCommandServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var paymentRepository: PaymentRepositoryPort
+
+    @Autowired
+    lateinit var paymentHistoryRepository: PaymentHistoryRepositoryPort
 
     @Autowired
     lateinit var paymentGateway: PaymentGatewayPort
@@ -248,6 +252,58 @@ class PaymentCommandServiceTest : IntegrationTest() {
         // then
         assertThat(result.reservationNo).isEqualTo("UNIQUE000001")
         verify(exactly = 1) { paymentGateway.charge(reservation.id, any(), any()) }
+    }
+
+    @Test
+    fun `결제 성공 시 payment_history에 PENDING에서 SUCCESS로의 전이가 기록된다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        every { reservationNoGenerator.generate() } returns "RESNO000010"
+        every { paymentGateway.charge(any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-10")
+
+        // when
+        val result = paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+
+        // then
+        val history = paymentHistoryRepository.findAllByPaymentId(result.payment.id)
+        assertThat(history).hasSize(1)
+        assertThat(history.single().fromStatus).isEqualTo(PaymentStatus.PENDING)
+        assertThat(history.single().toStatus).isEqualTo(PaymentStatus.SUCCESS)
+    }
+
+    @Test
+    fun `결제 거절 시 payment_history에 PENDING에서 FAILED로의 전이가 기록되고 사유가 남는다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        every { paymentGateway.charge(any(), any(), any()) } returns PaymentGatewayResult.Declined("한도 초과")
+
+        // when
+        runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+
+        // then
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        val history = paymentHistoryRepository.findAllByPaymentId(payment.id)
+        assertThat(history).hasSize(1)
+        assertThat(history.single().toStatus).isEqualTo(PaymentStatus.FAILED)
+        assertThat(history.single().reason).isEqualTo("한도 초과")
+    }
+
+    @Test
+    fun `재시도로 성공하면 payment_history에 FAILED에서 SUCCESS로의 전이가 추가로 기록된다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        every { paymentGateway.charge(any(), any(), any()) } returns PaymentGatewayResult.Declined("한도 초과")
+        runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+
+        // when
+        every { reservationNoGenerator.generate() } returns "RESNO000011"
+        every { paymentGateway.charge(any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-11")
+        val result = paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+
+        // then
+        val history = paymentHistoryRepository.findAllByPaymentId(result.payment.id)
+        assertThat(history).hasSize(2)
+        assertThat(history).extracting("toStatus").containsExactlyInAnyOrder(PaymentStatus.FAILED, PaymentStatus.SUCCESS)
     }
 
     private fun 홀드된_예약_준비(

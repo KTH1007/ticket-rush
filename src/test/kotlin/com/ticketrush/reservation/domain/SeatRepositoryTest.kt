@@ -546,6 +546,44 @@ class SeatRepositoryTest : IntegrationTest() {
         assertThat(updated).isEqualTo(0)
     }
 
+    @Test
+    fun `예약에 속한 SOLD 좌석을 AVAILABLE로 되돌리고 배정 필드를 비운다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val reservation = reservationRepository.예약_하나_저장(event)
+        val seat = 예약에_묶인_좌석_저장(event, grade, reservation.id, phoneHash, seatNo = 1, slotNo = 1)
+        seatRepository.markSold(reservation.id)
+
+        // when
+        val updated = seatRepository.returnToAvailable(reservation.id)
+
+        // then
+        assertThat(updated).isEqualTo(1)
+        val found = seatRepository.findAllByEventId(event.id).single { it.id == seat.id }
+        assertThat(found.status).isEqualTo(SeatStatus.AVAILABLE)
+        assertThat(found.reservationId).isNull()
+        assertThat(found.phoneHash).isNull()
+        assertThat(found.slotNo).isNull()
+    }
+
+    @Test
+    fun `HELD 좌석은 returnToAvailable 대상에서 제외된다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val reservation = reservationRepository.예약_하나_저장(event)
+        예약에_묶인_좌석_저장(event, grade, reservation.id, phoneHash, seatNo = 1, slotNo = 1)
+
+        // when
+        val updated = seatRepository.returnToAvailable(reservation.id)
+
+        // then
+        assertThat(updated).isEqualTo(0)
+    }
+
     private fun 예약에_묶인_좌석_저장(
         event: Event,
         grade: Grade,

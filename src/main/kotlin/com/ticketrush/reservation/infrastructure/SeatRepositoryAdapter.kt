@@ -49,4 +49,7 @@ class SeatRepositoryAdapter(
         reservationId: Long,
         newExpiresAt: LocalDateTime,
     ): Int = jpaRepository.shortenHoldExpiry(reservationId, newExpiresAt)
+
+    @Transactional
+    override fun returnToAvailable(reservationId: Long): Int = jpaRepository.returnToAvailable(reservationId)
 }

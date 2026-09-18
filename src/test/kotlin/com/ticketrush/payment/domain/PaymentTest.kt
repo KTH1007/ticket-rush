@@ -97,6 +97,54 @@ class PaymentTest {
         assertThat(payment.status).isEqualTo(PaymentStatus.SUCCESS)
     }
 
+    @Test
+    fun `SUCCESS 상태에서 취소 처리하면 CANCELED로 바뀐다`() {
+        // given
+        val payment = 결제(id = 1L)
+        payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0))
+
+        // when
+        payment.markCanceled()
+
+        // then
+        assertThat(payment.status).isEqualTo(PaymentStatus.CANCELED)
+    }
+
+    @Test
+    fun `SUCCESS가 아닌 결제를 취소 처리하려 하면 예외가 발생한다`() {
+        // given
+        val payment = 결제(id = 1L)
+
+        // when & then
+        assertThatThrownBy { payment.markCanceled() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `CANCELED 상태에서 환불 완료 처리하면 REFUNDED로 바뀐다`() {
+        // given
+        val payment = 결제(id = 1L)
+        payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0))
+        payment.markCanceled()
+
+        // when
+        payment.markRefunded()
+
+        // then
+        assertThat(payment.status).isEqualTo(PaymentStatus.REFUNDED)
+    }
+
+    @Test
+    fun `CANCELED가 아닌 결제를 환불 완료 처리하려 하면 예외가 발생한다`() {
+        // given
+        val payment = 결제(id = 1L)
+        payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0))
+
+        // when & then
+        assertThatThrownBy { payment.markRefunded() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
     private fun 결제(id: Long): Payment =
         Payment(
             id = id,
