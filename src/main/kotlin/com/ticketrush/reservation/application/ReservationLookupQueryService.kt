@@ -26,15 +26,14 @@ class ReservationLookupQueryService(
         reservationNo: String,
         phone: String,
     ): ReservationLookupResult {
-        if (rateLimiter.isBlocked(reservationNo)) throw ReservationLookupRateLimitedException()
+        if (!rateLimiter.tryReserveAttempt(reservationNo)) throw ReservationLookupRateLimitedException()
 
         val reservation = reservationRepository.findByReservationNo(reservationNo)
         if (reservation == null || reservation.phoneHash != phoneHasher.hash(phone)) {
-            rateLimiter.recordFailure(reservationNo)
             throw ReservationLookupFailedException()
         }
 
-        rateLimiter.reset(reservationNo)
+        rateLimiter.releaseAttempt(reservationNo)
         return ReservationLookupResult(reservation, seatsOf(reservation))
     }
 

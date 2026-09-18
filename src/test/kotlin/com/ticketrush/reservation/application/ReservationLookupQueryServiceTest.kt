@@ -92,7 +92,7 @@ class ReservationLookupQueryServiceTest : IntegrationTest() {
     fun `이미 차단된 reservationNo는 존재 여부와 무관하게 즉시 차단된다`() {
         // given
         val reservation = 예매완료_예약_준비(reservationNo = "ALREADY0001", phone = "01011112222")
-        repeat(5) { rateLimiter.recordFailure("ALREADY0001") }
+        repeat(5) { rateLimiter.tryReserveAttempt("ALREADY0001") }
 
         // when & then: 정확한 phone을 넣어도 차단이 우선
         assertThatThrownBy { queryService.lookup(reservation.reservationNo!!, "01011112222") }
@@ -100,17 +100,18 @@ class ReservationLookupQueryServiceTest : IntegrationTest() {
     }
 
     @Test
-    fun `성공하면 실패 카운터가 리셋되어 이후 실패 횟수가 다시 처음부터 쌓인다`() {
+    fun `성공하면 내가 예약한 슬롯만 돌려주고 다른 실패 기록은 그대로 남는다`() {
         // given
         val reservation = 예매완료_예약_준비(reservationNo = "RESETME0001", phone = "01011112222")
-        repeat(3) { rateLimiter.recordFailure("RESETME0001") }
-        queryService.lookup("RESETME0001", "01011112222")
+        repeat(3) { rateLimiter.tryReserveAttempt("RESETME0001") }
 
-        // when: 리셋 안 됐다면 3+4=7로 이미 차단됐을 상황
-        repeat(4) { runCatching { queryService.lookup("RESETME0001", "01099999999") } }
+        // when: 조회 자체도 슬롯을 하나 예약했다가(4번째) 성공하면 그 슬롯만 돌려줌 -> 다시 3
+        queryService.lookup(reservation.reservationNo!!, "01011112222")
 
-        // then
-        assertThat(rateLimiter.isBlocked(reservation.reservationNo!!)).isFalse()
+        // then: 무조건 리셋이었다면 5번 다 열렸겠지만, 내 몫만 돌아왔으니 딱 2번만 더 예약 가능(5 - 3)
+        assertThat(rateLimiter.tryReserveAttempt("RESETME0001")).isTrue()
+        assertThat(rateLimiter.tryReserveAttempt("RESETME0001")).isTrue()
+        assertThat(rateLimiter.tryReserveAttempt("RESETME0001")).isFalse()
     }
 
     private fun 예매완료_예약_준비(
