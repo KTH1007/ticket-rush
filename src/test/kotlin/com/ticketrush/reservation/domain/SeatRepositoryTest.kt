@@ -341,6 +341,35 @@ class SeatRepositoryTest : IntegrationTest() {
     }
 
     @Test
+    fun `예약 id로 좌석 목록을 조회한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val reservation = reservationRepository.예약_하나_저장(event)
+        val seat = 예약에_묶인_좌석_저장(event, grade, reservation.id, phoneHash, seatNo = 1, slotNo = 1)
+
+        // when
+        val found = seatRepository.findAllByReservationId(reservation.id)
+
+        // then
+        assertThat(found).extracting("id").containsExactly(seat.id)
+    }
+
+    @Test
+    fun `그 예약에 속한 좌석이 없으면 빈 리스트를 반환한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event)
+
+        // when
+        val found = seatRepository.findAllByReservationId(reservation.id)
+
+        // then
+        assertThat(found).isEmpty()
+    }
+
+    @Test
     fun `ux_seat_slot 위반 시(같은 전화번호가 같은 slot을 중복 사용) 예외 발생`() {
         // given
         val event = eventRepository.공연_하나_저장()

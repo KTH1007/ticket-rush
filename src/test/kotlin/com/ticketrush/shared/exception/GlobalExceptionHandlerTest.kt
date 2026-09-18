@@ -150,4 +150,17 @@ class GlobalExceptionHandlerTest {
         assertThat(body.detail).isEqualTo("샘플 접근이 지금은 허용되지 않습니다")
         assertThat(body.properties?.get("code")).isEqualTo("SAMPLE_FORBIDDEN")
     }
+
+    @Test
+    fun `TooManyRequestsException 발생 시 429와 ProblemDetail을 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/too-many-requests")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(429)
+        val body = objectMapper.readValue(result.response.contentAsString, ProblemDetail::class.java)
+        assertThat(body.title).isEqualTo("Too Many Requests")
+        assertThat(body.detail).isEqualTo("샘플 요청이 너무 많습니다")
+        assertThat(body.properties?.get("code")).isEqualTo("SAMPLE_TOO_MANY_REQUESTS")
+    }
 }

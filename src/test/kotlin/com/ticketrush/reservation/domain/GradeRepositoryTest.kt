@@ -68,4 +68,31 @@ class GradeRepositoryTest : TransactionalIntegrationTest() {
         // then
         assertThat(grades).isEmpty()
     }
+
+    @Test
+    fun `id 목록으로 등급을 조회한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val vip = gradeRepository.등급_하나_저장(event, name = "VIP", price = 200_000)
+        val r = gradeRepository.등급_하나_저장(event, name = "R", price = 150_000)
+
+        // when
+        val found = gradeRepository.findAllByIds(listOf(vip.id, r.id))
+
+        // then
+        assertThat(found).extracting("name").containsExactlyInAnyOrder("VIP", "R")
+    }
+
+    @Test
+    fun `존재하지 않는 id는 결과에서 빠진다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val vip = gradeRepository.등급_하나_저장(event)
+
+        // when
+        val found = gradeRepository.findAllByIds(listOf(vip.id, 999_999L))
+
+        // then
+        assertThat(found).extracting("id").containsExactly(vip.id)
+    }
 }

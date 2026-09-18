@@ -34,9 +34,14 @@ class ExceptionTestController {
 
     @PostMapping("/forbidden")
     fun forbidden(): Nothing = throw SampleForbiddenException()
+
+    @PostMapping("/too-many-requests")
+    fun tooManyRequests(): Nothing = throw SampleTooManyRequestsException()
 }
 
 class SampleForbiddenException : ForbiddenException(code = "SAMPLE_FORBIDDEN", message = "샘플 접근이 지금은 허용되지 않습니다")
+
+class SampleTooManyRequestsException : TooManyRequestsException(code = "SAMPLE_TOO_MANY_REQUESTS", message = "샘플 요청이 너무 많습니다")
 
 class SampleNotFoundException : NotFoundException(code = "SAMPLE_NOT_FOUND", message = "샘플을 찾을 수 없습니다")
 
