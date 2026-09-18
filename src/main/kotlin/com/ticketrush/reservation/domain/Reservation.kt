@@ -92,8 +92,13 @@ class Reservation(
     // 결제 실패 시 홀드 재시도 창을 좁힘
     fun shortenHoldOnPaymentFailure(newExpiresAt: LocalDateTime) {
         check(status == ReservationStatus.HOLDING) { "HOLDING 상태에서만 홀드 시간을 줄일 수 있습니다: $status" }
-        holdExpiresAt = newExpiresAt
+        val current = requireNotNull(holdExpiresAt) { "HOLDING 상태인데 holdExpiresAt이 없습니다: $id" }
+        if (newExpiresAt < current) {
+            holdExpiresAt = newExpiresAt
+        }
     }
+
+    fun isHoldActiveAt(now: LocalDateTime): Boolean = status == ReservationStatus.HOLDING && holdExpiresAt?.isAfter(now) == true
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

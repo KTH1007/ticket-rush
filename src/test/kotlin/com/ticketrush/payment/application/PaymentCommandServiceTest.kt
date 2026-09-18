@@ -146,6 +146,16 @@ class PaymentCommandServiceTest : IntegrationTest() {
     }
 
     @Test
+    fun `홀드 시각은 지났지만 status가 아직 HOLDING인 예약은 결제를 거부한다`() {
+        // given: 스위퍼가 아직 못 훑은 상황을 흉내냄 - status는 HOLDING인데 holdExpiresAt은 과거
+        val reservation = 홀드된_예약_준비(holdExpiresAt = LocalDateTime.of(2020, 1, 1, 0, 0))
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+            .isInstanceOf(ReservationNotHoldingException::class.java)
+    }
+
+    @Test
     fun `이미 결제된 예약에 다시 요청하면 PG를 재호출하지 않고 기존 결과를 반환한다`() {
         // given
         val reservation = 홀드된_예약_준비()

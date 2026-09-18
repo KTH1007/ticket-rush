@@ -102,16 +102,19 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
         val executor = Executors.newFixedThreadPool(threadCount)
         val results = Collections.synchronizedList(mutableListOf<Result<PaymentConfirmationResult>>())
 
-        repeat(threadCount) {
-            executor.submit {
-                startGate.await()
-                results.add(runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) })
-                doneLatch.countDown()
+        try {
+            repeat(threadCount) {
+                executor.submit {
+                    startGate.await()
+                    results.add(runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) })
+                    doneLatch.countDown()
+                }
             }
+            startGate.countDown()
+            check(doneLatch.await(10, TimeUnit.SECONDS)) { "결제 확정 스레드가 10초 안에 끝나지 않았다" }
+        } finally {
+            executor.shutdownNow()
         }
-        startGate.countDown()
-        doneLatch.await(10, TimeUnit.SECONDS)
-        executor.shutdown()
         return results
     }
 

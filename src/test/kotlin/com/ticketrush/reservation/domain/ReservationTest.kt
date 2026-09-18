@@ -109,6 +109,19 @@ class ReservationTest {
     }
 
     @Test
+    fun `새 만료 시각이 기존보다 늦으면 연장하지 않는다`() {
+        // given
+        val original = LocalDateTime.of(2026, 1, 1, 0, 0)
+        val reservation = 예약(id = 1L, holdExpiresAt = original)
+
+        // when
+        reservation.shortenHoldOnPaymentFailure(original.plusMinutes(1))
+
+        // then
+        assertThat(reservation.holdExpiresAt).isEqualTo(original)
+    }
+
+    @Test
     fun `HOLDING이 아닌 상태에서 홀드 만료 시각을 단축하려 하면 예외가 발생한다`() {
         // given
         val reservation = 예약(id = 1L)
@@ -119,7 +132,38 @@ class ReservationTest {
             .isInstanceOf(IllegalStateException::class.java)
     }
 
-    private fun 예약(id: Long): Reservation =
+    @Test
+    fun `HOLDING 상태이고 만료 시각 전이면 홀드가 유효하다`() {
+        // given
+        val reservation = 예약(id = 1L, holdExpiresAt = LocalDateTime.of(2026, 1, 1, 0, 10))
+
+        // when & then
+        assertThat(reservation.isHoldActiveAt(LocalDateTime.of(2026, 1, 1, 0, 0))).isTrue()
+    }
+
+    @Test
+    fun `HOLDING 상태여도 만료 시각이 지났으면 홀드가 유효하지 않다`() {
+        // given
+        val reservation = 예약(id = 1L, holdExpiresAt = LocalDateTime.of(2026, 1, 1, 0, 0))
+
+        // when & then
+        assertThat(reservation.isHoldActiveAt(LocalDateTime.of(2026, 1, 1, 0, 10))).isFalse()
+    }
+
+    @Test
+    fun `HOLDING이 아니면 만료 시각과 무관하게 홀드가 유효하지 않다`() {
+        // given
+        val reservation = 예약(id = 1L, holdExpiresAt = LocalDateTime.of(2030, 1, 1, 0, 0))
+        reservation.confirmPayment()
+
+        // when & then
+        assertThat(reservation.isHoldActiveAt(LocalDateTime.of(2026, 1, 1, 0, 0))).isFalse()
+    }
+
+    private fun 예약(
+        id: Long,
+        holdExpiresAt: LocalDateTime = LocalDateTime.of(2030, 1, 1, 0, 0),
+    ): Reservation =
         Reservation(
             id = id,
             eventId = 1L,
@@ -128,6 +172,6 @@ class ReservationTest {
             amount = 100_000,
             holdToken = UUID.randomUUID(),
             idempotencyKey = UUID.randomUUID(),
-            holdExpiresAt = LocalDateTime.of(2030, 1, 1, 0, 0),
+            holdExpiresAt = holdExpiresAt,
         )
 }

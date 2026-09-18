@@ -67,6 +67,7 @@ interface SeatJpaRepository : JpaRepository<Seat, Long> {
         """
         UPDATE Seat s SET s.holdExpiresAt = :newExpiresAt, s.version = s.version + 1
         WHERE s.reservationId = :reservationId AND s.status = com.ticketrush.reservation.domain.SeatStatus.HELD
+            AND :newExpiresAt < s.holdExpiresAt
         """,
     )
     fun shortenHoldExpiry(

@@ -48,9 +48,14 @@ class PaymentCommandService(
         val existingPayment = paymentRepository.findByReservationId(reservationId)
         successResultOrNull(reservation, existingPayment)?.let { return it }
 
-        if (reservation.status != ReservationStatus.HOLDING) throw ReservationNotHoldingException(reservation.status)
+        requireHolding(reservation)
 
         return chargeAndApply(reservation, existingPayment)
+    }
+
+    private fun requireHolding(reservation: Reservation) {
+        if (reservation.status != ReservationStatus.HOLDING) throw ReservationNotHoldingException(reservation.status)
+        if (!reservation.isHoldActiveAt(LocalDateTime.now(clock))) throw ReservationNotHoldingException(ReservationStatus.EXPIRED)
     }
 
     private fun loadOwnedReservation(

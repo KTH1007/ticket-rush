@@ -483,6 +483,24 @@ class SeatRepositoryTest : IntegrationTest() {
     }
 
     @Test
+    fun `새 만료 시각이 기존보다 늦으면 갱신하지 않는다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val reservation = reservationRepository.예약_하나_저장(event)
+        val seat = 예약에_묶인_좌석_저장(event, grade, reservation.id, phoneHash, seatNo = 1, slotNo = 1)
+
+        // when
+        val updated = seatRepository.shortenHoldExpiry(reservation.id, FIXED_HOLD_EXPIRES_AT.plusMinutes(1))
+
+        // then
+        assertThat(updated).isEqualTo(0)
+        val found = seatRepository.findAllByEventId(event.id).single { it.id == seat.id }
+        assertThat(found.holdExpiresAt).isEqualTo(FIXED_HOLD_EXPIRES_AT)
+    }
+
+    @Test
     fun `SOLD 좌석은 홀드 만료 시각 단축 대상에서 제외된다`() {
         // given
         val event = eventRepository.공연_하나_저장()
