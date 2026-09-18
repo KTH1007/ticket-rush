@@ -12,6 +12,8 @@ import java.time.LocalDateTime
 interface SeatJpaRepository : JpaRepository<Seat, Long> {
     fun findAllByEventIdOrderBySectionAscRowLabelAscSeatNoAsc(eventId: Long): List<Seat>
 
+    fun findAllByReservationId(reservationId: Long): List<Seat>
+
     fun findAllByEventIdAndPhoneHashAndStatusIn(
         eventId: Long,
         phoneHash: PhoneHash,

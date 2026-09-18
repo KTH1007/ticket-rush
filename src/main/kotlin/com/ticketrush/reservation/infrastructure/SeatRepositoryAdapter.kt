@@ -16,6 +16,8 @@ class SeatRepositoryAdapter(
 
     override fun findAllByEventId(eventId: Long): List<Seat> = jpaRepository.findAllByEventIdOrderBySectionAscRowLabelAscSeatNoAsc(eventId)
 
+    override fun findAllByReservationId(reservationId: Long): List<Seat> = jpaRepository.findAllByReservationId(reservationId)
+
     override fun findHeldOrSoldSlotNos(
         eventId: Long,
         phoneHash: PhoneHash,

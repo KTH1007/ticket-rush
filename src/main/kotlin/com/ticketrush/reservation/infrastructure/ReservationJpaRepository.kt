@@ -8,6 +8,8 @@ import org.springframework.data.repository.query.Param
 import java.time.LocalDateTime
 
 interface ReservationJpaRepository : JpaRepository<Reservation, Long> {
+    fun findByReservationNo(reservationNo: String): Reservation?
+
     fun existsByReservationNo(reservationNo: String): Boolean
 
     @Modifying(clearAutomatically = true)

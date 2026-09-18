@@ -14,6 +14,8 @@ class ReservationRepositoryAdapter(
 
     override fun findById(id: Long): Reservation? = jpaRepository.findById(id).orElse(null)
 
+    override fun findByReservationNo(reservationNo: String): Reservation? = jpaRepository.findByReservationNo(reservationNo)
+
     override fun existsByReservationNo(reservationNo: String): Boolean = jpaRepository.existsByReservationNo(reservationNo)
 
     @Transactional
