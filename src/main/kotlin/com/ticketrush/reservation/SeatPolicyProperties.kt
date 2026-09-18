@@ -7,6 +7,7 @@ import java.time.Duration
 data class SeatPolicyProperties(
     val holdTtl: Duration,
     val maxPerPhone: Int,
+    val paymentFailedHoldTtl: Duration,
 ) {
     init {
         require(!holdTtl.isNegative && !holdTtl.isZero) { "holdTtl은 양수여야 합니다: $holdTtl" }
@@ -15,6 +16,13 @@ data class SeatPolicyProperties(
         // availableSlots()가 배정한 slot이 그 CHECK에 걸려 런타임에만 터진다.
         require(maxPerPhone in MIN_PER_PHONE..MAX_PER_PHONE) {
             "maxPerPhone은 ${MIN_PER_PHONE}..${MAX_PER_PHONE} 범위여야 합니다: $maxPerPhone"
+        }
+        require(!paymentFailedHoldTtl.isNegative && !paymentFailedHoldTtl.isZero) {
+            "paymentFailedHoldTtl은 양수여야 합니다: $paymentFailedHoldTtl"
+        }
+        // 결제 실패 시 "줄어드는" 시간이라는 의미 자체가 원래 홀드 시간보다 짧아야 성립한다.
+        require(paymentFailedHoldTtl < holdTtl) {
+            "paymentFailedHoldTtl은 holdTtl보다 짧아야 합니다: paymentFailedHoldTtl=$paymentFailedHoldTtl, holdTtl=$holdTtl"
         }
     }
 

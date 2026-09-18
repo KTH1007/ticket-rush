@@ -422,6 +422,125 @@ class SeatRepositoryTest : IntegrationTest() {
         assertThat(unchanged.status).isEqualTo(SeatStatus.SOLD)
     }
 
+    @Test
+    fun `예약에 속한 HELD 좌석을 SOLD로 전환하고 홀드 만료 시각을 비운다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val reservation = reservationRepository.예약_하나_저장(event)
+        val seat1 = 예약에_묶인_좌석_저장(event, grade, reservation.id, phoneHash, seatNo = 1, slotNo = 1)
+        val seat2 = 예약에_묶인_좌석_저장(event, grade, reservation.id, phoneHash, seatNo = 2, slotNo = 2)
+
+        // when
+        val sold = seatRepository.markSold(reservation.id)
+
+        // then
+        assertThat(sold).isEqualTo(2)
+        val seats = listOf(seat1.id, seat2.id).map { id -> seatRepository.findAllByEventId(event.id).single { it.id == id } }
+        assertThat(seats).allSatisfy {
+            assertThat(it.status).isEqualTo(SeatStatus.SOLD)
+            assertThat(it.holdExpiresAt).isNull()
+            assertThat(it.version).isGreaterThan(0)
+        }
+    }
+
+    @Test
+    fun `다른 예약 소속 좌석은 markSold 대상에서 제외된다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val reservation = reservationRepository.예약_하나_저장(event)
+        val otherReservation = reservationRepository.예약_하나_저장(event)
+        val untouched =
+            예약에_묶인_좌석_저장(event, grade, otherReservation.id, PhoneHash(ByteArray(32) { 9 }), seatNo = 1, slotNo = 1)
+
+        // when
+        seatRepository.markSold(reservation.id)
+
+        // then
+        val found = seatRepository.findAllByEventId(event.id).single { it.id == untouched.id }
+        assertThat(found.status).isEqualTo(SeatStatus.HELD)
+    }
+
+    @Test
+    fun `예약에 속한 HELD 좌석의 홀드 만료 시각을 단축한다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val reservation = reservationRepository.예약_하나_저장(event)
+        val seat = 예약에_묶인_좌석_저장(event, grade, reservation.id, phoneHash, seatNo = 1, slotNo = 1)
+        val shortened = LocalDateTime.of(2026, 1, 1, 0, 1)
+
+        // when
+        val updated = seatRepository.shortenHoldExpiry(reservation.id, shortened)
+
+        // then
+        assertThat(updated).isEqualTo(1)
+        val found = seatRepository.findAllByEventId(event.id).single { it.id == seat.id }
+        assertThat(found.holdExpiresAt).isEqualTo(shortened)
+    }
+
+    @Test
+    fun `새 만료 시각이 기존보다 늦으면 갱신하지 않는다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val reservation = reservationRepository.예약_하나_저장(event)
+        val seat = 예약에_묶인_좌석_저장(event, grade, reservation.id, phoneHash, seatNo = 1, slotNo = 1)
+
+        // when
+        val updated = seatRepository.shortenHoldExpiry(reservation.id, FIXED_HOLD_EXPIRES_AT.plusMinutes(1))
+
+        // then
+        assertThat(updated).isEqualTo(0)
+        val found = seatRepository.findAllByEventId(event.id).single { it.id == seat.id }
+        assertThat(found.holdExpiresAt).isEqualTo(FIXED_HOLD_EXPIRES_AT)
+    }
+
+    @Test
+    fun `SOLD 좌석은 홀드 만료 시각 단축 대상에서 제외된다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val reservation = reservationRepository.예약_하나_저장(event)
+        예약에_묶인_좌석_저장(event, grade, reservation.id, phoneHash, seatNo = 1, slotNo = 1)
+        seatRepository.markSold(reservation.id)
+
+        // when
+        val updated = seatRepository.shortenHoldExpiry(reservation.id, LocalDateTime.of(2026, 1, 1, 0, 1))
+
+        // then
+        assertThat(updated).isEqualTo(0)
+    }
+
+    private fun 예약에_묶인_좌석_저장(
+        event: Event,
+        grade: Grade,
+        reservationId: Long,
+        phoneHash: PhoneHash,
+        seatNo: Short,
+        slotNo: Short,
+    ): Seat =
+        seatRepository.save(
+            Seat(
+                eventId = event.id,
+                gradeId = grade.id,
+                section = "A",
+                rowLabel = "1",
+                seatNo = seatNo,
+                ordinal = seatNo.toInt(),
+                status = SeatStatus.HELD,
+                reservationId = reservationId,
+                phoneHash = phoneHash,
+                slotNo = slotNo,
+                holdExpiresAt = FIXED_HOLD_EXPIRES_AT,
+            ),
+        )
+
     private fun 좌석_저장(
         event: Event,
         grade: Grade,

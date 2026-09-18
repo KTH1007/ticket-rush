@@ -49,4 +49,29 @@ interface SeatJpaRepository : JpaRepository<Seat, Long> {
     fun releaseExpiredHolds(
         @Param("now") now: LocalDateTime,
     ): Int
+
+    @Modifying(clearAutomatically = true)
+    @Query(
+        """
+        UPDATE Seat s SET s.status = com.ticketrush.reservation.domain.SeatStatus.SOLD,
+            s.holdExpiresAt = NULL, s.version = s.version + 1
+        WHERE s.reservationId = :reservationId AND s.status = com.ticketrush.reservation.domain.SeatStatus.HELD
+        """,
+    )
+    fun markSold(
+        @Param("reservationId") reservationId: Long,
+    ): Int
+
+    @Modifying(clearAutomatically = true)
+    @Query(
+        """
+        UPDATE Seat s SET s.holdExpiresAt = :newExpiresAt, s.version = s.version + 1
+        WHERE s.reservationId = :reservationId AND s.status = com.ticketrush.reservation.domain.SeatStatus.HELD
+            AND :newExpiresAt < s.holdExpiresAt
+        """,
+    )
+    fun shortenHoldExpiry(
+        @Param("reservationId") reservationId: Long,
+        @Param("newExpiresAt") newExpiresAt: LocalDateTime,
+    ): Int
 }

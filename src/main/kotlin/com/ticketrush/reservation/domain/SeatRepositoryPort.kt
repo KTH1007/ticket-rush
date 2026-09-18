@@ -19,4 +19,13 @@ interface SeatRepositoryPort : SeatQueryPort {
 
     // 만료된 홀드를 일괄 해제 (스케줄러 전용)
     fun releaseExpiredHolds(now: LocalDateTime): Int
+
+    // 결제 확정 시 그 예약에 속한 HELD 좌석을 전부 SOLD로 전환한다.
+    fun markSold(reservationId: Long): Int
+
+    // 결제 실패 시 그 예약에 속한 HELD 좌석의 홀드 만료 시각을 단축한다(재시도 창 축소).
+    fun shortenHoldExpiry(
+        reservationId: Long,
+        newExpiresAt: LocalDateTime,
+    ): Int
 }

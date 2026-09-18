@@ -38,4 +38,13 @@ class SeatRepositoryAdapter(
 
     @Transactional
     override fun releaseExpiredHolds(now: LocalDateTime): Int = jpaRepository.releaseExpiredHolds(now)
+
+    @Transactional
+    override fun markSold(reservationId: Long): Int = jpaRepository.markSold(reservationId)
+
+    @Transactional
+    override fun shortenHoldExpiry(
+        reservationId: Long,
+        newExpiresAt: LocalDateTime,
+    ): Int = jpaRepository.shortenHoldExpiry(reservationId, newExpiresAt)
 }
