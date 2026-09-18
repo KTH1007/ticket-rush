@@ -115,6 +115,21 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     }
 
     @Test
+    fun `환불 호출이 예외를 던져도 취소는 확정된다`() {
+        // given
+        val reservation = 결제완료_예약_준비()
+        every { paymentGateway.refund(any(), any()) } throws RuntimeException("네트워크 오류")
+
+        // when
+        val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
+
+        // then: 예외가 밖으로 안 새고, 취소/결제 상태는 그대로 확정됨
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.CANCELED)
+        val updated = requireNotNull(reservationRepository.findById(reservation.id))
+        assertThat(updated.status).isEqualTo(ReservationStatus.CANCELED)
+    }
+
+    @Test
     fun `이미 CANCELED인 예약을 다시 취소하면 거부된다`() {
         // given
         val reservation = 결제완료_예약_준비()

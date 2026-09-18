@@ -16,9 +16,12 @@ import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
 import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.shared.PhoneHasher
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+
+private val logger = KotlinLogging.logger {}
 
 // 7개 모두 cancel 흐름에서 실제로 쓰이는 의존성이다(리포지토리 3종 + PG + 레이트리미터 + 해셔 + 이력 기록기).
 @Suppress("LongParameterList")
@@ -93,22 +96,32 @@ class PaymentCancelCommandService(
             throw PaymentConflictException(cause = e)
         }
 
-    // 환불 실패해도 예외를 던지지 않는다
+    // 환불 호출 자체가 예외를 던져도(네트워크 오류 등) 취소 확정을 롤백시키면 안 된다 -
+    // "환불 실패해도 취소는 확정된다"는 계약을 예외 경로에서도 지킨다. 원인은 로그로만 남긴다.
+    @Suppress("TooGenericExceptionCaught")
     private fun applyRefund(payment: Payment): Payment {
         val pgTransactionId = requireNotNull(payment.pgTransactionId) { "취소 대상인데 원 거래 id가 없습니다: ${payment.id}" }
-        return when (val result = paymentGateway.refund(pgTransactionId, payment.amount)) {
-            is PaymentGatewayResult.Approved -> {
-                payment.markRefunded()
-                val refunded = paymentRepository.save(payment)
-                historyRecorder.record(
-                    refunded.id,
-                    PaymentStatus.CANCELED,
-                    PaymentStatus.REFUNDED,
-                    reason = "환불 완료: ${result.pgTransactionId}",
-                )
-                refunded
+        val result =
+            try {
+                paymentGateway.refund(pgTransactionId, payment.amount)
+            } catch (e: Exception) {
+                logger.error(e) { "환불 요청 중 오류가 발생했습니다. 취소는 유지하고 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
+                return payment
             }
+
+        return when (result) {
+            is PaymentGatewayResult.Approved -> markRefunded(payment, result)
             is PaymentGatewayResult.Declined -> payment
         }
+    }
+
+    private fun markRefunded(
+        payment: Payment,
+        result: PaymentGatewayResult.Approved,
+    ): Payment {
+        payment.markRefunded()
+        val refunded = paymentRepository.save(payment)
+        historyRecorder.record(refunded.id, PaymentStatus.CANCELED, PaymentStatus.REFUNDED, reason = "환불 완료: ${result.pgTransactionId}")
+        return refunded
     }
 }
