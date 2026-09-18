@@ -67,6 +67,16 @@ class Payment(
         status = PaymentStatus.FAILED
     }
 
+    fun markCanceled() {
+        check(status == PaymentStatus.SUCCESS) { "SUCCESS 상태에서만 취소할 수 있습니다: $status" }
+        status = PaymentStatus.CANCELED
+    }
+
+    fun markRefunded() {
+        check(status == PaymentStatus.CANCELED) { "CANCELED 상태에서만 환불 완료 처리할 수 있습니다: $status" }
+        status = PaymentStatus.REFUNDED
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is Payment) return false

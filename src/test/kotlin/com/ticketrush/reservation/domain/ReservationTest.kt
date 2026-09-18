@@ -151,6 +151,29 @@ class ReservationTest {
     }
 
     @Test
+    fun `PAID 상태에서 취소하면 CANCELED로 바뀐다`() {
+        // given
+        val reservation = 예약(id = 1L)
+        reservation.confirmPayment()
+
+        // when
+        reservation.cancel()
+
+        // then
+        assertThat(reservation.status).isEqualTo(ReservationStatus.CANCELED)
+    }
+
+    @Test
+    fun `PAID가 아닌 상태에서 취소하려 하면 예외가 발생한다`() {
+        // given
+        val reservation = 예약(id = 1L)
+
+        // when & then
+        assertThatThrownBy { reservation.cancel() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
     fun `HOLDING이 아니면 만료 시각과 무관하게 홀드가 유효하지 않다`() {
         // given
         val reservation = 예약(id = 1L, holdExpiresAt = LocalDateTime.of(2030, 1, 1, 0, 0))

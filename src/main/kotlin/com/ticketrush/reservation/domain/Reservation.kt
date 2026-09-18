@@ -100,6 +100,11 @@ class Reservation(
 
     fun isHoldActiveAt(now: LocalDateTime): Boolean = status == ReservationStatus.HOLDING && holdExpiresAt?.isAfter(now) == true
 
+    fun cancel() {
+        check(status == ReservationStatus.PAID) { "PAID 상태에서만 취소할 수 있습니다: $status" }
+        status = ReservationStatus.CANCELED
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is Reservation) return false

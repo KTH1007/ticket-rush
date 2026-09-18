@@ -28,4 +28,7 @@ interface SeatRepositoryPort : SeatQueryPort {
         reservationId: Long,
         newExpiresAt: LocalDateTime,
     ): Int
+
+    // 취소 시 그 예약에 속한 SOLD 좌석을 전부 AVAILABLE로 되돌린다(markSold의 반대).
+    fun returnToAvailable(reservationId: Long): Int
 }

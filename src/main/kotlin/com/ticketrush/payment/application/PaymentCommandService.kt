@@ -24,7 +24,7 @@ import java.time.Clock
 import java.time.LocalDateTime
 import java.util.UUID
 
-// 7개 모두 confirmPayment 흐름에서 실제로 쓰이는 의존성이다(리포지토리 3종 + PG + 번호 생성기 + 정책 + Clock). 인위적으로 묶기보다 그대로 둔다.
+// 8개 모두 confirmPayment 흐름에서 실제로 쓰이는 의존성이다(리포지토리 3종 + PG + 번호 생성기 + 정책 + Clock + 이력 기록기). 인위적으로 묶기보다 그대로 둔다.
 @Suppress("LongParameterList")
 @Service
 class PaymentCommandService(
@@ -35,6 +35,7 @@ class PaymentCommandService(
     private val reservationNoGenerator: ReservationNoGenerator,
     private val seatPolicy: SeatPolicyProperties,
     private val clock: Clock,
+    private val historyRecorder: PaymentHistoryRecorder,
 ) {
     // 직전에 기록한 실패 처리(Payment FAILED, 홀드 시간 단축)까지 롤백되면 안 되므로,
     // 이 예외만 롤백 대상에서 뺀다(Spring @Transactional의 기본 동작은 RuntimeException 전체 롤백).
@@ -109,8 +110,11 @@ class PaymentCommandService(
         seatRepository.markSold(reservation.id)
 
         val payment = existingPayment ?: Payment(reservationId = reservation.id, amount = reservation.amount)
+        val fromStatus = payment.status
         payment.markSuccess(result.pgTransactionId, LocalDateTime.now(clock))
-        return PaymentConfirmationResult(paymentRepository.save(payment), reservationNo)
+        val saved = paymentRepository.save(payment)
+        historyRecorder.record(saved.id, fromStatus, PaymentStatus.SUCCESS)
+        return PaymentConfirmationResult(saved, reservationNo)
     }
 
     // uk_reservation_no 충돌(확률상 사실상 0에 가깝지만 실측 후 재시도로 막기로 함)
@@ -133,8 +137,10 @@ class PaymentCommandService(
         seatRepository.shortenHoldExpiry(reservation.id, shortened)
 
         val payment = existingPayment ?: Payment(reservationId = reservation.id, amount = reservation.amount)
+        val fromStatus = payment.status
         payment.markFailed()
-        paymentRepository.save(payment)
+        val saved = paymentRepository.save(payment)
+        historyRecorder.record(saved.id, fromStatus, PaymentStatus.FAILED, reason = result.reason)
         throw PaymentDeclinedException(result.reason)
     }
 
