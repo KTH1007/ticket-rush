@@ -12,7 +12,7 @@ class OutboxEventTest {
     @Test
     fun `PENDING 상태로 생성된다`() {
         // when
-        val event = OutboxEvent.of("RESERVATION", 1L, "RESERVATION_PAID", """{"reservationId":1}""", now)
+        val event = 새_이벤트()
 
         // then
         assertThat(event.status).isEqualTo(OutboxStatus.PENDING)
@@ -35,7 +35,7 @@ class OutboxEventTest {
     @Test
     fun `PENDING 상태에서 완료 처리하려 하면 예외가 발생한다`() {
         // given
-        val event = OutboxEvent.of("RESERVATION", 1L, "RESERVATION_PAID", """{"reservationId":1}""", now)
+        val event = 새_이벤트()
 
         // when & then
         assertThatThrownBy { event.markDone() }.isInstanceOf(IllegalStateException::class.java)
@@ -72,6 +72,15 @@ class OutboxEventTest {
         assertThat(event.status).isEqualTo(OutboxStatus.FAILED)
     }
 
-    private fun 프로세싱_이벤트(): OutboxEvent =
-        OutboxEvent.of("RESERVATION", 1L, "RESERVATION_PAID", """{"reservationId":1}""", now).also { it.markProcessingForTest() }
+    private fun 새_이벤트(): OutboxEvent =
+        OutboxEvent(
+            aggregateType = "RESERVATION",
+            aggregateId = 1L,
+            eventType = "RESERVATION_PAID",
+            payload = """{"reservationId":1}""",
+            nextAttemptAt = now,
+            createdAt = now,
+        )
+
+    private fun 프로세싱_이벤트(): OutboxEvent = 새_이벤트().also { it.markProcessingForTest() }
 }

@@ -15,7 +15,7 @@ import java.time.LocalDateTime
 
 @Entity
 @Table(name = "outbox")
-class OutboxEvent private constructor(
+class OutboxEvent(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
@@ -23,10 +23,10 @@ class OutboxEvent private constructor(
     aggregateId: Long,
     eventType: String,
     payload: String,
-    status: OutboxStatus,
-    attemptCount: Int,
+    status: OutboxStatus = OutboxStatus.PENDING,
+    attemptCount: Int = 0,
     nextAttemptAt: LocalDateTime,
-    claimedAt: LocalDateTime?,
+    claimedAt: LocalDateTime? = null,
     createdAt: LocalDateTime,
 ) {
     @Column(name = "aggregate_type", nullable = false, length = 50)
@@ -95,25 +95,4 @@ class OutboxEvent private constructor(
     }
 
     override fun hashCode(): Int = OutboxEvent::class.java.hashCode()
-
-    companion object {
-        fun of(
-            aggregateType: String,
-            aggregateId: Long,
-            eventType: String,
-            payload: String,
-            now: LocalDateTime,
-        ): OutboxEvent =
-            OutboxEvent(
-                aggregateType = aggregateType,
-                aggregateId = aggregateId,
-                eventType = eventType,
-                payload = payload,
-                status = OutboxStatus.PENDING,
-                attemptCount = 0,
-                nextAttemptAt = now,
-                claimedAt = null,
-                createdAt = now,
-            )
-    }
 }
