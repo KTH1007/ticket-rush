@@ -13,6 +13,10 @@ class FakeSmsGatewayAdapter : NotificationPort {
         phone: String,
         message: String,
     ) {
-        logger.info { "[FAKE SMS] to=$phone message=\"$message\"" }
+        logger.info { "[FAKE SMS] to=${mask(phone)} message=\"$message\"" }
     }
+
+    // 로그에 전화번호 원문이 남지 않도록 가운데 자리를 가린다. 앞 3자리+마지막 4자리만 남김(예: 010****9999)
+    private fun mask(phone: String): String =
+        if (phone.length <= 7) "*".repeat(phone.length) else phone.take(3) + "*".repeat(phone.length - 7) + phone.takeLast(4)
 }
