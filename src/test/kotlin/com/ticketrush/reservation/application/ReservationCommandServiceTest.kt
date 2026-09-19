@@ -193,6 +193,7 @@ class ReservationCommandServiceTest : IntegrationTest() {
         eventId = eventId,
         seatSelection = SeatSelection(seatIds),
         phoneHash = phoneHash,
+        encryptedPhone = com.ticketrush.shared.EncryptedPhone(ByteArray(28) { 0 }),
     )
 
     private fun 좌석(

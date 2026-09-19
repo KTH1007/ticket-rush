@@ -40,6 +40,20 @@ class ReservationRepositoryTest : IntegrationTest() {
     }
 
     @Test
+    fun `encrypted_phone을 저장하면 값이 그대로 조회된다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val encryptedPhone = com.ticketrush.shared.EncryptedPhone(ByteArray(28) { 9 })
+
+        // when
+        val saved = reservationRepository.save(예약(eventId = event.id, encryptedPhone = encryptedPhone))
+        val reloaded = reservationRepository.findById(saved.id)
+
+        // then
+        assertThat(reloaded?.encryptedPhone).isEqualTo(encryptedPhone)
+    }
+
+    @Test
     fun `uk_reservation_no 위반 시 예외 발생`() {
         // given
         val event = eventRepository.공연_하나_저장()
@@ -197,6 +211,7 @@ class ReservationRepositoryTest : IntegrationTest() {
     private fun 예약(
         eventId: Long,
         phoneHash: PhoneHash = PhoneHash(ByteArray(32) { 1 }),
+        encryptedPhone: com.ticketrush.shared.EncryptedPhone? = null,
         quantity: Short = 1,
         amount: Int = 100_000,
         holdToken: UUID = UUID.randomUUID(),
@@ -210,6 +225,7 @@ class ReservationRepositoryTest : IntegrationTest() {
         Reservation(
             eventId = eventId,
             phoneHash = phoneHash,
+            encryptedPhone = encryptedPhone,
             quantity = quantity,
             amount = amount,
             holdToken = holdToken,

@@ -10,6 +10,7 @@ import com.ticketrush.reservation.domain.SeatHoldFilterPort
 import com.ticketrush.reservation.domain.SeatNotFoundException
 import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.reservation.domain.SeatSelection
+import com.ticketrush.shared.EncryptedPhone
 import com.ticketrush.shared.PhoneHash
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.DataIntegrityViolationException
@@ -37,13 +38,14 @@ class ReservationCommandService(
         eventId: Long,
         seatSelection: SeatSelection,
         phoneHash: PhoneHash,
+        encryptedPhone: EncryptedPhone,
     ): Reservation {
         val holdToken = UUID.randomUUID()
         if (!seatHoldFilter.tryClaim(eventId, seatSelection.seatIds, holdToken.toString())) {
             throw SeatAlreadyHeldException()
         }
         releaseOnRollback(eventId, seatSelection.seatIds, holdToken)
-        return holdSeatsInDb(eventId, seatSelection, phoneHash, holdToken)
+        return holdSeatsInDb(eventId, seatSelection, phoneHash, encryptedPhone, holdToken)
     }
 
     // @Transactional은 AOP 프록시라 실제 커밋은 이 메서드가 리턴한 "다음"에 일어난다. 그래서
@@ -87,12 +89,13 @@ class ReservationCommandService(
         eventId: Long,
         seatSelection: SeatSelection,
         phoneHash: PhoneHash,
+        encryptedPhone: EncryptedPhone,
         holdToken: UUID,
     ): Reservation {
         val slots = availableSlots(eventId, phoneHash, seatSelection.seatIds.size)
         val amount = computeAmount(eventId, seatSelection.seatIds)
         val holdExpiresAt = LocalDateTime.now(clock).plus(seatPolicy.holdTtl)
-        val reservation = saveHoldingReservation(eventId, seatSelection, phoneHash, amount, holdExpiresAt, holdToken)
+        val reservation = saveHoldingReservation(eventId, seatSelection, phoneHash, encryptedPhone, amount, holdExpiresAt, holdToken)
         holdEachSeat(eventId, seatSelection, slots, reservation, phoneHash, holdExpiresAt)
         return reservation
     }
@@ -126,6 +129,7 @@ class ReservationCommandService(
         eventId: Long,
         seatSelection: SeatSelection,
         phoneHash: PhoneHash,
+        encryptedPhone: EncryptedPhone,
         amount: Int,
         holdExpiresAt: LocalDateTime,
         holdToken: UUID,
@@ -134,6 +138,7 @@ class ReservationCommandService(
             Reservation(
                 eventId = eventId,
                 phoneHash = phoneHash,
+                encryptedPhone = encryptedPhone,
                 quantity = seatSelection.seatIds.size.toShort(),
                 amount = amount,
                 holdToken = holdToken,

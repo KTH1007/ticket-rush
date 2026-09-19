@@ -3,6 +3,7 @@ package com.ticketrush.reservation.presentation
 import com.ticketrush.queue.application.QueueQueryService
 import com.ticketrush.reservation.application.ReservationCommandService
 import com.ticketrush.reservation.domain.SeatSelection
+import com.ticketrush.shared.PhoneEncryptor
 import com.ticketrush.shared.PhoneHasher
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController
 class SeatHoldController(
     private val reservationCommandService: ReservationCommandService,
     private val phoneHasher: PhoneHasher,
+    private val phoneEncryptor: PhoneEncryptor,
     private val queueQueryService: QueueQueryService,
 ) {
     @PostMapping("/hold")
@@ -29,11 +31,13 @@ class SeatHoldController(
     ): ResponseEntity<SeatHoldResponse> {
         queueQueryService.requireActive(eventId, queueToken)
         val phoneHash = phoneHasher.hash(request.phoneNumber)
+        val encryptedPhone = phoneEncryptor.encrypt(request.phoneNumber)
         val reservation =
             reservationCommandService.holdSeats(
                 eventId = eventId,
                 seatSelection = SeatSelection(request.seatIds),
                 phoneHash = phoneHash,
+                encryptedPhone = encryptedPhone,
             )
         return ResponseEntity.status(HttpStatus.CREATED).body(SeatHoldResponse.from(reservation))
     }

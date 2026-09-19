@@ -8,6 +8,8 @@ import com.ticketrush.reservation.application.ReservationCommandService
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.SeatAlreadyHeldException
 import com.ticketrush.reservation.domain.SeatSelection
+import com.ticketrush.shared.EncryptedPhone
+import com.ticketrush.shared.PhoneEncryptor
 import com.ticketrush.shared.PhoneHash
 import com.ticketrush.shared.PhoneHasher
 import io.mockk.Runs
@@ -52,6 +54,9 @@ class SeatHoldControllerTest {
     lateinit var phoneHasher: PhoneHasher
 
     @Autowired
+    lateinit var phoneEncryptor: PhoneEncryptor
+
+    @Autowired
     lateinit var queueQueryService: QueueQueryService
 
     @TestConfiguration
@@ -63,6 +68,9 @@ class SeatHoldControllerTest {
         fun phoneHasher(): PhoneHasher = mockk()
 
         @Bean
+        fun phoneEncryptor(): PhoneEncryptor = mockk()
+
+        @Bean
         fun queueQueryService(): QueueQueryService = mockk()
     }
 
@@ -71,9 +79,16 @@ class SeatHoldControllerTest {
         // given
         대기열_통과_처리()
         val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val encryptedPhone = EncryptedPhone(ByteArray(28) { 1 })
         every { phoneHasher.hash("01012345678") } returns phoneHash
+        every { phoneEncryptor.encrypt("01012345678") } returns encryptedPhone
         every {
-            reservationCommandService.holdSeats(eventId = 1L, seatSelection = SeatSelection(listOf(10L)), phoneHash = phoneHash)
+            reservationCommandService.holdSeats(
+                eventId = 1L,
+                seatSelection = SeatSelection(listOf(10L)),
+                phoneHash = phoneHash,
+                encryptedPhone = encryptedPhone,
+            )
         } returns 예약(seatIds = listOf(10L), phoneHash = phoneHash)
 
         // when & then
@@ -90,9 +105,16 @@ class SeatHoldControllerTest {
         // given
         대기열_통과_처리()
         val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val encryptedPhone = EncryptedPhone(ByteArray(28) { 1 })
         every { phoneHasher.hash("01012345678") } returns phoneHash
+        every { phoneEncryptor.encrypt("01012345678") } returns encryptedPhone
         every {
-            reservationCommandService.holdSeats(eventId = 1L, seatSelection = SeatSelection(listOf(10L)), phoneHash = phoneHash)
+            reservationCommandService.holdSeats(
+                eventId = 1L,
+                seatSelection = SeatSelection(listOf(10L)),
+                phoneHash = phoneHash,
+                encryptedPhone = encryptedPhone,
+            )
         } throws SeatAlreadyHeldException()
 
         // when & then

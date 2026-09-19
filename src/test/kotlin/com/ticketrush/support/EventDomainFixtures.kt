@@ -60,6 +60,7 @@ fun SeatRepositoryPort.좌석_하나_저장(
 fun ReservationRepositoryPort.예약_하나_저장(
     event: Event,
     phoneHash: PhoneHash = PhoneHash(ByteArray(32) { 1 }),
+    encryptedPhone: com.ticketrush.shared.EncryptedPhone? = null,
     quantity: Short = 1,
     amount: Int = 100_000,
     holdExpiresAt: LocalDateTime = LocalDateTime.of(2030, 1, 1, 0, 0),
@@ -68,6 +69,7 @@ fun ReservationRepositoryPort.예약_하나_저장(
         Reservation(
             eventId = event.id,
             phoneHash = phoneHash,
+            encryptedPhone = encryptedPhone,
             quantity = quantity,
             amount = amount,
             holdToken = UUID.randomUUID(),
