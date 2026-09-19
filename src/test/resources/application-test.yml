@@ -18,3 +18,4 @@ ticket-rush:
     chunk-size: 10
   security:
     phone-hmac-key: test-hmac-key-for-local-only
+    phone-encryption-key: dGVzdC1waG9uZS1lbmNyeXB0aW9uLWtleS0zMmJ5dGU=
