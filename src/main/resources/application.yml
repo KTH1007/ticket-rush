@@ -106,6 +106,9 @@ ticket-rush:
     poll-interval: 1s
     chunk-size: 100
     max-attempts: 5
+    retry-delay: 30s
+    stale-claim-timeout: 60s
+    reclaim-interval: 30s
   reservation-lookup:
     max-attempts: 5
     block-window: 10m
