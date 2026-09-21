@@ -8,8 +8,7 @@ import org.springframework.data.repository.query.Param
 import java.time.LocalDateTime
 
 interface OutboxJpaRepository : JpaRepository<OutboxEvent, Long> {
-    // SKIP LOCKED로 이미 잠긴 행은 건너뛴다. 이 락은 같은 트랜잭션 안에서 뒤이은
-    // markProcessing UPDATE까지 유지되므로, 여러 인스턴스가 동시에 호출해도 겹치지 않는다.
+    // 이미 잠긴 행은 SKIP LOCKED로 건너뛰어 여러 인스턴스가 겹치지 않게 한다.
     @Query(
         value = """
             SELECT id FROM outbox
@@ -25,9 +24,7 @@ interface OutboxJpaRepository : JpaRepository<OutboxEvent, Long> {
         @Param("limit") limit: Int,
     ): List<Long>
 
-    // clearAutomatically = true: bulk UPDATE는 DB엔 반영되지만 이미 영속성 컨텍스트에 올라온
-    // 엔티티(예: 방금 save()한 것)는 자동 갱신이 안 된다. 이걸 켜야 이어지는 findAllById가
-    // 캐시된 값 대신 DB에서 새로 읽어온다(실측으로 확인한 필요성 — 처음엔 없이 짰다가 실패함).
+    // clearAutomatically 없으면 bulk UPDATE 후 findAllById가 캐시된 값을 돌려줌(실측 확인).
     @Modifying(clearAutomatically = true)
     @Query(
         "UPDATE OutboxEvent o SET o.status = com.ticketrush.outbox.domain.OutboxStatus.PROCESSING, o.claimedAt = :now " +

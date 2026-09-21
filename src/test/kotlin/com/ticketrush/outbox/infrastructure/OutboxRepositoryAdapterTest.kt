@@ -7,6 +7,7 @@ import com.ticketrush.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.transaction.annotation.Transactional
+import java.time.Duration
 import java.time.LocalDateTime
 import kotlin.test.Test
 
@@ -58,6 +59,37 @@ class OutboxRepositoryAdapterTest : IntegrationTest() {
         // then
         assertThat(reclaimed).isEqualTo(1)
         assertThat(outboxRepository.findById(stale.id)?.status).isEqualTo(OutboxStatus.PENDING)
+    }
+
+    @Test
+    @Transactional
+    fun `markDone은 PROCESSING 행을 DONE으로 바꾼다`() {
+        // given
+        val event = outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
+        outboxRepository.claimBatch(limit = 10, now = now)
+
+        // when
+        outboxRepository.markDone(event.id)
+
+        // then
+        assertThat(outboxRepository.findById(event.id)?.status).isEqualTo(OutboxStatus.DONE)
+    }
+
+    @Test
+    @Transactional
+    fun `markFailedOrRetry는 attempt_count를 늘리고 임계치 미만이면 PENDING으로 되돌린다`() {
+        // given
+        val event = outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
+        outboxRepository.claimBatch(limit = 10, now = now)
+
+        // when
+        outboxRepository.markFailedOrRetry(event.id, now, Duration.ofSeconds(30), maxAttempts = 5)
+
+        // then
+        val updated = outboxRepository.findById(event.id)
+        assertThat(updated?.attemptCount).isEqualTo(1)
+        assertThat(updated?.status).isEqualTo(OutboxStatus.PENDING)
+        assertThat(updated?.nextAttemptAt).isEqualTo(now.plusSeconds(30))
     }
 
     private fun 이벤트(

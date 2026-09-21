@@ -10,9 +10,7 @@ import org.springframework.transaction.event.TransactionalEventListener
 import java.time.Clock
 import java.time.LocalDateTime
 
-// BEFORE_COMMIT을 쓰는 이유: 아직 열려 있는 같은 트랜잭션 안에서 실행돼야 결제확정/취소와
-// outbox 기록이 원자적으로 묶인다(AFTER_COMMIT이면 원자성이 깨짐). 이 페이즈는 Spring Modulith의
-// 영속 추적(event_publication) 대상에서도 제외된다(그 레지스트리는 AFTER_COMMIT 리스너만 추적함).
+// BEFORE_COMMIT이라 결제확정/취소와 outbox 기록이 같은 트랜잭션으로 원자적으로 묶인다.
 @Component
 class OutboxEventRecorder(
     private val outboxRepository: OutboxRepositoryPort,

@@ -4,6 +4,7 @@ import com.ticketrush.outbox.domain.OutboxEvent
 import com.ticketrush.outbox.domain.OutboxRepositoryPort
 import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
+import java.time.Duration
 import java.time.LocalDateTime
 
 @Repository
@@ -14,9 +15,7 @@ class OutboxRepositoryAdapter(
 
     override fun findById(id: Long): OutboxEvent? = jpaRepository.findById(id).orElse(null)
 
-    // findClaimableIds(SELECT ... FOR UPDATE SKIP LOCKED)와 markProcessing(UPDATE)이
-    // 반드시 같은 트랜잭션 안에서 실행돼야 SKIP LOCKED로 잡은 락이 UPDATE까지 유지된다.
-    // 호출하는 쪽의 트랜잭션 유무와 무관하게 이 원자성이 항상 보장돼야 하므로 여기 직접 건다.
+    // SKIP LOCKED 락이 markProcessing까지 유지되도록 같은 트랜잭션으로 묶는다.
     @Transactional
     override fun claimBatch(
         limit: Int,
@@ -29,4 +28,25 @@ class OutboxRepositoryAdapter(
     }
 
     override fun reclaimStale(staleBefore: LocalDateTime): Int = jpaRepository.reclaimStale(staleBefore)
+
+    @Transactional
+    override fun markDone(id: Long) {
+        jpaRepository.findById(id).ifPresent {
+            it.markDone()
+            jpaRepository.save(it)
+        }
+    }
+
+    @Transactional
+    override fun markFailedOrRetry(
+        id: Long,
+        now: LocalDateTime,
+        retryDelay: Duration,
+        maxAttempts: Int,
+    ) {
+        jpaRepository.findById(id).ifPresent {
+            it.recordFailure(now, retryDelay, maxAttempts)
+            jpaRepository.save(it)
+        }
+    }
 }

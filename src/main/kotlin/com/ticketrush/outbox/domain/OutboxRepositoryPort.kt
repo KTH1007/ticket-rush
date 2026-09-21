@@ -1,5 +1,6 @@
 package com.ticketrush.outbox.domain
 
+import java.time.Duration
 import java.time.LocalDateTime
 
 interface OutboxRepositoryPort {
@@ -15,4 +16,14 @@ interface OutboxRepositoryPort {
 
     // claimed_at이 staleBefore보다 오래된 PROCESSING 행을 PENDING으로 되돌린다. 되돌린 행 수를 반환한다.
     fun reclaimStale(staleBefore: LocalDateTime): Int
+
+    // 스케줄러의 self-invocation으로 @Transactional이 무시되는 걸 피하려 여기 둠.
+    fun markDone(id: Long)
+
+    fun markFailedOrRetry(
+        id: Long,
+        now: LocalDateTime,
+        retryDelay: Duration,
+        maxAttempts: Int,
+    )
 }
