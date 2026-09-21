@@ -8,6 +8,7 @@ import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
+import com.ticketrush.payment.domain.ReservationPaidEvent
 import com.ticketrush.reservation.SeatPolicyProperties
 import com.ticketrush.reservation.domain.HoldTokenMismatchException
 import com.ticketrush.reservation.domain.Reservation
@@ -16,6 +17,7 @@ import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
 import com.ticketrush.reservation.domain.SeatRepositoryPort
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
@@ -36,6 +38,7 @@ class PaymentCommandService(
     private val seatPolicy: SeatPolicyProperties,
     private val clock: Clock,
     private val historyRecorder: PaymentHistoryRecorder,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
     // 직전에 기록한 실패 처리(Payment FAILED, 홀드 시간 단축)까지 롤백되면 안 되므로,
     // 이 예외만 롤백 대상에서 뺀다(Spring @Transactional의 기본 동작은 RuntimeException 전체 롤백).
@@ -114,6 +117,7 @@ class PaymentCommandService(
         payment.markSuccess(result.pgTransactionId, LocalDateTime.now(clock))
         val saved = paymentRepository.save(payment)
         historyRecorder.record(saved.id, fromStatus, PaymentStatus.SUCCESS)
+        eventPublisher.publishEvent(ReservationPaidEvent(reservation.id))
         return PaymentConfirmationResult(saved, reservationNo)
     }
 

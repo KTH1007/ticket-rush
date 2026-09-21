@@ -7,6 +7,7 @@ import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
+import com.ticketrush.payment.domain.ReservationCanceledEvent
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationAlreadyCanceledException
 import com.ticketrush.reservation.domain.ReservationLookupFailedException
@@ -17,6 +18,7 @@ import com.ticketrush.reservation.domain.ReservationStatus
 import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.shared.PhoneHasher
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -34,6 +36,7 @@ class PaymentCancelCommandService(
     private val rateLimiter: ReservationLookupRateLimiterPort,
     private val phoneHasher: PhoneHasher,
     private val historyRecorder: PaymentHistoryRecorder,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
     @Transactional
     fun cancel(
@@ -90,6 +93,7 @@ class PaymentCancelCommandService(
             payment.markCanceled()
             val canceled = paymentRepository.save(payment)
             historyRecorder.record(canceled.id, fromStatus, PaymentStatus.CANCELED, reason = "사용자 취소 요청")
+            eventPublisher.publishEvent(ReservationCanceledEvent(reservation.id))
 
             applyRefund(canceled)
         } catch (e: OptimisticLockingFailureException) {

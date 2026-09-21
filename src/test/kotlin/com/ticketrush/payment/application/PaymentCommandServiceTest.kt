@@ -76,6 +76,28 @@ class PaymentCommandServiceTest : IntegrationTest() {
         fun reservationNoGenerator(): ReservationNoGenerator = mockk()
     }
 
+    @Autowired
+    lateinit var outboxRepository: com.ticketrush.outbox.domain.OutboxRepositoryPort
+
+    @Test
+    fun `결제를 확정하면 outbox에 RESERVATION_PAID 이벤트가 같이 커밋된다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        every { reservationNoGenerator.generate() } returns "RESNO000099"
+        every {
+            paymentGateway.charge(reservation.id, reservation.amount, reservation.idempotencyKey)
+        } returns PaymentGatewayResult.Approved(pgTransactionId = "PG-TXN-99")
+
+        // when
+        paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+
+        // then
+        val events = outboxRepository.claimBatch(limit = 100, now = LocalDateTime.now())
+        val recorded = events.singleOrNull { it.aggregateId == reservation.id }
+        assertThat(recorded).isNotNull
+        assertThat(recorded!!.eventType).isEqualTo("RESERVATION_PAID")
+    }
+
     @Test
     fun `HOLDING 상태의 예약에 결제를 확정하면 성공하고 예매번호가 발급된다`() {
         // given

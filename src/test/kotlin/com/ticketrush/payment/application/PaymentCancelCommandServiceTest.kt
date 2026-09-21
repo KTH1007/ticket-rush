@@ -70,6 +70,25 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         fun paymentGateway(): PaymentGatewayPort = mockk()
     }
 
+    @Autowired
+    lateinit var outboxRepository: com.ticketrush.outbox.domain.OutboxRepositoryPort
+
+    @Test
+    fun `취소하면 outbox에 RESERVATION_CANCELED 이벤트가 같이 커밋된다`() {
+        // given
+        val reservation = 결제완료_예약_준비()
+        every { paymentGateway.refund(any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-6")
+
+        // when
+        cancelService.cancel(reservation.reservationNo!!, PHONE)
+
+        // then
+        val events = outboxRepository.claimBatch(limit = 100, now = LocalDateTime.now())
+        val recorded = events.singleOrNull { it.aggregateId == reservation.id }
+        assertThat(recorded).isNotNull
+        assertThat(recorded!!.eventType).isEqualTo("RESERVATION_CANCELED")
+    }
+
     @Test
     fun `PAID 상태의 예약을 취소하면 CANCELED로 바뀌고 좌석이 AVAILABLE로 돌아간다`() {
         // given
