@@ -8,6 +8,9 @@ interface OutboxRepositoryPort {
 
     fun findById(id: Long): OutboxEvent?
 
+    // 상태를 안 바꾸는 순수 조회. claimBatch(부수효과 있음)를 검증용으로 재사용하면 안 된다.
+    fun findByAggregateId(aggregateId: Long): List<OutboxEvent>
+
     // SKIP LOCKED로 PENDING 행을 최대 limit개 claim해서 PROCESSING으로 표시하고 반환한다.
     fun claimBatch(
         limit: Int,

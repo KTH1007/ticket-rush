@@ -92,8 +92,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
         paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
 
         // then
-        val events = outboxRepository.claimBatch(limit = 100, now = LocalDateTime.now())
-        val recorded = events.singleOrNull { it.aggregateId == reservation.id }
+        val recorded = outboxRepository.findByAggregateId(reservation.id).singleOrNull()
         assertThat(recorded).isNotNull
         assertThat(recorded!!.eventType).isEqualTo("RESERVATION_PAID")
     }

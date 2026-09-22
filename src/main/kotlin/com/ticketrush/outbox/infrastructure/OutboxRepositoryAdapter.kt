@@ -15,6 +15,8 @@ class OutboxRepositoryAdapter(
 
     override fun findById(id: Long): OutboxEvent? = jpaRepository.findById(id).orElse(null)
 
+    override fun findByAggregateId(aggregateId: Long): List<OutboxEvent> = jpaRepository.findByAggregateId(aggregateId)
+
     // SKIP LOCKED 락이 markProcessing까지 유지되도록 같은 트랜잭션으로 묶는다.
     @Transactional
     override fun claimBatch(

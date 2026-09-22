@@ -8,6 +8,8 @@ import org.springframework.data.repository.query.Param
 import java.time.LocalDateTime
 
 interface OutboxJpaRepository : JpaRepository<OutboxEvent, Long> {
+    fun findByAggregateId(aggregateId: Long): List<OutboxEvent>
+
     // 이미 잠긴 행은 SKIP LOCKED로 건너뛰어 여러 인스턴스가 겹치지 않게 한다.
     @Query(
         value = """
