@@ -23,6 +23,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
 import org.springframework.transaction.annotation.Transactional
+import java.time.Clock
 import java.time.LocalDateTime
 import kotlin.test.Test
 
@@ -49,6 +50,9 @@ class OutboxRelaySchedulerTest : IntegrationTest() {
     @Autowired
     lateinit var policy: OutboxPolicyProperties
 
+    @Autowired
+    lateinit var clock: Clock
+
     @TestConfiguration
     class MockConfig {
         @Bean
@@ -72,8 +76,7 @@ class OutboxRelaySchedulerTest : IntegrationTest() {
         val outboxEvent = 대기중인_outbox_이벤트_저장(reservation.id)
 
         // when
-        val claimed = requireNotNull(outboxRepository.claimBatch(limit = 10, now = LocalDateTime.now()).firstOrNull { it.id == outboxEvent.id })
-        relayScheduler.processOne(claimed)
+        relayScheduler.processOne(claim(outboxEvent.id))
 
         // then
         verify { notificationPort.sendSms("01099999999", "[티켓러시] 예매가 완료됐습니다. 예매번호: ${reservation.reservationNo}") }
@@ -90,8 +93,7 @@ class OutboxRelaySchedulerTest : IntegrationTest() {
         val outboxEvent = 대기중인_outbox_이벤트_저장(reservation.id)
 
         // when
-        val claimed = requireNotNull(outboxRepository.claimBatch(limit = 10, now = LocalDateTime.now()).firstOrNull { it.id == outboxEvent.id })
-        relayScheduler.processOne(claimed)
+        relayScheduler.processOne(claim(outboxEvent.id))
 
         // then
         val updated = outboxRepository.findById(outboxEvent.id)
@@ -103,43 +105,40 @@ class OutboxRelaySchedulerTest : IntegrationTest() {
     @Transactional
     fun `markFailedOrRetry를 max-attempts만큼 반복하면 FAILED가 된다`() {
         // given
-        val now = LocalDateTime.now()
-        val event = outboxRepository.save(
-            OutboxEvent(
-                aggregateType = "RESERVATION",
-                aggregateId = 999L,
-                eventType = "RESERVATION_PAID",
-                payload = "{}",
-                nextAttemptAt = now,
-                createdAt = now,
-            ),
-        )
-        outboxRepository.claimBatch(limit = 10, now = now) // PROCESSING으로 만듦
+        val now = LocalDateTime.now(clock)
+        val eventId = claim(대기중인_outbox_이벤트_저장(999L).id).id
 
         // when — recordFailure는 PROCESSING 상태에서만 되므로 매번 되돌린 뒤 기록
         repeat(policy.maxAttempts) {
-            val current = requireNotNull(outboxRepository.findById(event.id))
+            val current = requireNotNull(outboxRepository.findById(eventId))
             current.markProcessingForTest()
             outboxRepository.save(current)
-            outboxRepository.markFailedOrRetry(event.id, now, policy.retryDelay, policy.maxAttempts)
+            outboxRepository.markFailedOrRetry(eventId, now, policy.retryDelay, policy.maxAttempts)
         }
 
         // then
-        assertThat(outboxRepository.findById(event.id)?.status).isEqualTo(OutboxStatus.FAILED)
-        assertThat(outboxRepository.findById(event.id)?.attemptCount).isEqualTo(policy.maxAttempts)
+        assertThat(outboxRepository.findById(eventId)?.status).isEqualTo(OutboxStatus.FAILED)
+        assertThat(outboxRepository.findById(eventId)?.attemptCount).isEqualTo(policy.maxAttempts)
     }
 
-    private fun 대기중인_outbox_이벤트_저장(reservationId: Long): OutboxEvent =
-        outboxRepository.save(
+    private fun claim(outboxEventId: Long): OutboxEvent =
+        requireNotNull(
+            outboxRepository.claimBatch(limit = 10, now = LocalDateTime.now(clock)).firstOrNull { it.id == outboxEventId },
+        )
+
+    private fun 대기중인_outbox_이벤트_저장(reservationId: Long): OutboxEvent {
+        val now = LocalDateTime.now(clock)
+        return outboxRepository.save(
             OutboxEvent(
                 aggregateType = "RESERVATION",
                 aggregateId = reservationId,
                 eventType = "RESERVATION_PAID",
                 payload = """{"reservationId":$reservationId}""",
-                nextAttemptAt = LocalDateTime.now(),
-                createdAt = LocalDateTime.now(),
+                nextAttemptAt = now,
+                createdAt = now,
             ),
         )
+    }
 
     private fun 결제완료_예약_준비(encryptedPhone: EncryptedPhone): Reservation {
         val event = eventRepository.공연_하나_저장()

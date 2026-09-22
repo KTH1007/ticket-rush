@@ -125,6 +125,8 @@ class ReservationCommandService(
         return available
     }
 
+    // 7개 모두 Reservation 생성에 실제로 필요한 값이다. 인위적으로 묶기보다 그대로 둔다.
+    @Suppress("LongParameterList")
     private fun saveHoldingReservation(
         eventId: Long,
         seatSelection: SeatSelection,

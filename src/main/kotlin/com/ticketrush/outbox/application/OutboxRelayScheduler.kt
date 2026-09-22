@@ -29,6 +29,8 @@ class OutboxRelayScheduler(
         outboxRepository.claimBatch(policy.chunkSize, LocalDateTime.now(clock)).forEach(::processOne)
     }
 
+    // 어떤 이유로 실패하든(네트워크 오류, 예약 조회 실패 등) 재시도 처리로 넘겨야 한다
+    @Suppress("TooGenericExceptionCaught")
     fun processOne(event: OutboxEvent) {
         try {
             dispatch(event)

@@ -18,5 +18,14 @@ class FakeSmsGatewayAdapter : NotificationPort {
 
     // 로그에 전화번호 원문이 남지 않도록 가운데 자리를 가린다. 앞 3자리+마지막 4자리만 남김(예: 010****9999)
     private fun mask(phone: String): String =
-        if (phone.length <= 7) "*".repeat(phone.length) else phone.take(3) + "*".repeat(phone.length - 7) + phone.takeLast(4)
+        if (phone.length <= PREFIX_LENGTH + SUFFIX_LENGTH) {
+            "*".repeat(phone.length)
+        } else {
+            phone.take(PREFIX_LENGTH) + "*".repeat(phone.length - PREFIX_LENGTH - SUFFIX_LENGTH) + phone.takeLast(SUFFIX_LENGTH)
+        }
+
+    companion object {
+        private const val PREFIX_LENGTH = 3
+        private const val SUFFIX_LENGTH = 4
+    }
 }

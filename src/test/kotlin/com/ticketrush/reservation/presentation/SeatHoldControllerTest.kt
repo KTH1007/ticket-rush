@@ -78,10 +78,7 @@ class SeatHoldControllerTest {
     fun `좌석을 홀드하면 201과 예약 정보를 반환한다`() {
         // given
         대기열_통과_처리()
-        val phoneHash = PhoneHash(ByteArray(32) { 1 })
-        val encryptedPhone = EncryptedPhone(ByteArray(28) { 1 })
-        every { phoneHasher.hash("01012345678") } returns phoneHash
-        every { phoneEncryptor.encrypt("01012345678") } returns encryptedPhone
+        val (phoneHash, encryptedPhone) = 전화번호_해싱_스텁()
         every {
             reservationCommandService.holdSeats(
                 eventId = 1L,
@@ -104,10 +101,7 @@ class SeatHoldControllerTest {
     fun `이미 선점된 좌석이면 409를 반환한다`() {
         // given
         대기열_통과_처리()
-        val phoneHash = PhoneHash(ByteArray(32) { 1 })
-        val encryptedPhone = EncryptedPhone(ByteArray(28) { 1 })
-        every { phoneHasher.hash("01012345678") } returns phoneHash
-        every { phoneEncryptor.encrypt("01012345678") } returns encryptedPhone
+        val (phoneHash, encryptedPhone) = 전화번호_해싱_스텁()
         every {
             reservationCommandService.holdSeats(
                 eventId = 1L,
@@ -168,6 +162,14 @@ class SeatHoldControllerTest {
 
     private fun 대기열_통과_처리(token: String = "test-queue-token") {
         every { queueQueryService.requireActive(1L, token) } just Runs
+    }
+
+    private fun 전화번호_해싱_스텁(): Pair<PhoneHash, EncryptedPhone> {
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val encryptedPhone = EncryptedPhone(ByteArray(28) { 1 })
+        every { phoneHasher.hash("01012345678") } returns phoneHash
+        every { phoneEncryptor.encrypt("01012345678") } returns encryptedPhone
+        return phoneHash to encryptedPhone
     }
 
     private fun 좌석_홀드_문서화() =
