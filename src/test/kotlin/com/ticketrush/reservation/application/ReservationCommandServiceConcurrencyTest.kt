@@ -56,6 +56,7 @@ class ReservationCommandServiceConcurrencyTest : IntegrationTest() {
                     eventId = event.id,
                     seatSelection = SeatSelection(listOf(seat.id)),
                     phoneHash = PhoneHash(ByteArray(32) { i.toByte() }),
+                    encryptedPhone = com.ticketrush.shared.EncryptedPhone(ByteArray(28) { i.toByte() }),
                 )
             }
 
@@ -103,6 +104,7 @@ class ReservationCommandServiceConcurrencyTest : IntegrationTest() {
                 eventId = eventId,
                 seatSelection = SeatSelection(seatIdsPerThread[i]),
                 phoneHash = phoneHash,
+                encryptedPhone = com.ticketrush.shared.EncryptedPhone(ByteArray(28) { 0 }),
             )
         }
     }

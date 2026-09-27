@@ -16,5 +16,9 @@ ticket-rush:
   outbox:
     poll-interval: 100ms
     chunk-size: 10
+    retry-delay: 200ms
+    stale-claim-timeout: 500ms
+    reclaim-interval: 200ms
   security:
     phone-hmac-key: test-hmac-key-for-local-only
+    phone-encryption-key: dGVzdC1waG9uZS1lbmNyeXB0aW9uLWtleS0zMmJ5dGU=

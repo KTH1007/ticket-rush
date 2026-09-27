@@ -8,6 +8,8 @@ import com.ticketrush.reservation.application.ReservationCommandService
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.SeatAlreadyHeldException
 import com.ticketrush.reservation.domain.SeatSelection
+import com.ticketrush.shared.EncryptedPhone
+import com.ticketrush.shared.PhoneEncryptor
 import com.ticketrush.shared.PhoneHash
 import com.ticketrush.shared.PhoneHasher
 import io.mockk.Runs
@@ -52,6 +54,9 @@ class SeatHoldControllerTest {
     lateinit var phoneHasher: PhoneHasher
 
     @Autowired
+    lateinit var phoneEncryptor: PhoneEncryptor
+
+    @Autowired
     lateinit var queueQueryService: QueueQueryService
 
     @TestConfiguration
@@ -63,6 +68,9 @@ class SeatHoldControllerTest {
         fun phoneHasher(): PhoneHasher = mockk()
 
         @Bean
+        fun phoneEncryptor(): PhoneEncryptor = mockk()
+
+        @Bean
         fun queueQueryService(): QueueQueryService = mockk()
     }
 
@@ -70,10 +78,14 @@ class SeatHoldControllerTest {
     fun `좌석을 홀드하면 201과 예약 정보를 반환한다`() {
         // given
         대기열_통과_처리()
-        val phoneHash = PhoneHash(ByteArray(32) { 1 })
-        every { phoneHasher.hash("01012345678") } returns phoneHash
+        val (phoneHash, encryptedPhone) = 전화번호_해싱_스텁()
         every {
-            reservationCommandService.holdSeats(eventId = 1L, seatSelection = SeatSelection(listOf(10L)), phoneHash = phoneHash)
+            reservationCommandService.holdSeats(
+                eventId = 1L,
+                seatSelection = SeatSelection(listOf(10L)),
+                phoneHash = phoneHash,
+                encryptedPhone = encryptedPhone,
+            )
         } returns 예약(seatIds = listOf(10L), phoneHash = phoneHash)
 
         // when & then
@@ -89,10 +101,14 @@ class SeatHoldControllerTest {
     fun `이미 선점된 좌석이면 409를 반환한다`() {
         // given
         대기열_통과_처리()
-        val phoneHash = PhoneHash(ByteArray(32) { 1 })
-        every { phoneHasher.hash("01012345678") } returns phoneHash
+        val (phoneHash, encryptedPhone) = 전화번호_해싱_스텁()
         every {
-            reservationCommandService.holdSeats(eventId = 1L, seatSelection = SeatSelection(listOf(10L)), phoneHash = phoneHash)
+            reservationCommandService.holdSeats(
+                eventId = 1L,
+                seatSelection = SeatSelection(listOf(10L)),
+                phoneHash = phoneHash,
+                encryptedPhone = encryptedPhone,
+            )
         } throws SeatAlreadyHeldException()
 
         // when & then
@@ -146,6 +162,14 @@ class SeatHoldControllerTest {
 
     private fun 대기열_통과_처리(token: String = "test-queue-token") {
         every { queueQueryService.requireActive(1L, token) } just Runs
+    }
+
+    private fun 전화번호_해싱_스텁(): Pair<PhoneHash, EncryptedPhone> {
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val encryptedPhone = EncryptedPhone(ByteArray(28) { 1 })
+        every { phoneHasher.hash("01012345678") } returns phoneHash
+        every { phoneEncryptor.encrypt("01012345678") } returns encryptedPhone
+        return phoneHash to encryptedPhone
     }
 
     private fun 좌석_홀드_문서화() =

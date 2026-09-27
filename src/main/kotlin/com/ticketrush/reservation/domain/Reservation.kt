@@ -1,6 +1,8 @@
 package com.ticketrush.reservation.domain
 
 import com.ticketrush.shared.BaseEntity
+import com.ticketrush.shared.EncryptedPhone
+import com.ticketrush.shared.EncryptedPhoneConverter
 import com.ticketrush.shared.PhoneHash
 import com.ticketrush.shared.PhoneHashConverter
 import jakarta.persistence.Column
@@ -24,6 +26,7 @@ class Reservation(
     val id: Long = 0,
     eventId: Long,
     phoneHash: PhoneHash,
+    encryptedPhone: EncryptedPhone? = null,
     quantity: Short,
     amount: Int,
     holdToken: UUID,
@@ -40,6 +43,11 @@ class Reservation(
     @Convert(converter = PhoneHashConverter::class)
     @Column(name = "phone_hash", nullable = false)
     var phoneHash: PhoneHash = phoneHash
+        protected set
+
+    @Convert(converter = EncryptedPhoneConverter::class)
+    @Column(name = "encrypted_phone")
+    var encryptedPhone: EncryptedPhone? = encryptedPhone
         protected set
 
     @Column(nullable = false)

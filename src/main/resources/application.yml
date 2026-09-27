@@ -106,8 +106,12 @@ ticket-rush:
     poll-interval: 1s
     chunk-size: 100
     max-attempts: 5
+    retry-delay: 30s
+    stale-claim-timeout: 60s
+    reclaim-interval: 30s
   reservation-lookup:
     max-attempts: 5
     block-window: 10m
   security:
     phone-hmac-key: ${PHONE_HMAC_KEY}   # DB/Redis에서 전화번호 원문 대신 동일 사용자를 식별할 수 있는 결정적 식별자를 만들기 위함
+    phone-encryption-key: ${PHONE_ENCRYPTION_KEY}   # AES-256 키, base64 인코딩된 32바이트. openssl rand -base64 32 로 생성
