@@ -76,4 +76,19 @@ class PaymentClaimServiceTest : IntegrationTest() {
         assertThat(takenOver.id).isEqualTo(first.id)
         assertThat(takenOver.status).isEqualTo(PaymentStatus.PENDING)
     }
+
+    @Test
+    @Transactional
+    fun `이미 SUCCESS 등 최종 상태인 Payment는 그대로 반환한다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event)
+        val claimed = claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+        claimed.markSuccess("PG-TXN-1", LocalDateTime.now(clock))
+        paymentRepository.save(claimed)
+
+        val result = claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+
+        assertThat(result.id).isEqualTo(claimed.id)
+        assertThat(result.status).isEqualTo(PaymentStatus.SUCCESS)
+    }
 }
