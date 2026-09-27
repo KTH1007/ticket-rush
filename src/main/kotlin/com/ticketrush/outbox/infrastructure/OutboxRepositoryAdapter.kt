@@ -29,6 +29,7 @@ class OutboxRepositoryAdapter(
         return jpaRepository.findAllById(ids)
     }
 
+    @Transactional
     override fun reclaimStale(staleBefore: LocalDateTime): Int = jpaRepository.reclaimStale(staleBefore)
 
     @Transactional
