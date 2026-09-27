@@ -86,7 +86,15 @@ class PaymentCommandService(
         existingPayment: Payment?,
     ): PaymentConfirmationResult =
         try {
-            when (val result = paymentGateway.charge(reservation.id, reservation.amount, reservation.idempotencyKey)) {
+            when (
+                val result =
+                    paymentGateway.charge(
+                        paymentKey = "TEMP-${reservation.id}",
+                        orderId = reservation.idempotencyKey.toString(),
+                        amount = reservation.amount,
+                        idempotencyKey = reservation.idempotencyKey,
+                    )
+            ) {
                 is PaymentGatewayResult.Approved -> handleApproved(reservation, existingPayment, result)
                 is PaymentGatewayResult.Declined -> handleDeclined(reservation, existingPayment, result)
             }

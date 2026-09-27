@@ -218,6 +218,7 @@ class SeatHoldControllerTest {
             responseFields(
                 fieldWithPath("reservationId").description("예약 id"),
                 fieldWithPath("holdToken").description("홀드 소유권 증명 토큰 (결제 확정 시 재사용)"),
+                fieldWithPath("orderId").description("Toss 결제 요청 시 사용할 주문번호(idempotencyKey)"),
                 fieldWithPath("quantity").description("선택 좌석 수"),
                 fieldWithPath("amount").description("결제 금액"),
                 fieldWithPath("holdExpiresAt").description("홀드 만료 시각"),

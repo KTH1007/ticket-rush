@@ -3,9 +3,11 @@ package com.ticketrush.payment.domain
 import java.util.UUID
 
 interface PaymentGatewayPort {
-    // idempotencyKey는 PG 쪽 중복 승인 방지용
+    // paymentKey/orderId는 클라이언트가 결제창(위젯) 인증 후 받아온 값. idempotencyKey는 HTTP
+    // 헤더로 보내 재시도해도 PG가 중복 승인하지 않게 한다
     fun charge(
-        reservationId: Long,
+        paymentKey: String,
+        orderId: String,
         amount: Int,
         idempotencyKey: UUID,
     ): PaymentGatewayResult

@@ -77,7 +77,7 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
         // given
         val reservation = 홀드된_예약_준비()
         every { reservationNoGenerator.generate() } answers { "RESNO" + System.nanoTime().toString().takeLast(7) }
-        every { paymentGateway.charge(any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-CONC")
+        every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-CONC")
 
         // when
         val results = 동시_결제_확정_시도(reservation, threadCount = 2)
