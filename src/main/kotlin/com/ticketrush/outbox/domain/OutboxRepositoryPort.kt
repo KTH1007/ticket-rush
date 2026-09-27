@@ -21,10 +21,15 @@ interface OutboxRepositoryPort {
     fun reclaimStale(staleBefore: LocalDateTime): Int
 
     // 스케줄러의 self-invocation으로 @Transactional이 무시되는 걸 피하려 여기 둠.
-    fun markDone(id: Long)
+    // claimedAt이 현재 저장된 값과 다르면(회수 스케줄러가 이미 PENDING으로 되돌렸으면) 조용히 건너뛴다.
+    fun markDone(
+        id: Long,
+        claimedAt: LocalDateTime,
+    )
 
     fun markFailedOrRetry(
         id: Long,
+        claimedAt: LocalDateTime,
         now: LocalDateTime,
         retryDelay: Duration,
         maxAttempts: Int,

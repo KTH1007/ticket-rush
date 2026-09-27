@@ -85,6 +85,25 @@ class OutboxRelaySchedulerTest : IntegrationTest() {
 
     @Test
     @Transactional
+    fun `처리 도중 회수 스케줄러가 claim을 되돌려도 예외 없이 넘어가고 상태를 건드리지 않는다`() {
+        // given
+        val encryptedPhone = phoneEncryptor.encrypt("01099999999")
+        val reservation = 결제완료_예약_준비(encryptedPhone)
+        val outboxEvent = 대기중인_outbox_이벤트_저장(reservation.id)
+        val claimed = claim(outboxEvent.id)
+
+        // dispatch가 오래 걸리는 사이 회수 스케줄러가 먼저 PENDING으로 되돌린 상황을 흉내낸다
+        outboxRepository.reclaimStale(staleBefore = LocalDateTime.now(clock).plusSeconds(1))
+
+        // when — claimed는 옛 claimedAt을 들고 있으므로 markDone에서 소유권 불일치로 조용히 건너뛰어야 한다
+        relayScheduler.processOne(claimed)
+
+        // then
+        assertThat(outboxRepository.findById(outboxEvent.id)?.status).isEqualTo(OutboxStatus.PENDING)
+    }
+
+    @Test
+    @Transactional
     fun `발송이 실패하면 attempt_count가 늘고 PENDING으로 재시도 대기한다`() {
         // given
         every { notificationPort.sendSms(any(), any()) } throws RuntimeException("게이트웨이 오류")
@@ -106,14 +125,16 @@ class OutboxRelaySchedulerTest : IntegrationTest() {
     fun `markFailedOrRetry를 max-attempts만큼 반복하면 FAILED가 된다`() {
         // given
         val now = LocalDateTime.now(clock)
-        val eventId = claim(대기중인_outbox_이벤트_저장(999L).id).id
+        val claimed = claim(대기중인_outbox_이벤트_저장(999L).id)
+        val eventId = claimed.id
+        val claimedAt = requireNotNull(claimed.claimedAt)
 
         // when — recordFailure는 PROCESSING 상태에서만 되므로 매번 되돌린 뒤 기록
         repeat(policy.maxAttempts) {
             val current = requireNotNull(outboxRepository.findById(eventId))
             current.markProcessingForTest()
             outboxRepository.save(current)
-            outboxRepository.markFailedOrRetry(eventId, now, policy.retryDelay, policy.maxAttempts)
+            outboxRepository.markFailedOrRetry(eventId, claimedAt, now, policy.retryDelay, policy.maxAttempts)
         }
 
         // then

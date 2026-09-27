@@ -32,12 +32,26 @@ class OutboxRelayScheduler(
     // 어떤 이유로 실패하든(네트워크 오류, 예약 조회 실패 등) 재시도 처리로 넘겨야 한다
     @Suppress("TooGenericExceptionCaught")
     fun processOne(event: OutboxEvent) {
+        val claimedAt = requireNotNull(event.claimedAt) { "claim된 이벤트는 claimedAt이 있어야 합니다: id=${event.id}" }
         try {
             dispatch(event)
-            outboxRepository.markDone(event.id)
+            outboxRepository.markDone(event.id, claimedAt)
         } catch (e: Exception) {
             logger.warn(e) { "outbox 이벤트 처리 실패: id=${event.id}, eventType=${event.eventType}" }
-            outboxRepository.markFailedOrRetry(event.id, LocalDateTime.now(clock), policy.retryDelay, policy.maxAttempts)
+            markFailedOrRetryQuietly(event, claimedAt)
+        }
+    }
+
+    // 실패 기록 자체가 실패해도(소유권을 잃은 뒤 재처리 등) relay()의 forEach 전체를 중단시키면 안 된다
+    @Suppress("TooGenericExceptionCaught")
+    private fun markFailedOrRetryQuietly(
+        event: OutboxEvent,
+        claimedAt: LocalDateTime,
+    ) {
+        try {
+            outboxRepository.markFailedOrRetry(event.id, claimedAt, LocalDateTime.now(clock), policy.retryDelay, policy.maxAttempts)
+        } catch (e: Exception) {
+            logger.error(e) { "outbox 실패 기록 자체가 실패함: id=${event.id}" }
         }
     }
 

@@ -65,31 +65,63 @@ class OutboxRepositoryAdapterTest : IntegrationTest() {
     @Transactional
     fun `markDone은 PROCESSING 행을 DONE으로 바꾼다`() {
         // given
-        val event = outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
-        outboxRepository.claimBatch(limit = 10, now = now)
+        outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
+        val claimed = outboxRepository.claimBatch(limit = 10, now = now).single()
 
         // when
-        outboxRepository.markDone(event.id)
+        outboxRepository.markDone(claimed.id, requireNotNull(claimed.claimedAt))
 
         // then
-        assertThat(outboxRepository.findById(event.id)?.status).isEqualTo(OutboxStatus.DONE)
+        assertThat(outboxRepository.findById(claimed.id)?.status).isEqualTo(OutboxStatus.DONE)
+    }
+
+    @Test
+    @Transactional
+    fun `claimedAt이 일치하지 않으면(소유권을 잃으면) markDone을 건너뛴다`() {
+        // given
+        outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
+        val claimed = outboxRepository.claimBatch(limit = 10, now = now).single()
+        val staleClaimedAt = requireNotNull(claimed.claimedAt).minusMinutes(1)
+
+        // when
+        outboxRepository.markDone(claimed.id, staleClaimedAt)
+
+        // then
+        assertThat(outboxRepository.findById(claimed.id)?.status).isEqualTo(OutboxStatus.PROCESSING)
     }
 
     @Test
     @Transactional
     fun `markFailedOrRetry는 attempt_count를 늘리고 임계치 미만이면 PENDING으로 되돌린다`() {
         // given
-        val event = outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
-        outboxRepository.claimBatch(limit = 10, now = now)
+        outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
+        val claimed = outboxRepository.claimBatch(limit = 10, now = now).single()
 
         // when
-        outboxRepository.markFailedOrRetry(event.id, now, Duration.ofSeconds(30), maxAttempts = 5)
+        outboxRepository.markFailedOrRetry(claimed.id, requireNotNull(claimed.claimedAt), now, Duration.ofSeconds(30), maxAttempts = 5)
 
         // then
-        val updated = outboxRepository.findById(event.id)
+        val updated = outboxRepository.findById(claimed.id)
         assertThat(updated?.attemptCount).isEqualTo(1)
         assertThat(updated?.status).isEqualTo(OutboxStatus.PENDING)
         assertThat(updated?.nextAttemptAt).isEqualTo(now.plusSeconds(30))
+    }
+
+    @Test
+    @Transactional
+    fun `claimedAt이 일치하지 않으면(소유권을 잃으면) markFailedOrRetry를 건너뛴다`() {
+        // given
+        outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
+        val claimed = outboxRepository.claimBatch(limit = 10, now = now).single()
+        val staleClaimedAt = requireNotNull(claimed.claimedAt).minusMinutes(1)
+
+        // when
+        outboxRepository.markFailedOrRetry(claimed.id, staleClaimedAt, now, Duration.ofSeconds(30), maxAttempts = 5)
+
+        // then
+        val untouched = outboxRepository.findById(claimed.id)
+        assertThat(untouched?.status).isEqualTo(OutboxStatus.PROCESSING)
+        assertThat(untouched?.attemptCount).isEqualTo(0)
     }
 
     private fun 이벤트(
