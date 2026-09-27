@@ -55,7 +55,7 @@ class PaymentControllerTest {
     fun `결제를 확정하면 201과 결제 결과를 반환한다`() {
         // given
         val holdToken = UUID.randomUUID()
-        every { paymentCommandService.confirmPayment(1L, holdToken) } returns 결제_확정_결과()
+        every { paymentCommandService.confirmPayment(1L, holdToken, any(), any(), any()) } returns 결제_확정_결과()
 
         // when & then
         mockMvc
@@ -77,7 +77,7 @@ class PaymentControllerTest {
     fun `존재하지 않는 예약이면 404를 반환한다`() {
         // given
         val holdToken = UUID.randomUUID()
-        every { paymentCommandService.confirmPayment(1L, holdToken) } throws ReservationNotFoundException(1L)
+        every { paymentCommandService.confirmPayment(1L, holdToken, any(), any(), any()) } throws ReservationNotFoundException(1L)
 
         // when & then
         mockMvc.perform(결제_확정_요청(holdToken = holdToken)).andExpect(status().isNotFound)
@@ -87,7 +87,7 @@ class PaymentControllerTest {
     fun `holdToken이 일치하지 않으면 401을 반환한다`() {
         // given
         val holdToken = UUID.randomUUID()
-        every { paymentCommandService.confirmPayment(1L, holdToken) } throws HoldTokenMismatchException()
+        every { paymentCommandService.confirmPayment(1L, holdToken, any(), any(), any()) } throws HoldTokenMismatchException()
 
         // when & then
         mockMvc.perform(결제_확정_요청(holdToken = holdToken)).andExpect(status().isUnauthorized)
@@ -98,7 +98,7 @@ class PaymentControllerTest {
         // given
         val holdToken = UUID.randomUUID()
         every {
-            paymentCommandService.confirmPayment(1L, holdToken)
+            paymentCommandService.confirmPayment(1L, holdToken, any(), any(), any())
         } throws ReservationNotHoldingException(ReservationStatus.EXPIRED)
 
         // when & then
@@ -109,7 +109,7 @@ class PaymentControllerTest {
     fun `PG가 거절하면 409를 반환한다`() {
         // given
         val holdToken = UUID.randomUUID()
-        every { paymentCommandService.confirmPayment(1L, holdToken) } throws PaymentDeclinedException("한도 초과")
+        every { paymentCommandService.confirmPayment(1L, holdToken, any(), any(), any()) } throws PaymentDeclinedException("한도 초과")
 
         // when & then
         mockMvc.perform(결제_확정_요청(holdToken = holdToken)).andExpect(status().isConflict)
@@ -119,7 +119,7 @@ class PaymentControllerTest {
     fun `정확히 동시에 처리된 요청이면 409를 반환한다`() {
         // given
         val holdToken = UUID.randomUUID()
-        every { paymentCommandService.confirmPayment(1L, holdToken) } throws PaymentConflictException()
+        every { paymentCommandService.confirmPayment(1L, holdToken, any(), any(), any()) } throws PaymentConflictException()
 
         // when & then
         mockMvc.perform(결제_확정_요청(holdToken = holdToken)).andExpect(status().isConflict)
@@ -128,9 +128,16 @@ class PaymentControllerTest {
     private fun 결제_확정_요청(
         reservationId: Long = 1L,
         holdToken: UUID,
+        paymentKey: String = "test-payment-key",
+        orderId: String = "test-order-id",
+        amount: Int = 100_000,
     ) = post("/api/reservations/{reservationId}/payments", reservationId)
         .contentType(MediaType.APPLICATION_JSON)
-        .content(objectMapper.writeValueAsString(PaymentConfirmationRequest(holdToken = holdToken)))
+        .content(
+            objectMapper.writeValueAsString(
+                PaymentConfirmationRequest(holdToken = holdToken, paymentKey = paymentKey, orderId = orderId, amount = amount),
+            ),
+        )
 
     private fun 결제_확정_결과(): PaymentConfirmationResult =
         PaymentConfirmationResult(
@@ -151,6 +158,9 @@ class PaymentControllerTest {
         private val paymentConfirmRequestFields =
             requestFields(
                 fieldWithPath("holdToken").description("좌석 홀드 시 발급받은 소유권 증명 토큰"),
+                fieldWithPath("paymentKey").description("결제 위젯 인증 완료 후 발급된 결제 키"),
+                fieldWithPath("orderId").description("주문 id. 예약의 idempotencyKey와 일치해야 한다"),
+                fieldWithPath("amount").description("결제 금액. 예약 금액과 일치해야 한다"),
             )
         private val paymentConfirmResponseFields =
             responseFields(

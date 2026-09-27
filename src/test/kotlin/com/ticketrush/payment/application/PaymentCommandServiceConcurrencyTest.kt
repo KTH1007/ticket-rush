@@ -88,10 +88,19 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
         assertThat(failure).isInstanceOf(PaymentConflictException::class.java)
 
         val winner = results.first { it.isSuccess }.getOrThrow()
-        val retried = paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        val retried = paymentCommandService.결제_확정(reservation)
         assertThat(retried.reservationNo).isEqualTo(winner.reservationNo)
         assertThat(retried.payment.pgTransactionId).isEqualTo(winner.payment.pgTransactionId)
     }
+
+    private fun PaymentCommandService.결제_확정(reservation: Reservation): PaymentConfirmationResult =
+        confirmPayment(
+            reservationId = reservation.id,
+            holdToken = reservation.holdToken,
+            paymentKey = "test-payment-key",
+            orderId = reservation.idempotencyKey.toString(),
+            amount = reservation.amount,
+        )
 
     private fun 동시_결제_확정_시도(
         reservation: Reservation,
@@ -106,7 +115,7 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
             repeat(threadCount) {
                 executor.submit {
                     startGate.await()
-                    results.add(runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) })
+                    results.add(runCatching { paymentCommandService.결제_확정(reservation) })
                     doneLatch.countDown()
                 }
             }

@@ -1,10 +1,12 @@
 package com.ticketrush.payment.application
 
 import com.ticketrush.event.domain.EventRepositoryPort
+import com.ticketrush.payment.domain.PaymentConfirmationResult
 import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentHistoryRepositoryPort
+import com.ticketrush.payment.domain.PaymentOrderMismatchException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.GradeRepositoryPort
@@ -89,7 +91,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
         } returns PaymentGatewayResult.Approved(pgTransactionId = "PG-TXN-99")
 
         // when
-        paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        paymentCommandService.결제_확정(reservation)
 
         // then
         val recorded = outboxRepository.findByAggregateId(reservation.id).singleOrNull()
@@ -107,7 +109,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
         } returns PaymentGatewayResult.Approved(pgTransactionId = "PG-TXN-1")
 
         // when
-        val result = paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        val result = paymentCommandService.결제_확정(reservation)
 
         // then
         assertThat(result.reservationNo).isEqualTo("RESNO000001")
@@ -123,7 +125,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-2")
 
         // when
-        paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        paymentCommandService.결제_확정(reservation)
 
         // then
         val seat = seatRepository.findAllByEventId(reservation.eventId).single()
@@ -134,8 +136,15 @@ class PaymentCommandServiceTest : IntegrationTest() {
     @Test
     fun `존재하지 않는 예약이면 ReservationNotFoundException이 발생한다`() {
         // when & then
-        assertThatThrownBy { paymentCommandService.confirmPayment(999_999L, UUID.randomUUID()) }
-            .isInstanceOf(ReservationNotFoundException::class.java)
+        assertThatThrownBy {
+            paymentCommandService.confirmPayment(
+                reservationId = 999_999L,
+                holdToken = UUID.randomUUID(),
+                paymentKey = "test-payment-key",
+                orderId = "order-id",
+                amount = 100_000,
+            )
+        }.isInstanceOf(ReservationNotFoundException::class.java)
     }
 
     @Test
@@ -144,8 +153,15 @@ class PaymentCommandServiceTest : IntegrationTest() {
         val reservation = 홀드된_예약_준비()
 
         // when & then
-        assertThatThrownBy { paymentCommandService.confirmPayment(reservation.id, UUID.randomUUID()) }
-            .isInstanceOf(HoldTokenMismatchException::class.java)
+        assertThatThrownBy {
+            paymentCommandService.confirmPayment(
+                reservationId = reservation.id,
+                holdToken = UUID.randomUUID(),
+                paymentKey = "test-payment-key",
+                orderId = reservation.idempotencyKey.toString(),
+                amount = reservation.amount,
+            )
+        }.isInstanceOf(HoldTokenMismatchException::class.java)
     }
 
     @Test
@@ -166,7 +182,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
             )
 
         // when & then
-        assertThatThrownBy { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation) }
             .isInstanceOf(ReservationNotHoldingException::class.java)
     }
 
@@ -176,8 +192,40 @@ class PaymentCommandServiceTest : IntegrationTest() {
         val reservation = 홀드된_예약_준비(holdExpiresAt = LocalDateTime.of(2020, 1, 1, 0, 0))
 
         // when & then
-        assertThatThrownBy { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation) }
             .isInstanceOf(ReservationNotHoldingException::class.java)
+    }
+
+    @Test
+    fun `요청의 orderId가 예약의 idempotencyKey와 다르면 예외가 난다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event)
+
+        assertThatThrownBy {
+            paymentCommandService.confirmPayment(
+                reservationId = reservation.id,
+                holdToken = reservation.holdToken,
+                paymentKey = "test-payment-key",
+                orderId = "잘못된-orderId",
+                amount = reservation.amount,
+            )
+        }.isInstanceOf(PaymentOrderMismatchException::class.java)
+    }
+
+    @Test
+    fun `요청의 amount가 예약 금액과 다르면 예외가 난다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event, amount = 100_000)
+
+        assertThatThrownBy {
+            paymentCommandService.confirmPayment(
+                reservationId = reservation.id,
+                holdToken = reservation.holdToken,
+                paymentKey = "test-payment-key",
+                orderId = reservation.idempotencyKey.toString(),
+                amount = 1,
+            )
+        }.isInstanceOf(PaymentOrderMismatchException::class.java)
     }
 
     @Test
@@ -186,10 +234,10 @@ class PaymentCommandServiceTest : IntegrationTest() {
         val reservation = 홀드된_예약_준비()
         every { reservationNoGenerator.generate() } returns "RESNO000003"
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-3")
-        paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        paymentCommandService.결제_확정(reservation)
 
         // when
-        val result = paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        val result = paymentCommandService.결제_확정(reservation)
 
         // then
         assertThat(result.payment.pgTransactionId).isEqualTo("PG-TXN-3")
@@ -203,7 +251,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Declined("한도 초과")
 
         // when & then
-        assertThatThrownBy { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation) }
             .isInstanceOf(PaymentDeclinedException::class.java)
     }
 
@@ -214,7 +262,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Declined("한도 초과")
 
         // when
-        runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+        runCatching { paymentCommandService.결제_확정(reservation) }
 
         // then
         val updated = requireNotNull(reservationRepository.findById(reservation.id))
@@ -230,7 +278,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Declined("한도 초과")
 
         // when
-        runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+        runCatching { paymentCommandService.결제_확정(reservation) }
 
         // then
         val payment = paymentRepository.findByReservationId(reservation.id)
@@ -242,13 +290,13 @@ class PaymentCommandServiceTest : IntegrationTest() {
         // given
         val reservation = 홀드된_예약_준비()
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Declined("한도 초과")
-        runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+        runCatching { paymentCommandService.결제_확정(reservation) }
         val failedPaymentId = requireNotNull(paymentRepository.findByReservationId(reservation.id)).id
 
         // when
         every { reservationNoGenerator.generate() } returns "RESNO000004"
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-4")
-        val result = paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        val result = paymentCommandService.결제_확정(reservation)
 
         // then
         assertThat(result.payment.id).isEqualTo(failedPaymentId)
@@ -261,14 +309,14 @@ class PaymentCommandServiceTest : IntegrationTest() {
         val other = 홀드된_예약_준비()
         every { reservationNoGenerator.generate() } returns "COLLIDE00001"
         every { paymentGateway.charge(any(), any(), any(), other.idempotencyKey) } returns PaymentGatewayResult.Approved("PG-TXN-OTHER")
-        paymentCommandService.confirmPayment(other.id, other.holdToken)
+        paymentCommandService.결제_확정(other)
 
         val reservation = 홀드된_예약_준비()
         every { reservationNoGenerator.generate() } returnsMany listOf("COLLIDE00001", "UNIQUE000001")
         every { paymentGateway.charge(any(), any(), any(), reservation.idempotencyKey) } returns PaymentGatewayResult.Approved("PG-TXN-2")
 
         // when
-        val result = paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        val result = paymentCommandService.결제_확정(reservation)
 
         // then
         assertThat(result.reservationNo).isEqualTo("UNIQUE000001")
@@ -283,7 +331,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-10")
 
         // when
-        val result = paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        val result = paymentCommandService.결제_확정(reservation)
 
         // then
         val history = paymentHistoryRepository.findAllByPaymentId(result.payment.id)
@@ -299,7 +347,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Declined("한도 초과")
 
         // when
-        runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+        runCatching { paymentCommandService.결제_확정(reservation) }
 
         // then
         val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
@@ -314,18 +362,27 @@ class PaymentCommandServiceTest : IntegrationTest() {
         // given
         val reservation = 홀드된_예약_준비()
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Declined("한도 초과")
-        runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) }
+        runCatching { paymentCommandService.결제_확정(reservation) }
 
         // when
         every { reservationNoGenerator.generate() } returns "RESNO000011"
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-11")
-        val result = paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        val result = paymentCommandService.결제_확정(reservation)
 
         // then
         val history = paymentHistoryRepository.findAllByPaymentId(result.payment.id)
         assertThat(history).hasSize(2)
         assertThat(history).extracting("toStatus").containsExactlyInAnyOrder(PaymentStatus.FAILED, PaymentStatus.SUCCESS)
     }
+
+    private fun PaymentCommandService.결제_확정(reservation: Reservation): PaymentConfirmationResult =
+        confirmPayment(
+            reservationId = reservation.id,
+            holdToken = reservation.holdToken,
+            paymentKey = "test-payment-key",
+            orderId = reservation.idempotencyKey.toString(),
+            amount = reservation.amount,
+        )
 
     private fun 홀드된_예약_준비(
         amount: Int = 100_000,

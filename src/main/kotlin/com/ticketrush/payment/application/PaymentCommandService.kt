@@ -6,6 +6,7 @@ import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentOrderMismatchException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.payment.domain.ReservationPaidEvent
@@ -46,6 +47,9 @@ class PaymentCommandService(
     fun confirmPayment(
         reservationId: Long,
         holdToken: UUID,
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
     ): PaymentConfirmationResult {
         val reservation = loadOwnedReservation(reservationId, holdToken)
 
@@ -53,13 +57,24 @@ class PaymentCommandService(
         successResultOrNull(reservation, existingPayment)?.let { return it }
 
         requireHolding(reservation)
+        requireOrderMatches(reservation, orderId, amount)
 
-        return chargeAndApply(reservation, existingPayment)
+        return chargeAndApply(reservation, existingPayment, paymentKey, orderId, amount)
     }
 
     private fun requireHolding(reservation: Reservation) {
         if (reservation.status != ReservationStatus.HOLDING) throw ReservationNotHoldingException(reservation.status)
         if (!reservation.isHoldActiveAt(LocalDateTime.now(clock))) throw ReservationNotHoldingException(ReservationStatus.EXPIRED)
+    }
+
+    // 클라이언트가 보낸 값이 서버가 아는 예약 정보와 다르면 위조나 버그로 보고 거부한다
+    private fun requireOrderMatches(
+        reservation: Reservation,
+        orderId: String,
+        amount: Int,
+    ) {
+        if (reservation.idempotencyKey.toString() != orderId) throw PaymentOrderMismatchException()
+        if (reservation.amount != amount) throw PaymentOrderMismatchException()
     }
 
     private fun loadOwnedReservation(
@@ -84,16 +99,13 @@ class PaymentCommandService(
     private fun chargeAndApply(
         reservation: Reservation,
         existingPayment: Payment?,
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
     ): PaymentConfirmationResult =
         try {
             when (
-                val result =
-                    paymentGateway.charge(
-                        paymentKey = "TEMP-${reservation.id}",
-                        orderId = reservation.idempotencyKey.toString(),
-                        amount = reservation.amount,
-                        idempotencyKey = reservation.idempotencyKey,
-                    )
+                val result = paymentGateway.charge(paymentKey, orderId, amount, reservation.idempotencyKey)
             ) {
                 is PaymentGatewayResult.Approved -> handleApproved(reservation, existingPayment, result)
                 is PaymentGatewayResult.Declined -> handleDeclined(reservation, existingPayment, result)
