@@ -6,6 +6,7 @@ import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
+import com.ticketrush.reservation.domain.ReservationStatus
 import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.예약_하나_저장
@@ -90,5 +91,31 @@ class PaymentClaimServiceTest : IntegrationTest() {
 
         assertThat(result.id).isEqualTo(claimed.id)
         assertThat(result.status).isEqualTo(PaymentStatus.SUCCESS)
+    }
+
+    @Test
+    @Transactional
+    fun `applySuccess는 PENDING을 SUCCESS로 바꾸고 예약번호를 배정한다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event)
+        val claimed = claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+
+        val result = claimService.applySuccess(claimed, reservation, "PG-TX-001", LocalDateTime.now(clock))
+
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
+        assertThat(result.reservationNo).isNotBlank()
+        assertThat(reservationRepository.findById(reservation.id)?.status).isEqualTo(ReservationStatus.PAID)
+    }
+
+    @Test
+    @Transactional
+    fun `applyFailure는 PENDING을 FAILED로 바꾸고 홀드를 단축한다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event)
+        val claimed = claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+
+        claimService.applyFailure(claimed, reservation, LocalDateTime.now(clock), reason = "한도 초과")
+
+        assertThat(paymentRepository.findByReservationId(reservation.id)?.status).isEqualTo(PaymentStatus.FAILED)
     }
 }
