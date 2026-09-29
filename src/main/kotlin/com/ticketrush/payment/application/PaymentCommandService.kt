@@ -2,6 +2,7 @@ package com.ticketrush.payment.application
 
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConfirmationResult
+import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
@@ -14,6 +15,7 @@ import com.ticketrush.reservation.domain.ReservationNotFoundException
 import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
+import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
 import java.time.Clock
 import java.time.LocalDateTime
@@ -48,6 +50,7 @@ class PaymentCommandService(
         return callGatewayAndApply(reservation, claimed, paymentKey, orderId, amount)
     }
 
+    // 만료된 클레임을 동시에 넘겨받은 두 요청 중 진 쪽은 결과 반영 저장에서 낙관적 락 충돌로 걸린다
     private fun callGatewayAndApply(
         reservation: Reservation,
         claimed: Payment,
@@ -55,13 +58,17 @@ class PaymentCommandService(
         orderId: String,
         amount: Int,
     ): PaymentConfirmationResult =
-        when (val result = paymentGateway.charge(paymentKey, orderId, amount, reservation.idempotencyKey)) {
-            is PaymentGatewayResult.Approved ->
-                claimService.applySuccess(claimed, reservation, result.pgTransactionId, LocalDateTime.now(clock))
-            is PaymentGatewayResult.Declined -> {
-                claimService.applyFailure(claimed, reservation, LocalDateTime.now(clock), result.reason)
-                throw PaymentDeclinedException(result.reason)
+        try {
+            when (val result = paymentGateway.charge(paymentKey, orderId, amount, reservation.idempotencyKey)) {
+                is PaymentGatewayResult.Approved ->
+                    claimService.applySuccess(claimed, reservation, result.pgTransactionId, LocalDateTime.now(clock))
+                is PaymentGatewayResult.Declined -> {
+                    claimService.applyFailure(claimed, reservation, LocalDateTime.now(clock), result.reason)
+                    throw PaymentDeclinedException(result.reason)
+                }
             }
+        } catch (e: OptimisticLockingFailureException) {
+            throw PaymentConflictException(cause = e)
         }
 
     private fun requireHolding(reservation: Reservation) {
