@@ -15,6 +15,7 @@ logstashEncoder = "9.0"
 springdocOpenapi = "3.1.1"
 asciidoctor = "4.0.5"
 restdocsApiSpec = "0.20.1"
+wiremock = "3.13.1"
 
 [libraries]
 resilience4j-spring-boot4 = { module = "io.github.resilience4j:resilience4j-spring-boot4", version.ref = "resilience4j" }
@@ -34,6 +35,7 @@ archunit = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "arc
 testcontainers-redis = { module = "com.redis:testcontainers-redis", version.ref = "testcontainersRedis" }
 springdoc-openapi-webmvc-ui = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdocOpenapi" }
 restdocs-api-spec-mockmvc = { module = "com.epages:restdocs-api-spec-mockmvc", version.ref = "restdocsApiSpec" }
+wiremock = { module = "org.wiremock:wiremock", version.ref = "wiremock" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

@@ -22,6 +22,9 @@ ticket-rush:
   payment:
     stale-claim-timeout: 500ms
     reclaim-interval: 200ms
+  toss:
+    base-url: http://localhost:0
+    secret-key: test-secret-key
   security:
     phone-hmac-key: test-hmac-key-for-local-only
     phone-encryption-key: dGVzdC1waG9uZS1lbmNyeXB0aW9uLWtleS0zMmJ5dGU=
