@@ -64,6 +64,35 @@ configurations {
     }
 }
 
+// WireMock 내장 서버는 Jetty 11 API로 동작하는데, Spring Boot BOM이 Jetty 12를
+// 관리해서 뒤섞이면 기동에 실패한다. 운영 런타임은 Jetty를 쓰지 않으므로 전역으로 11로 되돌린다.
+dependencyManagement {
+    dependencies {
+        dependencySet(mapOf("group" to "org.eclipse.jetty", "version" to "11.0.24")) {
+            entry("jetty-server")
+            entry("jetty-http")
+            entry("jetty-io")
+            entry("jetty-util")
+            entry("jetty-client")
+            entry("jetty-security")
+            entry("jetty-xml")
+            entry("jetty-servlet")
+            entry("jetty-servlets")
+            entry("jetty-webapp")
+            entry("jetty-proxy")
+            entry("jetty-alpn-client")
+            entry("jetty-alpn-server")
+            entry("jetty-alpn-java-client")
+            entry("jetty-alpn-java-server")
+        }
+        dependencySet(mapOf("group" to "org.eclipse.jetty.http2", "version" to "11.0.24")) {
+            entry("http2-server")
+            entry("http2-common")
+            entry("http2-hpack")
+        }
+    }
+}
+
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
