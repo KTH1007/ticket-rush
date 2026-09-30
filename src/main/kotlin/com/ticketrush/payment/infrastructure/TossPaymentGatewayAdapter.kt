@@ -6,7 +6,7 @@ import com.ticketrush.payment.domain.PaymentGatewayResult
 import org.springframework.context.annotation.Profile
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
-import org.springframework.web.client.HttpStatusCodeException
+import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.RestClient
 import java.util.Base64
 import java.util.UUID
@@ -36,7 +36,8 @@ class TossPaymentGatewayAdapter(
                     .retrieve()
                     .body(TossPaymentResponse::class.java)
             toResult(requireNotNull(response) { "토스 confirm 응답 본문이 비어 있습니다" })
-        } catch (e: HttpStatusCodeException) {
+        } catch (e: HttpClientErrorException) {
+            // 4xx만 거절로 변환한다. 5xx/타임아웃은 그대로 던져서 인프라 장애로 구분되게 한다.
             PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
         }
 
@@ -55,7 +56,7 @@ class TossPaymentGatewayAdapter(
                     .retrieve()
                     .body(TossPaymentResponse::class.java)
             toResult(requireNotNull(response) { "토스 cancel 응답 본문이 비어 있습니다" })
-        } catch (e: HttpStatusCodeException) {
+        } catch (e: HttpClientErrorException) {
             PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
         }
 
@@ -68,7 +69,7 @@ class TossPaymentGatewayAdapter(
             PaymentGatewayResult.Declined(reason = "예상치 못한 status: ${response.status}")
         }
 
-    private fun declinedReasonFrom(e: HttpStatusCodeException): String {
+    private fun declinedReasonFrom(e: HttpClientErrorException): String {
         val error = runCatching { e.getResponseBodyAs(TossErrorResponse::class.java) }.getOrNull()
         return if (error != null) "${error.code}: ${error.message}" else e.message.orEmpty()
     }

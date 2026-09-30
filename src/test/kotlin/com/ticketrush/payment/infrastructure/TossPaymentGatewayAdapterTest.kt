@@ -10,7 +10,9 @@ import com.github.tomakehurst.wiremock.junit5.WireMockExtension
 import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.extension.RegisterExtension
+import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.RestClient
 import java.util.Base64
 import java.util.UUID
@@ -62,6 +64,22 @@ class TossPaymentGatewayAdapterTest {
 
         assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
         assertThat((result as PaymentGatewayResult.Declined).reason).contains("REJECT_CARD_COMPANY")
+    }
+
+    @Test
+    fun `5xx 에러 응답이면 예외를 던진다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(500)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""{"code":"FAILED_INTERNAL_SYSTEM_PROCESSING","message":"일시적인 오류가 발생했습니다"}"""),
+                ),
+        )
+
+        assertThatThrownBy { adapter().charge("pk_test_4", "order-4", 10_000, UUID.randomUUID()) }
+            .isInstanceOf(HttpServerErrorException::class.java)
     }
 
     @Test
