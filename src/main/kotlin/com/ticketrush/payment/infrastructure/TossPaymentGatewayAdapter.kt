@@ -3,6 +3,7 @@ package com.ticketrush.payment.infrastructure
 import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
 import org.springframework.context.annotation.Profile
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
@@ -18,6 +19,7 @@ class TossPaymentGatewayAdapter(
     private val restClient: RestClient,
     private val toss: TossProperties,
 ) : PaymentGatewayPort {
+    @CircuitBreaker(name = "paymentGateway")
     override fun charge(
         paymentKey: String,
         orderId: String,
@@ -41,6 +43,7 @@ class TossPaymentGatewayAdapter(
             PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
         }
 
+    @CircuitBreaker(name = "paymentGateway")
     override fun refund(
         pgTransactionId: String,
         amount: Int,
