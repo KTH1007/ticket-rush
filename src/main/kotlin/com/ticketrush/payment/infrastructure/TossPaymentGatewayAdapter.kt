@@ -55,7 +55,7 @@ class TossPaymentGatewayAdapter(
                     .body(mapOf("cancelReason" to "사용자 취소 요청"))
                     .retrieve()
                     .body(TossPaymentResponse::class.java)
-            toResult(requireNotNull(response) { "토스 cancel 응답 본문이 비어 있습니다" })
+            toCancelResult(requireNotNull(response) { "토스 cancel 응답 본문이 비어 있습니다" })
         } catch (e: HttpClientErrorException) {
             PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
         }
@@ -64,6 +64,14 @@ class TossPaymentGatewayAdapter(
 
     private fun toResult(response: TossPaymentResponse): PaymentGatewayResult =
         if (response.status == "DONE") {
+            PaymentGatewayResult.Approved(pgTransactionId = response.paymentKey)
+        } else {
+            PaymentGatewayResult.Declined(reason = "예상치 못한 status: ${response.status}")
+        }
+
+    // 취소 성공은 DONE이 아니라 CANCELED/PARTIAL_CANCELED로 온다
+    private fun toCancelResult(response: TossPaymentResponse): PaymentGatewayResult =
+        if (response.status == "CANCELED" || response.status == "PARTIAL_CANCELED") {
             PaymentGatewayResult.Approved(pgTransactionId = response.paymentKey)
         } else {
             PaymentGatewayResult.Declined(reason = "예상치 못한 status: ${response.status}")

@@ -105,4 +105,21 @@ class TossPaymentGatewayAdapterTest {
                 .withRequestBody(equalToJson("""{"paymentKey":"pk_3","orderId":"order-3","amount":10000}""")),
         )
     }
+
+    @Test
+    fun `취소 성공 응답이면 Approved를 반환한다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/pk_refund_1/cancel"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""{"paymentKey":"pk_refund_1","status":"CANCELED"}"""),
+                ),
+        )
+
+        val result = adapter().refund("pk_refund_1", 10_000)
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Approved::class.java)
+    }
 }
