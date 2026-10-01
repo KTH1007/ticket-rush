@@ -69,7 +69,7 @@ class PaymentClaimService(
         payment: Payment,
         reservation: Reservation,
         pgTransactionId: String,
-        now: LocalDateTime,
+        paidAt: LocalDateTime,
     ): PaymentConfirmationResult {
         val reservationNo = findUnusedReservationNo()
         reservation.confirmPayment()
@@ -78,7 +78,7 @@ class PaymentClaimService(
         seatRepository.markSold(reservation.id)
 
         val fromStatus = payment.status
-        payment.markSuccess(pgTransactionId, now)
+        payment.markSuccess(pgTransactionId, paidAt)
         val saved = paymentRepository.save(payment)
         historyRecorder.record(saved.id, fromStatus, PaymentStatus.SUCCESS)
         eventPublisher.publishEvent(ReservationPaidEvent(reservation.id))

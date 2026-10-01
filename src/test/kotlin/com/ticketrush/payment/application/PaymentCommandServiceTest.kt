@@ -35,7 +35,9 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import java.time.Clock
 import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlin.test.Test
 
@@ -67,6 +69,9 @@ class PaymentCommandServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var paymentCommandService: PaymentCommandService
+
+    @Autowired
+    lateinit var clock: Clock
 
     @TestConfiguration
     class MockConfig {
@@ -116,6 +121,42 @@ class PaymentCommandServiceTest : IntegrationTest() {
         assertThat(result.reservationNo).isEqualTo("RESNO000001")
         assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
         assertThat(result.payment.pgTransactionId).isEqualTo("PG-TXN-1")
+    }
+
+    @Test
+    fun `PG가 승인 시각을 주면 Payment의 paidAt은 서버 시각이 아니라 그 승인 시각이다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        val approvedAt = LocalDateTime.of(2020, 1, 1, 10, 15, 30)
+        every { reservationNoGenerator.generate() } returns "RESNO000020"
+        every {
+            paymentGateway.charge(any(), any(), any(), any())
+        } returns PaymentGatewayResult.Approved(pgTransactionId = "PG-TXN-20", approvedAt = approvedAt)
+
+        // when
+        val result = paymentCommandService.결제_확정(reservation)
+
+        // then
+        assertThat(result.payment.paidAt).isEqualTo(approvedAt)
+        assertThat(paymentRepository.findByReservationId(reservation.id)?.paidAt).isEqualTo(approvedAt)
+    }
+
+    @Test
+    fun `PG가 승인 시각을 주지 않으면 Payment의 paidAt은 서버 시각이다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        every { reservationNoGenerator.generate() } returns "RESNO000021"
+        every {
+            paymentGateway.charge(any(), any(), any(), any())
+        } returns PaymentGatewayResult.Approved(pgTransactionId = "PG-TXN-21", approvedAt = null)
+        val before = LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS)
+
+        // when
+        paymentCommandService.결제_확정(reservation)
+
+        // then
+        val paidAt = requireNotNull(paymentRepository.findByReservationId(reservation.id)?.paidAt)
+        assertThat(paidAt).isBetween(before, LocalDateTime.now(clock))
     }
 
     @Test

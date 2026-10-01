@@ -61,7 +61,13 @@ class PaymentCommandService(
         try {
             when (val result = paymentGateway.charge(paymentKey, orderId, amount, reservation.idempotencyKey)) {
                 is PaymentGatewayResult.Approved ->
-                    claimService.applySuccess(claimed, reservation, result.pgTransactionId, LocalDateTime.now(clock))
+                    claimService.applySuccess(
+                        claimed,
+                        reservation,
+                        result.pgTransactionId,
+                        // PG 승인 시각이 정산 기준이라 우선하고, 없을 때만 서버 시각으로 대체한다
+                        result.approvedAt ?: LocalDateTime.now(clock),
+                    )
                 is PaymentGatewayResult.Declined -> {
                     claimService.applyFailure(claimed, reservation, LocalDateTime.now(clock), result.reason)
                     throw PaymentDeclinedException(result.reason)

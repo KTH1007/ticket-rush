@@ -4,6 +4,7 @@ import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
 import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpStatus
@@ -11,10 +12,19 @@ import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.RestClient
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeParseException
 import java.util.Base64
 import java.util.UUID
 
+private val logger = KotlinLogging.logger {}
+
 private const val IDEMPOTENT_REQUEST_PROCESSING = "IDEMPOTENT_REQUEST_PROCESSING"
+
+// application.yml의 jdbc.time_zone과 같은 존. LocalDateTime이 이 존 기준으로 저장된다
+private val SEOUL: ZoneId = ZoneId.of("Asia/Seoul")
 
 // 실제 Toss Payments confirm/cancel API를 호출하는 구현체
 @Profile("toss")
@@ -75,10 +85,21 @@ class TossPaymentGatewayAdapter(
 
     private fun toResult(response: TossPaymentResponse): PaymentGatewayResult =
         if (response.status == "DONE") {
-            PaymentGatewayResult.Approved(pgTransactionId = response.paymentKey)
+            PaymentGatewayResult.Approved(pgTransactionId = response.paymentKey, approvedAt = parseApprovedAt(response.approvedAt))
         } else {
             PaymentGatewayResult.Declined(reason = "예상치 못한 status: ${response.status}")
         }
+
+    // 이미 승인된 뒤라 파싱 실패로 예외를 던지면 클레임이 PENDING으로 남는다. null로 두고 호출 측이 서버 시각으로 대체한다
+    private fun parseApprovedAt(raw: String?): LocalDateTime? {
+        if (raw == null) return null
+        return try {
+            OffsetDateTime.parse(raw).atZoneSameInstant(SEOUL).toLocalDateTime()
+        } catch (e: DateTimeParseException) {
+            logger.warn(e) { "토스 approvedAt 파싱에 실패해 서버 시각으로 대체합니다: approvedAt=$raw" }
+            null
+        }
+    }
 
     // 취소 성공은 DONE이 아니라 CANCELED/PARTIAL_CANCELED로 온다
     private fun toCancelResult(response: TossPaymentResponse): PaymentGatewayResult =
@@ -99,6 +120,7 @@ class TossPaymentGatewayAdapter(
     private data class TossPaymentResponse(
         val paymentKey: String,
         val status: String,
+        val approvedAt: String? = null,
     )
 
     private data class TossErrorResponse(

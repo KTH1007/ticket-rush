@@ -15,6 +15,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.extension.RegisterExtension
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.RestClient
+import java.time.LocalDateTime
 import java.util.Base64
 import java.util.UUID
 import kotlin.test.Test
@@ -47,6 +48,44 @@ class TossPaymentGatewayAdapterTest {
 
         assertThat(result).isInstanceOf(PaymentGatewayResult.Approved::class.java)
         assertThat((result as PaymentGatewayResult.Approved).pgTransactionId).isEqualTo("pk_test_1")
+    }
+
+    @Test
+    fun `승인 응답에 approvedAt이 있으면 Approved에 서울 시각으로 담긴다`() {
+        stubConfirmDone(approvedAt = "2026-10-01T10:15:30+09:00")
+
+        val result = adapter().charge("pk", "order-1", 10_000, UUID.randomUUID())
+
+        assertThat(result)
+            .isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = "pk", approvedAt = LocalDateTime.of(2026, 10, 1, 10, 15, 30)))
+    }
+
+    @Test
+    fun `approvedAt의 오프셋이 달라도 같은 순간이면 같은 서울 시각이 된다`() {
+        stubConfirmDone(approvedAt = "2026-10-01T01:15:30+00:00")
+
+        val result = adapter().charge("pk", "order-1", 10_000, UUID.randomUUID())
+
+        assertThat(result)
+            .isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = "pk", approvedAt = LocalDateTime.of(2026, 10, 1, 10, 15, 30)))
+    }
+
+    @Test
+    fun `승인 응답에 approvedAt이 없으면 approvedAt은 null이고 Approved를 반환한다`() {
+        stubConfirmDone(approvedAt = null)
+
+        val result = adapter().charge("pk", "order-1", 10_000, UUID.randomUUID())
+
+        assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = "pk", approvedAt = null))
+    }
+
+    @Test
+    fun `approvedAt이 형식에 맞지 않아도 예외 없이 approvedAt은 null이고 Approved를 반환한다`() {
+        stubConfirmDone(approvedAt = "어제 오후 세 시")
+
+        val result = adapter().charge("pk", "order-1", 10_000, UUID.randomUUID())
+
+        assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = "pk", approvedAt = null))
     }
 
     @Test
@@ -156,5 +195,18 @@ class TossPaymentGatewayAdapterTest {
         val result = adapter().refund("pk_refund_1", 10_000)
 
         assertThat(result).isInstanceOf(PaymentGatewayResult.Approved::class.java)
+    }
+
+    private fun stubConfirmDone(approvedAt: String?) {
+        val approvedAtField = approvedAt?.let { ""","approvedAt":"$it"""" }.orEmpty()
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""{"paymentKey":"pk","status":"DONE"$approvedAtField}"""),
+                ),
+        )
     }
 }
