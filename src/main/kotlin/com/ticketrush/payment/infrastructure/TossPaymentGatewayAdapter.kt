@@ -1,16 +1,20 @@
 package com.ticketrush.payment.infrastructure
 
 import com.ticketrush.payment.TossProperties
+import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
 import org.springframework.context.annotation.Profile
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.RestClient
 import java.util.Base64
 import java.util.UUID
+
+private const val IDEMPOTENT_REQUEST_PROCESSING = "IDEMPOTENT_REQUEST_PROCESSING"
 
 // 실제 Toss Payments confirm/cancel API를 호출하는 구현체
 @Profile("toss")
@@ -39,6 +43,10 @@ class TossPaymentGatewayAdapter(
                     .body(TossPaymentResponse::class.java)
             toResult(requireNotNull(response) { "토스 confirm 응답 본문이 비어 있습니다" })
         } catch (e: HttpClientErrorException) {
+            // 첫 요청이 아직 처리 중이라 나중에 승인될 수 있으므로 거절로 확정하지 않는다
+            if (e.statusCode == HttpStatus.CONFLICT && errorBodyFrom(e)?.code == IDEMPOTENT_REQUEST_PROCESSING) {
+                throw PaymentConflictException(e)
+            }
             // 4xx만 거절로 변환한다. 5xx/타임아웃은 그대로 던져서 인프라 장애로 구분되게 한다.
             PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
         }
@@ -80,8 +88,11 @@ class TossPaymentGatewayAdapter(
             PaymentGatewayResult.Declined(reason = "예상치 못한 status: ${response.status}")
         }
 
+    private fun errorBodyFrom(e: HttpClientErrorException): TossErrorResponse? =
+        runCatching { e.getResponseBodyAs(TossErrorResponse::class.java) }.getOrNull()
+
     private fun declinedReasonFrom(e: HttpClientErrorException): String {
-        val error = runCatching { e.getResponseBodyAs(TossErrorResponse::class.java) }.getOrNull()
+        val error = errorBodyFrom(e)
         return if (error != null) "${error.code}: ${error.message}" else e.message.orEmpty()
     }
 

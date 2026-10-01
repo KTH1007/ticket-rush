@@ -2,6 +2,7 @@ package com.ticketrush.payment.application
 
 import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.payment.domain.PaymentConfirmationResult
+import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
@@ -355,6 +356,25 @@ class PaymentCommandServiceTest : IntegrationTest() {
         assertThat(history).hasSize(1)
         assertThat(history.single().toStatus).isEqualTo(PaymentStatus.FAILED)
         assertThat(history.single().reason).isEqualTo("한도 초과")
+    }
+
+    @Test
+    fun `PG가 PaymentConflictException을 던지면 실패로 확정하지 않고 PENDING과 홀드를 그대로 둔다`() {
+        // given
+        val reservation = 홀드된_예약_준비(holdExpiresAt = FAR_FUTURE)
+        every { paymentGateway.charge(any(), any(), any(), any()) } throws PaymentConflictException()
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation) }
+            .isInstanceOf(PaymentConflictException::class.java)
+
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id)).extracting("toStatus").doesNotContain(PaymentStatus.FAILED)
+        val updated = requireNotNull(reservationRepository.findById(reservation.id))
+        assertThat(updated.holdExpiresAt).isEqualTo(FAR_FUTURE)
+        val seat = seatRepository.findAllByEventId(reservation.eventId).single()
+        assertThat(seat.holdExpiresAt).isEqualTo(FAR_FUTURE)
     }
 
     @Test

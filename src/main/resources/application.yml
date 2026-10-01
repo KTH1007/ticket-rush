@@ -80,7 +80,11 @@ resilience4j:
         waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
     instances:
-      paymentGateway: { baseConfig: default }
+      paymentGateway:
+        baseConfig: default
+        # 멱등 요청 처리 중 409는 PG 장애가 아니라서 실패율에 넣지 않는다
+        ignoreExceptions:
+          - com.ticketrush.payment.domain.PaymentConflictException
   timelimiter:
     instances:
       paymentGateway: { timeoutDuration: 3s }

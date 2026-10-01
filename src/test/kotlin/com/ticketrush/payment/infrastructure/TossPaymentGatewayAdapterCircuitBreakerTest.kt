@@ -6,10 +6,13 @@ import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension
 import com.ticketrush.payment.TossHttpConfig
 import com.ticketrush.payment.TossProperties
+import com.ticketrush.payment.domain.PaymentConflictException
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry
 import io.github.resilience4j.springboot.circuitbreaker.autoconfigure.CircuitBreakerAutoConfiguration
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.extension.RegisterExtension
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -50,6 +53,15 @@ class TossPaymentGatewayAdapterCircuitBreakerTest {
     @Autowired
     lateinit var adapter: TossPaymentGatewayAdapter
 
+    @Autowired
+    lateinit var circuitBreakerRegistry: CircuitBreakerRegistry
+
+    // 서킷은 컨텍스트 안의 싱글톤이라 이전 테스트가 열어 둔 상태를 비워야 한다
+    @BeforeEach
+    fun resetCircuitBreaker() {
+        circuitBreakerRegistry.circuitBreaker("paymentGateway").reset()
+    }
+
     @Test
     fun `연속 실패로 서킷이 열리면 이후 호출은 WireMock에 안 가고 즉시 실패한다`() {
         wireMock.stubFor(
@@ -70,5 +82,31 @@ class TossPaymentGatewayAdapterCircuitBreakerTest {
         }.isInstanceOf(CallNotPermittedException::class.java)
 
         assertThat(wireMock.allServeEvents).hasSizeLessThan(11)
+    }
+
+    @Test
+    fun `409 IDEMPOTENT_REQUEST_PROCESSING은 몇 번을 받아도 서킷을 열지 않는다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(409)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""{"code":"IDEMPOTENT_REQUEST_PROCESSING","message":"이전 멱등 요청이 처리중입니다."}"""),
+                ),
+        )
+
+        // minimumNumberOfCalls(10)를 넘겨도 실패로 집계되지 않아야 한다
+        repeat(15) {
+            assertThatThrownBy {
+                adapter.charge("pk-$it", "order-$it", 10_000, UUID.randomUUID())
+            }.isInstanceOf(PaymentConflictException::class.java)
+        }
+
+        assertThatThrownBy {
+            adapter.charge("pk-last", "order-last", 10_000, UUID.randomUUID())
+        }.isInstanceOf(PaymentConflictException::class.java)
+
+        assertThat(wireMock.allServeEvents).hasSize(16)
     }
 }

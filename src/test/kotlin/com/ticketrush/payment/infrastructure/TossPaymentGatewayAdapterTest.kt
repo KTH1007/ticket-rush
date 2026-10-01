@@ -8,6 +8,7 @@ import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension
 import com.ticketrush.payment.TossProperties
+import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -64,6 +65,40 @@ class TossPaymentGatewayAdapterTest {
 
         assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
         assertThat((result as PaymentGatewayResult.Declined).reason).contains("REJECT_CARD_COMPANY")
+    }
+
+    @Test
+    fun `409 IDEMPOTENT_REQUEST_PROCESSING이면 Declined가 아니라 PaymentConflictException을 던진다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(409)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""{"code":"IDEMPOTENT_REQUEST_PROCESSING","message":"이전 멱등 요청이 처리중입니다."}"""),
+                ),
+        )
+
+        assertThatThrownBy { adapter().charge("pk_test_5", "order-5", 10_000, UUID.randomUUID()) }
+            .isInstanceOf(PaymentConflictException::class.java)
+    }
+
+    @Test
+    fun `409여도 code가 IDEMPOTENT_REQUEST_PROCESSING이 아니면 Declined를 반환한다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(409)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""{"code":"DUPLICATED_ORDER_ID","message":"이미 사용된 주문번호입니다."}"""),
+                ),
+        )
+
+        val result = adapter().charge("pk_test_6", "order-6", 10_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+        assertThat((result as PaymentGatewayResult.Declined).reason).contains("DUPLICATED_ORDER_ID")
     }
 
     @Test
