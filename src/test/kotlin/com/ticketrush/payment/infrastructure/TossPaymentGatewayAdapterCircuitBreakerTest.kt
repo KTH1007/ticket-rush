@@ -14,7 +14,7 @@ import org.junit.jupiter.api.extension.RegisterExtension
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Configuration
+import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.EnableAspectJAutoProxy
 import org.springframework.context.annotation.Import
 import org.springframework.test.context.ActiveProfiles
@@ -24,12 +24,8 @@ import org.springframework.web.client.HttpServerErrorException
 import java.util.UUID
 import kotlin.test.Test
 
-// @SpringBootApplication/@EnableAutoConfiguration은 안 쓴다. 그걸 쓰면 spring-modulith가
-// 클래스패스 전체에서 @EnableAutoConfiguration 붙은 클래스를 찾아 그 패키지를 무관한
-// TicketRushApplication 컨텍스트의 AutoConfigurationPackages에 끼워넣어서, PaymentJpaRepository가
-// 두 번 스캔되고 BeanDefinitionOverrideException이 나는 실제 버그를 겪었다.
-// 서킷브레이커 자동설정만 명시적으로 @Import해서 그 문제를 피한다.
-@Configuration
+// @TestConfiguration으로 두면 TicketRushApplication의 컴포넌트 스캔에서 제외된다
+@TestConfiguration
 @EnableAspectJAutoProxy(proxyTargetClass = true)
 @EnableConfigurationProperties(TossProperties::class)
 @Import(CircuitBreakerAutoConfiguration::class)
