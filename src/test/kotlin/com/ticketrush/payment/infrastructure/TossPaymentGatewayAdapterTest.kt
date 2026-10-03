@@ -13,6 +13,7 @@ import com.ticketrush.payment.domain.PaymentGatewayResult
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.extension.RegisterExtension
+import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.RestClient
 import java.time.LocalDateTime
@@ -104,6 +105,40 @@ class TossPaymentGatewayAdapterTest {
 
         assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
         assertThat((result as PaymentGatewayResult.Declined).reason).contains("REJECT_CARD_COMPANY")
+    }
+
+    @Test
+    fun `403 REJECT_CARD_COMPANY도 Declined를 반환한다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(403)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""{"code":"REJECT_CARD_COMPANY","message":"카드사에서 거절했습니다"}"""),
+                ),
+        )
+
+        val result = adapter().charge("pk_test_7", "order-7", 10_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+        assertThat((result as PaymentGatewayResult.Declined).reason).contains("REJECT_CARD_COMPANY")
+    }
+
+    @Test
+    fun `401 인증 실패는 Declined가 아니라 예외를 던진다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(401)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""{"code":"UNAUTHORIZED_KEY","message":"인증되지 않은 시크릿 키 혹은 클라이언트 키 입니다."}"""),
+                ),
+        )
+
+        assertThatThrownBy { adapter().charge("pk_test_8", "order-8", 10_000, UUID.randomUUID()) }
+            .isInstanceOf(HttpClientErrorException.Unauthorized::class.java)
     }
 
     @Test

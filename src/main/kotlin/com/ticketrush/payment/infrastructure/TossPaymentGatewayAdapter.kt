@@ -53,13 +53,22 @@ class TossPaymentGatewayAdapter(
                     .body(TossPaymentResponse::class.java)
             toResult(requireNotNull(response) { "토스 confirm 응답 본문이 비어 있습니다" })
         } catch (e: HttpClientErrorException) {
-            // 첫 요청이 아직 처리 중이라 나중에 승인될 수 있으므로 거절로 확정하지 않는다
-            if (e.statusCode == HttpStatus.CONFLICT && errorBodyFrom(e)?.code == IDEMPOTENT_REQUEST_PROCESSING) {
-                throw PaymentConflictException(e)
-            }
-            // 4xx만 거절로 변환한다. 5xx/타임아웃은 그대로 던져서 인프라 장애로 구분되게 한다.
-            PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
+            declinedOrRethrow(e)
         }
+
+    // 4xx만 거절로 변환한다. 5xx/타임아웃은 그대로 던져서 인프라 장애로 구분되게 한다.
+    private fun declinedOrRethrow(e: HttpClientErrorException): PaymentGatewayResult {
+        // 첫 요청이 아직 처리 중이라 나중에 승인될 수 있으므로 거절로 확정하지 않는다
+        if (e.statusCode == HttpStatus.CONFLICT && errorBodyFrom(e)?.code == IDEMPOTENT_REQUEST_PROCESSING) {
+            throw PaymentConflictException(e)
+        }
+        // 시크릿 키 설정 실수가 결제 거절로 확정돼 홀드가 단축되는 걸 막으려고 그대로 던진다
+        if (e.statusCode == HttpStatus.UNAUTHORIZED) {
+            logger.error { "Toss 인증 실패(401), 시크릿 키 설정 확인 필요" }
+            throw e
+        }
+        return PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
+    }
 
     @CircuitBreaker(name = "paymentGateway")
     override fun refund(
