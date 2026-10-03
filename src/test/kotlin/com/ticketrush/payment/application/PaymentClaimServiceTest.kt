@@ -97,6 +97,36 @@ class PaymentClaimServiceTest : IntegrationTest() {
 
     @Test
     @Transactional
+    fun `이미 SUCCESS인 Payment는 늦게 도착한 시도의 paymentKey와 orderId로 덮어쓰지 않는다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event)
+        val claimed = 클레임(reservation, LocalDateTime.now(clock))
+        claimed.markSuccess("PG-TXN-1", LocalDateTime.now(clock))
+        paymentRepository.save(claimed)
+
+        val result = 클레임(reservation, LocalDateTime.now(clock), paymentKey = "late-payment-key", orderId = "late-order-id")
+
+        assertThat(result.tossPaymentKey).isEqualTo("test-payment-key")
+        assertThat(result.tossOrderId).isEqualTo(reservation.idempotencyKey.toString())
+    }
+
+    @Test
+    @Transactional
+    fun `이미 FAILED인 Payment도 새 시도의 paymentKey와 orderId로 덮어쓰지 않는다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event)
+        val claimed = 클레임(reservation, LocalDateTime.now(clock))
+        claimed.markFailed()
+        paymentRepository.save(claimed)
+
+        val result = 클레임(reservation, LocalDateTime.now(clock), paymentKey = "late-payment-key", orderId = "late-order-id")
+
+        assertThat(result.tossPaymentKey).isEqualTo("test-payment-key")
+        assertThat(result.tossOrderId).isEqualTo(reservation.idempotencyKey.toString())
+    }
+
+    @Test
+    @Transactional
     fun `applySuccess는 PENDING을 SUCCESS로 바꾸고 예약번호를 배정한다`() {
         val event = eventRepository.공연_하나_저장()
         val reservation = reservationRepository.예약_하나_저장(event = event)
@@ -124,6 +154,7 @@ class PaymentClaimServiceTest : IntegrationTest() {
     private fun 클레임(
         reservation: Reservation,
         now: LocalDateTime,
-    ): Payment =
-        claimService.claimOrTakeOver(reservation.id, reservation.amount, "test-payment-key", reservation.idempotencyKey.toString(), now)
+        paymentKey: String = "test-payment-key",
+        orderId: String = reservation.idempotencyKey.toString(),
+    ): Payment = claimService.claimOrTakeOver(reservation.id, reservation.amount, paymentKey, orderId, now)
 }

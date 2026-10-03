@@ -40,6 +40,8 @@ class PaymentClaimService(
     ): Payment {
         val existing = paymentRepository.findByReservationId(reservationId)
         val claimed = if (existing != null) takeOverIfStale(existing, now) else insertNewClaim(reservationId, amount)
+        // 이미 확정된 행에 늦게 도착한 시도의 키를 덮어쓰지 않는다
+        if (claimed.status != PaymentStatus.PENDING) return claimed
         claimed.recordAttempt(paymentKey, orderId)
         return paymentRepository.save(claimed)
     }

@@ -5,6 +5,7 @@ import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
+import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -46,7 +47,8 @@ class PaymentReclaimScheduler(
         }
     }
 
-    private fun reclaimOne(payment: Payment) {
+    private fun reclaimOne(snapshot: Payment) {
+        val payment = findStillPending(snapshot) ?: return
         val paymentKey = payment.tossPaymentKey
         val orderId = payment.tossOrderId
         if (paymentKey == null || orderId == null) {
@@ -65,6 +67,10 @@ class PaymentReclaimScheduler(
         }
     }
 
+    // 목록 조회 뒤 PG 호출을 거치는 사이 다른 인스턴스나 사용자 재시도가 먼저 확정했을 수 있어 최신 상태를 다시 읽는다
+    private fun findStillPending(snapshot: Payment): Payment? =
+        paymentRepository.findByReservationId(snapshot.reservationId)?.takeIf { it.status == PaymentStatus.PENDING }
+
     private fun retryCharge(
         payment: Payment,
         reservation: Reservation,
@@ -73,6 +79,8 @@ class PaymentReclaimScheduler(
         now: LocalDateTime,
     ) {
         val claimed = claimService.claimOrTakeOver(reservation.id, payment.amount, paymentKey, orderId, now)
+        // 재확인 직후 확정됐다면 claimOrTakeOver가 그 행을 그대로 돌려주므로 다시 승인하지 않는다
+        if (claimed.status != PaymentStatus.PENDING) return
         when (val result = paymentGateway.charge(paymentKey, orderId, payment.amount, reservation.idempotencyKey)) {
             is PaymentGatewayResult.Approved ->
                 claimService.applySuccess(claimed, reservation, result.pgTransactionId, result.approvedAt ?: now)
