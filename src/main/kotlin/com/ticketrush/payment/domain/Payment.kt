@@ -23,6 +23,8 @@ class Payment(
     pgTransactionId: String? = null,
     status: PaymentStatus = PaymentStatus.PENDING,
     paidAt: LocalDateTime? = null,
+    tossPaymentKey: String? = null,
+    tossOrderId: String? = null,
     version: Long = 0,
 ) : BaseEntity() {
     @Column(name = "reservation_id", nullable = false)
@@ -46,10 +48,27 @@ class Payment(
     var paidAt: LocalDateTime? = paidAt
         protected set
 
+    @Column(name = "toss_payment_key", length = 200)
+    var tossPaymentKey: String? = tossPaymentKey
+        protected set
+
+    @Column(name = "toss_order_id", length = 64)
+    var tossOrderId: String? = tossOrderId
+        protected set
+
     @Version
     @Column(nullable = false)
     var version: Long = version
         protected set
+
+    // 회수 스케줄러가 같은 값으로 PG를 다시 부를 수 있게 클레임 시점의 paymentKey/orderId를 남긴다
+    fun recordAttempt(
+        paymentKey: String,
+        orderId: String,
+    ) {
+        this.tossPaymentKey = paymentKey
+        this.tossOrderId = orderId
+    }
 
     // 결제 성공 처리. FAILED였던 결제도 재시도로 다시 성공시킬 수 있음
     // 예약당 행 하나를 강제하므로, 시도마다 새 행을 만드는 게 아니라 같은 행을 계속 갱신

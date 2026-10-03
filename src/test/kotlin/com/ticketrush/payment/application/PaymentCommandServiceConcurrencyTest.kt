@@ -110,7 +110,13 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
     fun `stale 클레임을 동시에 이어받으면 하나만 성공하고 나머지는 충돌 예외를 받는다`() {
         // given
         val reservation = 홀드된_예약_준비()
-        claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+        claimService.claimOrTakeOver(
+            reservation.id,
+            reservation.amount,
+            "test-payment-key",
+            reservation.idempotencyKey.toString(),
+            LocalDateTime.now(clock),
+        )
         Thread.sleep(policy.staleClaimTimeout.toMillis() + 100)
         every { reservationNoGenerator.generate() } answers { "RESNO" + System.nanoTime().toString().takeLast(7) }
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-STALE")

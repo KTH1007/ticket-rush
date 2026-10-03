@@ -34,11 +34,14 @@ class PaymentClaimService(
     fun claimOrTakeOver(
         reservationId: Long,
         amount: Int,
+        paymentKey: String,
+        orderId: String,
         now: LocalDateTime,
     ): Payment {
         val existing = paymentRepository.findByReservationId(reservationId)
-        if (existing != null) return takeOverIfStale(existing, now)
-        return insertNewClaim(reservationId, amount)
+        val claimed = if (existing != null) takeOverIfStale(existing, now) else insertNewClaim(reservationId, amount)
+        claimed.recordAttempt(paymentKey, orderId)
+        return paymentRepository.save(claimed)
     }
 
     private fun takeOverIfStale(

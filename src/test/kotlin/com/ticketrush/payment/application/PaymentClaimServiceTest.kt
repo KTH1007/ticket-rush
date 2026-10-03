@@ -2,9 +2,11 @@ package com.ticketrush.payment.application
 
 import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.payment.PaymentPolicyProperties
+import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
+import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
 import com.ticketrush.support.IntegrationTest
@@ -43,7 +45,7 @@ class PaymentClaimServiceTest : IntegrationTest() {
         val event = eventRepository.공연_하나_저장()
         val reservation = reservationRepository.예약_하나_저장(event = event, amount = 100_000)
 
-        val claimed = claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+        val claimed = 클레임(reservation, LocalDateTime.now(clock))
 
         assertThat(claimed.status).isEqualTo(PaymentStatus.PENDING)
         assertThat(claimed.reservationId).isEqualTo(reservation.id)
@@ -56,10 +58,10 @@ class PaymentClaimServiceTest : IntegrationTest() {
         val event = eventRepository.공연_하나_저장()
         val reservation = reservationRepository.예약_하나_저장(event = event)
         val now = LocalDateTime.now(clock)
-        claimService.claimOrTakeOver(reservation.id, reservation.amount, now)
+        클레임(reservation, now)
 
         assertThatThrownBy {
-            claimService.claimOrTakeOver(reservation.id, reservation.amount, now)
+            클레임(reservation, now)
         }.isInstanceOf(PaymentConflictException::class.java)
     }
 
@@ -69,10 +71,10 @@ class PaymentClaimServiceTest : IntegrationTest() {
         val event = eventRepository.공연_하나_저장()
         val reservation = reservationRepository.예약_하나_저장(event = event)
         val claimedAt = LocalDateTime.now(clock)
-        val first = claimService.claimOrTakeOver(reservation.id, reservation.amount, claimedAt)
+        val first = 클레임(reservation, claimedAt)
 
         val muchLater = claimedAt.plus(policy.staleClaimTimeout).plusSeconds(1)
-        val takenOver = claimService.claimOrTakeOver(reservation.id, reservation.amount, muchLater)
+        val takenOver = 클레임(reservation, muchLater)
 
         assertThat(takenOver.id).isEqualTo(first.id)
         assertThat(takenOver.status).isEqualTo(PaymentStatus.PENDING)
@@ -83,11 +85,11 @@ class PaymentClaimServiceTest : IntegrationTest() {
     fun `이미 SUCCESS 등 최종 상태인 Payment는 그대로 반환한다`() {
         val event = eventRepository.공연_하나_저장()
         val reservation = reservationRepository.예약_하나_저장(event = event)
-        val claimed = claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+        val claimed = 클레임(reservation, LocalDateTime.now(clock))
         claimed.markSuccess("PG-TXN-1", LocalDateTime.now(clock))
         paymentRepository.save(claimed)
 
-        val result = claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+        val result = 클레임(reservation, LocalDateTime.now(clock))
 
         assertThat(result.id).isEqualTo(claimed.id)
         assertThat(result.status).isEqualTo(PaymentStatus.SUCCESS)
@@ -98,7 +100,7 @@ class PaymentClaimServiceTest : IntegrationTest() {
     fun `applySuccess는 PENDING을 SUCCESS로 바꾸고 예약번호를 배정한다`() {
         val event = eventRepository.공연_하나_저장()
         val reservation = reservationRepository.예약_하나_저장(event = event)
-        val claimed = claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+        val claimed = 클레임(reservation, LocalDateTime.now(clock))
 
         val result = claimService.applySuccess(claimed, reservation, "PG-TX-001", LocalDateTime.now(clock))
 
@@ -112,10 +114,16 @@ class PaymentClaimServiceTest : IntegrationTest() {
     fun `applyFailure는 PENDING을 FAILED로 바꾸고 홀드를 단축한다`() {
         val event = eventRepository.공연_하나_저장()
         val reservation = reservationRepository.예약_하나_저장(event = event)
-        val claimed = claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+        val claimed = 클레임(reservation, LocalDateTime.now(clock))
 
         claimService.applyFailure(claimed, reservation, LocalDateTime.now(clock), reason = "한도 초과")
 
         assertThat(paymentRepository.findByReservationId(reservation.id)?.status).isEqualTo(PaymentStatus.FAILED)
     }
+
+    private fun 클레임(
+        reservation: Reservation,
+        now: LocalDateTime,
+    ): Payment =
+        claimService.claimOrTakeOver(reservation.id, reservation.amount, "test-payment-key", reservation.idempotencyKey.toString(), now)
 }

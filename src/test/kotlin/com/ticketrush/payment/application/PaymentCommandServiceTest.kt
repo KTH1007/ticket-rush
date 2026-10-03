@@ -416,6 +416,10 @@ class PaymentCommandServiceTest : IntegrationTest() {
         assertThat(updated.holdExpiresAt).isEqualTo(FAR_FUTURE)
         val seat = seatRepository.findAllByEventId(reservation.eventId).single()
         assertThat(seat.holdExpiresAt).isEqualTo(FAR_FUTURE)
+
+        // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
+        payment.markFailed()
+        paymentRepository.save(payment)
     }
 
     @Test

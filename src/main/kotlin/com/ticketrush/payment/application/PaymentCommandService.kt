@@ -46,7 +46,7 @@ class PaymentCommandService(
         requireHolding(reservation)
         requireOrderMatches(reservation, orderId, amount)
 
-        val claimed = claimService.claimOrTakeOver(reservation.id, reservation.amount, LocalDateTime.now(clock))
+        val claimed = claimService.claimOrTakeOver(reservation.id, reservation.amount, paymentKey, orderId, LocalDateTime.now(clock))
         return callGatewayAndApply(reservation, claimed, paymentKey, orderId, amount)
     }
 
