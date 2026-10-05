@@ -54,7 +54,9 @@ class OutboxRelayRetryTest : IntegrationTest() {
         // given
         every { reservationRepository.findById(aggregateId) } returns 결제완료_예약()
         every { notificationPort.sendSms(any(), any()) } throws RuntimeException("게이트웨이 오류")
-        val relay = OutboxRelayScheduler(outboxRepository, reservationRepository, notificationPort, phoneEncryptor, policy, clock)
+        // 먼 미래 행은 next_attempt_at 순서상 맨 뒤라, 다른 대기 행이 chunkSize 이상이면 밀리므로 크게 잡는다
+        val relayPolicy = policy.copy(chunkSize = 1_000)
+        val relay = OutboxRelayScheduler(outboxRepository, reservationRepository, notificationPort, phoneEncryptor, relayPolicy, clock)
         val outboxId = outboxRepository.save(대기중인_이벤트()).id
 
         // when
