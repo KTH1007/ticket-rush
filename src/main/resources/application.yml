@@ -85,6 +85,8 @@ resilience4j:
         # 멱등 요청 처리 중 409는 PG 장애가 아니라서 실패율에 넣지 않는다
         ignoreExceptions:
           - com.ticketrush.payment.domain.PaymentConflictException
+  # 어댑터에서 쓰지 않는 설정이다. 동기(블로킹) 호출이라 @TimeLimiter가 맞지 않아 빼고,
+  # 타임아웃은 TossHttpConfig의 RestClient connect/read 3s로 건다
   timelimiter:
     instances:
       paymentGateway: { timeoutDuration: 3s }
@@ -117,7 +119,7 @@ ticket-rush:
     max-attempts: 5
     block-window: 10m
   payment:
-    stale-claim-timeout: 10s # PG 타임리미터(3s)보다 충분히 넉넉하게
+    stale-claim-timeout: 10s # PG 호출 최악 시간(RestClient connect 3s + read 3s)보다 충분히 넉넉하게
     reclaim-interval: 5s
   toss:
     base-url: https://api.tosspayments.com
