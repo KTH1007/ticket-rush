@@ -25,6 +25,7 @@ private val logger = KotlinLogging.logger {}
 private const val IDEMPOTENT_REQUEST_PROCESSING = "IDEMPOTENT_REQUEST_PROCESSING"
 private const val NOT_FOUND_PAYMENT = "NOT_FOUND_PAYMENT"
 private const val ALREADY_PROCESSING_REQUEST = "ALREADY_PROCESSING_REQUEST"
+private const val ALREADY_CANCELED_PAYMENT = "ALREADY_CANCELED_PAYMENT"
 private val ALREADY_PROCESSED_CODES = setOf("ALREADY_PROCESSED_PAYMENT", "DUPLICATED_REQUEST")
 
 // application.yml의 jdbc.time_zone과 같은 존. LocalDateTime이 이 존 기준으로 저장된다
@@ -151,8 +152,34 @@ class TossPaymentGatewayAdapter(
                     .body(TossPaymentResponse::class.java)
             toCancelResult(requireNotNull(response) { "토스 cancel 응답 본문이 비어 있습니다" })
         } catch (e: HttpClientErrorException) {
-            PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
+            refundDeclinedOrRethrow(e, pgTransactionId)
         }
+
+    // 환불 4xx 분류. 첫 요청이 처리 중이면 거절로 확정하지 않고, 이미 취소됐다는 응답은 조회로 실제 상태를 확인한다
+    private fun refundDeclinedOrRethrow(
+        e: HttpClientErrorException,
+        pgTransactionId: String,
+    ): PaymentGatewayResult {
+        val code = errorBodyFrom(e)?.code
+        if (e.statusCode == HttpStatus.CONFLICT && code == IDEMPOTENT_REQUEST_PROCESSING) {
+            throw PaymentConflictException(e)
+        }
+        throwIfUnauthorized(e)
+        if (e.statusCode == HttpStatus.BAD_REQUEST && code == ALREADY_CANCELED_PAYMENT) {
+            return resolveRefundByInquiry(pgTransactionId)
+        }
+        return PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
+    }
+
+    // 이전 시도나 외부(운영자)의 전액 취소를 우리가 모르는 경우라, 조회가 CANCELED일 때만 환불 완료로 본다
+    private fun resolveRefundByInquiry(pgTransactionId: String): PaymentGatewayResult {
+        val payment = fetchPayment(pgTransactionId)
+        return when {
+            payment == null -> PaymentGatewayResult.Declined(reason = "Toss에 해당 결제가 없습니다")
+            payment.status != "CANCELED" -> PaymentGatewayResult.Declined(reason = "Toss status: ${payment.status}")
+            else -> PaymentGatewayResult.Approved(pgTransactionId = pgTransactionId)
+        }
+    }
 
     private fun basicAuth(): String = "Basic " + Base64.getEncoder().encodeToString("${toss.secretKey}:".toByteArray())
 
@@ -181,9 +208,9 @@ class TossPaymentGatewayAdapter(
         }
     }
 
-    // 취소 성공은 DONE이 아니라 CANCELED/PARTIAL_CANCELED로 온다
+    // 항상 전액을 요청하므로 부분 취소(PARTIAL_CANCELED)는 환불 완료가 아니다. 성공은 DONE이 아니라 CANCELED로 온다
     private fun toCancelResult(response: TossPaymentResponse): PaymentGatewayResult =
-        if (response.status == "CANCELED" || response.status == "PARTIAL_CANCELED") {
+        if (response.status == "CANCELED") {
             PaymentGatewayResult.Approved(pgTransactionId = response.paymentKey)
         } else {
             PaymentGatewayResult.Declined(reason = "예상치 못한 status: ${response.status}")

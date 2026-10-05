@@ -1,7 +1,12 @@
 package com.ticketrush.payment.application
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.payment.domain.Payment
+import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentHistoryRepositoryPort
@@ -27,6 +32,9 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
@@ -74,6 +82,21 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var outboxRepository: com.ticketrush.outbox.domain.OutboxRepositoryPort
+
+    private val logs = ListAppender<ILoggingEvent>()
+    private val serviceLogger = LoggerFactory.getLogger(PaymentCancelCommandService::class.java.name) as Logger
+
+    @BeforeEach
+    fun captureLogs() {
+        logs.start()
+        serviceLogger.addAppender(logs)
+    }
+
+    @AfterEach
+    fun releaseLogs() {
+        serviceLogger.detachAppender(logs)
+        logs.stop()
+    }
 
     @Test
     fun `취소하면 outbox에 RESERVATION_CANCELED 이벤트가 같이 커밋된다`() {
@@ -143,10 +166,11 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         // when
         val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
 
-        // then: 예외 없이 끝나고, 결제는 CANCELED에 머무름(REFUNDED 아님)
+        // then: 예외 없이 끝나고, 결제는 CANCELED에 머무름(REFUNDED 아님). 거절 사유는 WARN으로 남는다
         assertThat(result.payment.status).isEqualTo(PaymentStatus.CANCELED)
         val updated = requireNotNull(reservationRepository.findById(reservation.id))
         assertThat(updated.status).isEqualTo(ReservationStatus.CANCELED)
+        assertThat(logs.list.single { it.level == Level.WARN }.formattedMessage).contains("환불 한도 초과")
     }
 
     @Test
@@ -158,10 +182,28 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         // when
         val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
 
-        // then: 예외가 밖으로 안 새고, 취소/결제 상태는 그대로 확정됨
+        // then: 예외가 밖으로 안 새고, 취소/결제 상태는 그대로 확정됨. 원인은 ERROR와 스택트레이스로 남는다
         assertThat(result.payment.status).isEqualTo(PaymentStatus.CANCELED)
         val updated = requireNotNull(reservationRepository.findById(reservation.id))
         assertThat(updated.status).isEqualTo(ReservationStatus.CANCELED)
+        assertThat(logs.list.single { it.level == Level.ERROR }.throwableProxy).isNotNull()
+    }
+
+    @Test
+    fun `환불이 아직 처리 중이라는 충돌이 와도 취소는 확정되고 결제는 CANCELED로 남는다`() {
+        // given
+        val reservation = 결제완료_예약_준비()
+        every { paymentGateway.refund(any(), any(), any()) } throws PaymentConflictException()
+
+        // when
+        val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
+
+        // then: 환불 재시도 대상으로 CANCELED를 유지하고 예약 취소는 확정됨. 정상 경합이라 WARN 한 줄만 남는다
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.CANCELED)
+        val updated = requireNotNull(reservationRepository.findById(reservation.id))
+        assertThat(updated.status).isEqualTo(ReservationStatus.CANCELED)
+        assertThat(logs.list.single { it.level == Level.WARN }.throwableProxy).isNull()
+        assertThat(logs.list.filter { it.level == Level.ERROR }).isEmpty()
     }
 
     @Test

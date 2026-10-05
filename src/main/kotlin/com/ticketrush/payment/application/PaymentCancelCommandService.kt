@@ -112,6 +112,10 @@ class PaymentCancelCommandService(
         val result =
             try {
                 paymentGateway.refund(pgTransactionId, payment.amount, RefundIdempotencyKey.of(reservation.idempotencyKey))
+            } catch (expected: PaymentConflictException) {
+                // 같은 환불이 PG에서 처리 중인 정상 경합이라 스택트레이스 없이 재시도 대상으로만 남긴다
+                logger.warn { "환불이 PG에서 아직 처리 중입니다. 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
+                return payment
             } catch (e: Exception) {
                 logger.error(e) { "환불 요청 중 오류가 발생했습니다. 취소는 유지하고 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
                 return payment
@@ -119,7 +123,10 @@ class PaymentCancelCommandService(
 
         return when (result) {
             is PaymentGatewayResult.Approved -> markRefunded(payment, result)
-            is PaymentGatewayResult.Declined -> payment
+            is PaymentGatewayResult.Declined -> {
+                logger.warn { "환불이 거절됐습니다. 취소는 유지하고 결제는 CANCELED로 남깁니다: paymentId=${payment.id}, reason=${result.reason}" }
+                payment
+            }
         }
     }
 
