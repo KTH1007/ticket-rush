@@ -72,6 +72,19 @@ class OutboxEventTest {
         assertThat(event.status).isEqualTo(OutboxStatus.FAILED)
     }
 
+    @Test
+    fun `실패 기록으로 PENDING에 돌아가면 claimedAt을 비운다`() {
+        // given
+        val event = claim된_이벤트()
+
+        // when
+        event.recordFailure(now, Duration.ofSeconds(30), maxAttempts = 5)
+
+        // then
+        assertThat(event.status).isEqualTo(OutboxStatus.PENDING)
+        assertThat(event.claimedAt).isNull()
+    }
+
     private fun 새_이벤트(): OutboxEvent =
         OutboxEvent(
             aggregateType = "RESERVATION",
@@ -83,4 +96,17 @@ class OutboxEventTest {
         )
 
     private fun 프로세싱_이벤트(): OutboxEvent = 새_이벤트().also { it.markProcessingForTest() }
+
+    // 프로덕션 claim과 같이 PROCESSING이면서 claimedAt이 채워진 상태
+    private fun claim된_이벤트(): OutboxEvent =
+        OutboxEvent(
+            aggregateType = "RESERVATION",
+            aggregateId = 1L,
+            eventType = "RESERVATION_PAID",
+            payload = """{"reservationId":1}""",
+            status = OutboxStatus.PROCESSING,
+            nextAttemptAt = now,
+            claimedAt = now,
+            createdAt = now,
+        )
 }

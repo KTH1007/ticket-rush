@@ -4,6 +4,7 @@ import com.ticketrush.outbox.domain.OutboxEvent
 import com.ticketrush.outbox.domain.OutboxRepositoryPort
 import com.ticketrush.outbox.domain.OutboxStatus
 import com.ticketrush.support.IntegrationTest
+import jakarta.persistence.EntityManager
 import org.assertj.core.api.Assertions.assertThat
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.transaction.annotation.Transactional
@@ -14,6 +15,9 @@ import kotlin.test.Test
 class OutboxRepositoryAdapterTest : IntegrationTest() {
     @Autowired
     lateinit var outboxRepository: OutboxRepositoryPort
+
+    @Autowired
+    lateinit var entityManager: EntityManager
 
     private val now = LocalDateTime.of(2026, 1, 1, 0, 0)
 
@@ -105,6 +109,25 @@ class OutboxRepositoryAdapterTest : IntegrationTest() {
         assertThat(updated?.attemptCount).isEqualTo(1)
         assertThat(updated?.status).isEqualTo(OutboxStatus.PENDING)
         assertThat(updated?.nextAttemptAt).isEqualTo(now.plusSeconds(30))
+    }
+
+    @Test
+    @Transactional
+    fun `markFailedOrRetry로 PENDING에 돌아간 행은 claimed_at이 비어 DB 제약을 통과한다`() {
+        // given
+        outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
+        val claimed = outboxRepository.claimBatch(limit = 10, now = now).single()
+
+        // when
+        outboxRepository.markFailedOrRetry(claimed.id, requireNotNull(claimed.claimedAt), now, Duration.ofSeconds(30), maxAttempts = 5)
+        // 롤백 테스트는 flush 전엔 UPDATE가 DB로 안 나가 ck_outbox_claim_state가 평가되지 않는다
+        entityManager.flush()
+        entityManager.clear()
+
+        // then
+        val retried = requireNotNull(outboxRepository.findById(claimed.id))
+        assertThat(retried.status).isEqualTo(OutboxStatus.PENDING)
+        assertThat(retried.claimedAt).isNull()
     }
 
     @Test
