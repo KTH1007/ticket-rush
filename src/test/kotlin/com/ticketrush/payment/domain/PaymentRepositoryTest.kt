@@ -6,11 +6,15 @@ import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.예약_하나_저장
+import jakarta.persistence.EntityManager
+import jakarta.persistence.PersistenceContext
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.transaction.annotation.Transactional
+import java.time.Clock
 import java.time.LocalDateTime
 import kotlin.test.Test
 
@@ -26,6 +30,12 @@ class PaymentRepositoryTest : IntegrationTest() {
 
     @Autowired
     lateinit var jdbcTemplate: JdbcTemplate
+
+    @Autowired
+    lateinit var clock: Clock
+
+    @PersistenceContext
+    lateinit var entityManager: EntityManager
 
     @Test
     fun `결제를 저장하면 값이 그대로 조회된다`() {
@@ -119,6 +129,35 @@ class PaymentRepositoryTest : IntegrationTest() {
             .hasMessageContaining("ck_payment_status")
     }
 
+    @Test
+    @Transactional
+    fun `stale PENDING 결제는 updatedAt이 오래된 순서로 조회된다`() {
+        // given: 저장 순서와 updatedAt 순서가 다르게 만든다
+        val newest = paymentRepository.save(결제(예약_하나_저장().id, tossPaymentKey = "pk-newest"))
+        val oldest = paymentRepository.save(결제(예약_하나_저장().id, tossPaymentKey = "pk-oldest"))
+        val middle = paymentRepository.save(결제(예약_하나_저장().id, tossPaymentKey = "pk-middle"))
+        updatedAt을_과거로_되돌리기(newest, hours = 1)
+        updatedAt을_과거로_되돌리기(oldest, hours = 3)
+        updatedAt을_과거로_되돌리기(middle, hours = 2)
+
+        // when
+        val stale = paymentRepository.findStalePending(LocalDateTime.now(clock).minusMinutes(30))
+
+        // then
+        assertThat(stale.map { it.id }.filter { it in setOf(newest.id, oldest.id, middle.id) })
+            .containsExactly(oldest.id, middle.id, newest.id)
+    }
+
+    // 감사 필드는 JPA flush 때만 갱신되므로 JDBC로 시간을 되돌린다
+    private fun updatedAt을_과거로_되돌리기(
+        payment: Payment,
+        hours: Int,
+    ) {
+        entityManager.flush()
+        jdbcTemplate.update("UPDATE payment SET updated_at = updated_at - make_interval(hours => ?) WHERE id = ?", hours, payment.id)
+        entityManager.clear()
+    }
+
     private fun 예약_하나_저장(): Reservation {
         val event = eventRepository.공연_하나_저장()
         return reservationRepository.예약_하나_저장(event)
@@ -129,11 +168,13 @@ class PaymentRepositoryTest : IntegrationTest() {
         amount: Int = 100_000,
         status: PaymentStatus = PaymentStatus.PENDING,
         paidAt: LocalDateTime? = null,
+        tossPaymentKey: String? = null,
     ): Payment =
         Payment(
             reservationId = reservationId,
             amount = amount,
             status = status,
             paidAt = paidAt,
+            tossPaymentKey = tossPaymentKey,
         )
 }

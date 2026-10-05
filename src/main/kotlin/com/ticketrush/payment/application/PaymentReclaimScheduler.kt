@@ -4,6 +4,7 @@ import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.Reservation
@@ -28,7 +29,7 @@ class PaymentReclaimScheduler(
     private val policy: PaymentPolicyProperties,
     private val clock: Clock,
 ) {
-    // 같은 행이 매 틱 ERROR를 쏟아내지 않도록 인스턴스당 한 번만 남긴다
+    // Toss가 승인했는데 예약이 만료된 결제. 매 틱 Toss를 다시 부르거나 ERROR를 쏟아내지 않도록 인스턴스당 한 번만 처리한다
     private val alertedPaymentIds = ConcurrentHashMap.newKeySet<Long>()
 
     @Scheduled(fixedRateString = "\${ticket-rush.payment.reclaim-interval}")
@@ -59,11 +60,11 @@ class PaymentReclaimScheduler(
             requireNotNull(reservationRepository.findById(payment.reservationId)) { "예약을 찾을 수 없습니다: ${payment.reservationId}" }
         val now = LocalDateTime.now(clock)
 
-        // HoldExpiryScheduler가 PENDING 결제를 보지 않고 예약을 만료시킨다. 늦은 승인이 와도 반영할 수 없으니 PG를 부르지 않는다
+        // HoldExpiryScheduler가 PENDING 결제를 보지 않고 예약을 만료시킨다. 늦은 승인이 와도 반영할 수 없으니 승인 요청은 하지 않는다
         if (reservation.isHoldActiveAt(now)) {
             retryCharge(payment, reservation, paymentKey, orderId, now)
         } else {
-            alertOnce(payment, reservation)
+            reconcileByInquiry(payment, reservation, paymentKey)
         }
     }
 
@@ -88,14 +89,32 @@ class PaymentReclaimScheduler(
         }
     }
 
-    private fun alertOnce(
+    // 승인 요청 대신 조회로 실제 승인 여부만 확인한다. 조회가 예외면 PENDING으로 두고 다음 틱에 다시 확인한다
+    private fun reconcileByInquiry(
         payment: Payment,
         reservation: Reservation,
+        paymentKey: String,
     ) {
-        if (!alertedPaymentIds.add(payment.id)) return
+        if (payment.id in alertedPaymentIds) return
+        when (val inquiry = paymentGateway.inquire(paymentKey)) {
+            is PaymentInquiryResult.Done -> alertRefundNeeded(payment, reservation, inquiry)
+            is PaymentInquiryResult.NotApproved ->
+                claimService.markFailedByReconciliation(payment, "Toss 미승인(${inquiry.status}), 예약을 쓸 수 없어 결제 실패로 확정")
+            PaymentInquiryResult.NotFound ->
+                claimService.markFailedByReconciliation(payment, "Toss에 결제 내역 없음, 예약을 쓸 수 없어 결제 실패로 확정")
+        }
+    }
+
+    // 돈이 움직이는 판단이라 자동 환불하지 않고 PENDING 그대로 둔 채 사람이 처리하도록 알린다
+    private fun alertRefundNeeded(
+        payment: Payment,
+        reservation: Reservation,
+        inquiry: PaymentInquiryResult.Done,
+    ) {
+        alertedPaymentIds.add(payment.id)
         logger.error {
-            "승인 여부를 알 수 없는 PENDING 결제, 대사 필요: " +
-                "reservationId=${reservation.id}, paymentId=${payment.id}, reservationStatus=${reservation.status}"
+            "Toss는 승인(DONE)했지만 예약이 만료됨, 환불 필요: reservationId=${reservation.id}, paymentId=${payment.id}, " +
+                "reservationStatus=${reservation.status}, approvedAt=${inquiry.approvedAt}"
         }
     }
 }

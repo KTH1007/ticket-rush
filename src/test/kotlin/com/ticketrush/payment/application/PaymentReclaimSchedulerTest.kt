@@ -1,20 +1,31 @@
 package com.ticketrush.payment.application
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.ticketrush.event.domain.Event
 import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentHistoryRepositoryPort
+import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
+import com.ticketrush.reservation.domain.GradeRepositoryPort
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
+import com.ticketrush.reservation.domain.SeatRepositoryPort
+import com.ticketrush.reservation.domain.SeatStatus
 import com.ticketrush.shared.PhoneHash
 import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.공연_하나_저장
+import com.ticketrush.support.등급_하나_저장
 import com.ticketrush.support.예약_하나_저장
+import com.ticketrush.support.홀드된_좌석_하나_저장
 import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
@@ -22,7 +33,9 @@ import io.mockk.verify
 import jakarta.persistence.EntityManager
 import jakarta.persistence.PersistenceContext
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
@@ -48,6 +61,15 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
 
     @Autowired
     lateinit var paymentRepository: PaymentRepositoryPort
+
+    @Autowired
+    lateinit var gradeRepository: GradeRepositoryPort
+
+    @Autowired
+    lateinit var seatRepository: SeatRepositoryPort
+
+    @Autowired
+    lateinit var paymentHistoryRepository: PaymentHistoryRepositoryPort
 
     @Autowired
     lateinit var claimService: PaymentClaimService
@@ -77,9 +99,20 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
         fun paymentGateway(): PaymentGatewayPort = mockk()
     }
 
+    private val logs = ListAppender<ILoggingEvent>()
+    private val schedulerLogger = LoggerFactory.getLogger(PaymentReclaimScheduler::class.java.name) as Logger
+
     @BeforeEach
     fun reset() {
         clearMocks(paymentGateway)
+        logs.start()
+        schedulerLogger.addAppender(logs)
+    }
+
+    @AfterEach
+    fun releaseLogs() {
+        schedulerLogger.detachAppender(logs)
+        logs.stop()
     }
 
     @Test
@@ -134,9 +167,10 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
 
     @Test
     @Transactional
-    fun `예약이 HOLDING이 아니면 게이트웨이를 부르지 않고 Payment는 PENDING으로 남긴다`() {
+    fun `예약이 HOLDING이 아니면 Toss가 승인(DONE)했어도 charge를 부르지 않고 Payment는 PENDING으로 남긴다`() {
         val reservation = 예약_저장(status = ReservationStatus.EXPIRED)
-        클레임(reservation)
+        클레임(reservation, paymentKey = "pk-expired")
+        every { paymentGateway.inquire("pk-expired") } returns PaymentInquiryResult.Done("pk-expired")
 
         reclaimScheduler.reclaim(staleBefore = staleBefore())
 
@@ -146,9 +180,10 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
 
     @Test
     @Transactional
-    fun `홀드 시각이 지난 예약이면 게이트웨이를 부르지 않고 Payment는 PENDING으로 남긴다`() {
+    fun `홀드 시각이 지난 예약이면 Toss가 승인(DONE)했어도 charge를 부르지 않고 Payment는 PENDING으로 남긴다`() {
         val reservation = 예약_저장(holdExpiresAt = LocalDateTime.of(2020, 1, 1, 0, 0))
-        클레임(reservation)
+        클레임(reservation, paymentKey = "pk-hold-passed")
+        every { paymentGateway.inquire("pk-hold-passed") } returns PaymentInquiryResult.Done("pk-hold-passed")
 
         reclaimScheduler.reclaim(staleBefore = staleBefore())
 
@@ -191,7 +226,137 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
         assertThat(paymentRepository.findByReservationId(healthy.id)?.status).isEqualTo(PaymentStatus.SUCCESS)
     }
 
+    @Test
+    @Transactional
+    fun `예약을 쓸 수 없는데 Toss가 승인(DONE)했으면 결제와 예약을 그대로 두고 환불 필요 알림을 남긴다`() {
+        val reservation = 만료된_예약과_좌석()
+        val approvedAt = LocalDateTime.of(2026, 10, 1, 10, 15, 30)
+        클레임(reservation, paymentKey = "pk-done")
+        every { paymentGateway.inquire("pk-done") } returns PaymentInquiryResult.Done("pk-done", approvedAt)
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id)).isEmpty()
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
+        assertReservationAndSeatUntouched(reservation)
+        val refundAlert = logs.list.single { it.level == Level.ERROR }.formattedMessage
+        assertThat(refundAlert)
+            .contains("환불 필요", "reservationId=${reservation.id}", "paymentId=${payment.id}", "approvedAt=$approvedAt")
+    }
+
+    @Test
+    @Transactional
+    fun `승인(DONE)을 확인해 알린 결제는 다음 틱에서 Toss를 다시 조회하지 않고 알림도 반복하지 않는다`() {
+        val reservation = 만료된_예약과_좌석()
+        클레임(reservation, paymentKey = "pk-done-twice")
+        every { paymentGateway.inquire("pk-done-twice") } returns PaymentInquiryResult.Done("pk-done-twice")
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        verify(exactly = 1) { paymentGateway.inquire("pk-done-twice") }
+        assertThat(logs.list.filter { it.level == Level.ERROR }).hasSize(1)
+        assertThat(paymentRepository.findByReservationId(reservation.id)?.status).isEqualTo(PaymentStatus.PENDING)
+    }
+
+    @Test
+    @Transactional
+    fun `예약을 쓸 수 없는데 Toss가 승인하지 않았으면 결제만 FAILED로 확정하고 사유를 남기며 예약과 좌석은 그대로 둔다`() {
+        val reservation = 만료된_예약과_좌석()
+        클레임(reservation, paymentKey = "pk-aborted")
+        every { paymentGateway.inquire("pk-aborted") } returns PaymentInquiryResult.NotApproved("ABORTED")
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.FAILED)
+        val history = paymentHistoryRepository.findAllByPaymentId(payment.id).single()
+        assertThat(history.fromStatus).isEqualTo(PaymentStatus.PENDING)
+        assertThat(history.toStatus).isEqualTo(PaymentStatus.FAILED)
+        assertThat(history.reason).contains("ABORTED")
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
+        assertReservationAndSeatUntouched(reservation)
+    }
+
+    @Test
+    @Transactional
+    fun `예약을 쓸 수 없는데 Toss에 결제가 없으면 결제만 FAILED로 확정하고 예약과 좌석은 그대로 둔다`() {
+        val reservation = 만료된_예약과_좌석()
+        클레임(reservation, paymentKey = "pk-missing")
+        every { paymentGateway.inquire("pk-missing") } returns PaymentInquiryResult.NotFound
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.FAILED)
+        val history = paymentHistoryRepository.findAllByPaymentId(payment.id).single()
+        assertThat(history.fromStatus).isEqualTo(PaymentStatus.PENDING)
+        assertThat(history.toStatus).isEqualTo(PaymentStatus.FAILED)
+        assertThat(history.reason).isNotBlank()
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
+        assertReservationAndSeatUntouched(reservation)
+    }
+
+    @Test
+    @Transactional
+    fun `조회가 예외를 던지면 그 행은 PENDING으로 남고 다음 행은 계속 처리한다`() {
+        val failing = 만료된_예약과_좌석()
+        val healthy = reservationRepository.예약_하나_저장(event = 공연())
+        클레임(failing, paymentKey = "pk-inquiry-fails")
+        클레임(healthy, paymentKey = "pk-healthy")
+        every { paymentGateway.inquire("pk-inquiry-fails") } throws HttpServerErrorException(HttpStatus.SERVICE_UNAVAILABLE)
+        every {
+            paymentGateway.charge(any(), any(), any(), healthy.idempotencyKey)
+        } returns PaymentGatewayResult.Approved(pgTransactionId = "pk-healthy")
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        assertThat(paymentRepository.findByReservationId(failing.id)?.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(paymentRepository.findByReservationId(healthy.id)?.status).isEqualTo(PaymentStatus.SUCCESS)
+        verify(exactly = 1) { paymentGateway.inquire("pk-inquiry-fails") }
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), failing.idempotencyKey) }
+    }
+
+    @Test
+    @Transactional
+    fun `예약이 HOLDING이고 유효하면 조회 없이 charge로 재시도한다`() {
+        val reservation = reservationRepository.예약_하나_저장(event = 공연())
+        클레임(reservation, paymentKey = "pk-valid")
+        every {
+            paymentGateway.charge(any(), any(), any(), reservation.idempotencyKey)
+        } returns PaymentGatewayResult.Approved(pgTransactionId = "pk-valid")
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        verify(exactly = 0) { paymentGateway.inquire(any()) }
+        assertThat(paymentRepository.findByReservationId(reservation.id)?.status).isEqualTo(PaymentStatus.SUCCESS)
+    }
+
     private fun 공연(): Event = eventRepository.공연_하나_저장()
+
+    // 홀드가 이미 지난 HOLDING 예약과 그 좌석. 회수 스케줄러의 예약 상태 가드에 걸리는 행이다
+    private fun 만료된_예약과_좌석(): Reservation {
+        val event = 공연()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val phoneHash = PhoneHash(ByteArray(32) { 1 })
+        val reservation = reservationRepository.예약_하나_저장(event, phoneHash = phoneHash, holdExpiresAt = HOLD_PASSED_AT)
+        seatRepository.홀드된_좌석_하나_저장(event, grade, reservation.id, phoneHash, slotNo = 1, holdExpiresAt = HOLD_PASSED_AT)
+        return reservation
+    }
+
+    // 좌석의 홀드 단축은 벌크 UPDATE라 영속성 컨텍스트를 비우고 DB에서 다시 읽어야 보인다
+    private fun assertReservationAndSeatUntouched(reservation: Reservation) {
+        entityManager.flush()
+        entityManager.clear()
+        val savedReservation = requireNotNull(reservationRepository.findById(reservation.id))
+        assertThat(savedReservation.status).isEqualTo(ReservationStatus.HOLDING)
+        assertThat(savedReservation.holdExpiresAt).isEqualTo(HOLD_PASSED_AT)
+        val seat = seatRepository.findAllByReservationId(reservation.id).single()
+        assertThat(seat.status).isEqualTo(SeatStatus.HELD)
+        assertThat(seat.holdExpiresAt).isEqualTo(HOLD_PASSED_AT)
+    }
 
     private fun 예약_저장(
         status: ReservationStatus = ReservationStatus.HOLDING,
@@ -233,4 +398,8 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
     }
 
     private fun staleBefore(): LocalDateTime = LocalDateTime.now(clock).minus(policy.staleClaimTimeout)
+
+    companion object {
+        private val HOLD_PASSED_AT: LocalDateTime = LocalDateTime.of(2020, 1, 1, 0, 0)
+    }
 }

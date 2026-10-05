@@ -108,6 +108,18 @@ class PaymentClaimService(
         historyRecorder.record(saved.id, fromStatus, PaymentStatus.FAILED, reason = reason)
     }
 
+    // 예약이 이미 쓸 수 없는 상태라 applyFailure처럼 홀드를 단축하지 않고 결제 상태만 닫는다
+    @Transactional
+    fun markFailedByReconciliation(
+        payment: Payment,
+        reason: String,
+    ) {
+        val fromStatus = payment.status
+        payment.markFailed()
+        val saved = paymentRepository.save(payment)
+        historyRecorder.record(saved.id, fromStatus, PaymentStatus.FAILED, reason = reason)
+    }
+
     private fun findUnusedReservationNo(): String {
         repeat(MAX_RESERVATION_NO_ATTEMPTS) {
             val candidate = reservationNoGenerator.generate()

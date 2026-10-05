@@ -7,6 +7,6 @@ interface PaymentRepositoryPort {
 
     fun findByReservationId(reservationId: Long): Payment?
 
-    // 회수 스케줄러 전용. 재시도에 필요한 paymentKey가 있는 PENDING 중 updatedAt이 오래된 행을 찾는다
+    // 회수 스케줄러 전용. 재시도에 필요한 paymentKey가 있는 PENDING 중 updatedAt이 오래된 행을 오래된 순서로 찾는다
     fun findStalePending(staleBefore: LocalDateTime): List<Payment>
 }

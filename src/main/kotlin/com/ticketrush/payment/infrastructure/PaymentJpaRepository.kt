@@ -10,7 +10,7 @@ interface PaymentJpaRepository : JpaRepository<Payment, Long> {
 
     @Query(
         "SELECT p FROM Payment p WHERE p.status = com.ticketrush.payment.domain.PaymentStatus.PENDING " +
-            "AND p.tossPaymentKey IS NOT NULL AND p.updatedAt < :staleBefore",
+            "AND p.tossPaymentKey IS NOT NULL AND p.updatedAt < :staleBefore ORDER BY p.updatedAt",
     )
     fun findStalePending(staleBefore: LocalDateTime): List<Payment>
 }
