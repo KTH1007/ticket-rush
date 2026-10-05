@@ -58,13 +58,15 @@ class TossPaymentGatewayAdapter(
                     .body(TossPaymentResponse::class.java)
             toResult(requireNotNull(response) { "토스 confirm 응답 본문이 비어 있습니다" })
         } catch (e: HttpClientErrorException) {
-            declinedOrRethrow(e, paymentKey)
+            declinedOrRethrow(e, paymentKey, orderId, amount)
         }
 
     // 4xx만 거절로 변환한다. 5xx/타임아웃은 그대로 던져서 인프라 장애로 구분되게 한다.
     private fun declinedOrRethrow(
         e: HttpClientErrorException,
         paymentKey: String,
+        orderId: String,
+        amount: Int,
     ): PaymentGatewayResult {
         val code = errorBodyFrom(e)?.code
         // 첫 요청이 아직 처리 중이라 나중에 승인될 수 있으므로 거절로 확정하지 않는다
@@ -76,19 +78,27 @@ class TossPaymentGatewayAdapter(
         }
         throwIfUnauthorized(e)
         if (e.statusCode == HttpStatus.BAD_REQUEST && code in ALREADY_PROCESSED_CODES) {
-            return resolveByInquiry(paymentKey)
+            return resolveByInquiry(paymentKey, orderId, amount)
         }
         return PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
     }
 
     // 이미 승인됐을 수 있어 거절로 확정하지 않고 Toss에 직접 물어 판정한다.
     // 같은 빈 안의 호출이라 프록시를 타지 않으므로 서킷은 charge 한 번으로만 집계된다
-    private fun resolveByInquiry(paymentKey: String): PaymentGatewayResult =
-        when (val inquiry = inquire(paymentKey)) {
-            is PaymentInquiryResult.Done -> PaymentGatewayResult.Approved(inquiry.pgTransactionId, inquiry.approvedAt)
-            is PaymentInquiryResult.NotApproved -> PaymentGatewayResult.Declined(reason = "Toss status: ${inquiry.status}")
-            PaymentInquiryResult.NotFound -> PaymentGatewayResult.Declined(reason = "Toss에 해당 결제가 없습니다")
+    private fun resolveByInquiry(
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
+    ): PaymentGatewayResult {
+        val payment = fetchPayment(paymentKey)
+        return when {
+            payment == null -> PaymentGatewayResult.Declined(reason = "Toss에 해당 결제가 없습니다")
+            payment.status != "DONE" -> PaymentGatewayResult.Declined(reason = "Toss status: ${payment.status}")
+            // 다른 주문에서 승인된 paymentKey를 가져다 쓴 요청이 승인으로 둔갑하지 않게 한다. 필드가 없으면 불일치로 본다
+            payment.orderId != orderId || payment.totalAmount != amount -> PaymentGatewayResult.Declined(reason = "다른 주문의 결제")
+            else -> PaymentGatewayResult.Approved(payment.paymentKey, parseApprovedAt(payment.approvedAt))
         }
+    }
 
     // 시크릿 키 설정 실수가 거절이나 미승인으로 확정돼 결제가 잘못 닫히는 걸 막으려고 그대로 던진다
     private fun throwIfUnauthorized(e: HttpClientErrorException) {
@@ -99,6 +109,10 @@ class TossPaymentGatewayAdapter(
 
     @CircuitBreaker(name = "paymentGateway")
     override fun inquire(paymentKey: String): PaymentInquiryResult =
+        fetchPayment(paymentKey)?.let(::toInquiryResult) ?: PaymentInquiryResult.NotFound
+
+    // 없는 결제만 null이다. 그 밖의 4xx는 승인 여부를 모르므로 미승인으로 단정하지 않고 던진다
+    private fun fetchPayment(paymentKey: String): TossPaymentResponse? =
         try {
             val response =
                 restClient
@@ -107,19 +121,15 @@ class TossPaymentGatewayAdapter(
                     .header("Authorization", basicAuth())
                     .retrieve()
                     .body(TossPaymentResponse::class.java)
-            toInquiryResult(requireNotNull(response) { "토스 조회 응답 본문이 비어 있습니다" })
+            requireNotNull(response) { "토스 조회 응답 본문이 비어 있습니다" }
         } catch (e: HttpClientErrorException) {
-            notFoundOrRethrow(e)
+            if (e.statusCode == HttpStatus.NOT_FOUND && errorBodyFrom(e)?.code == NOT_FOUND_PAYMENT) {
+                null
+            } else {
+                throwIfUnauthorized(e)
+                throw e
+            }
         }
-
-    // 없는 결제만 NotFound다. 그 밖의 4xx는 승인 여부를 모르므로 미승인으로 단정하지 않고 던진다
-    private fun notFoundOrRethrow(e: HttpClientErrorException): PaymentInquiryResult {
-        if (e.statusCode == HttpStatus.NOT_FOUND && errorBodyFrom(e)?.code == NOT_FOUND_PAYMENT) {
-            return PaymentInquiryResult.NotFound
-        }
-        throwIfUnauthorized(e)
-        throw e
-    }
 
     @CircuitBreaker(name = "paymentGateway")
     override fun refund(
@@ -188,6 +198,8 @@ class TossPaymentGatewayAdapter(
         val paymentKey: String,
         val status: String,
         val approvedAt: String? = null,
+        val orderId: String? = null,
+        val totalAmount: Int? = null,
     )
 
     private data class TossErrorResponse(

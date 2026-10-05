@@ -38,7 +38,7 @@ class TossPaymentGatewayAdapterAlreadyProcessedTest {
     @ValueSource(strings = ["ALREADY_PROCESSED_PAYMENT", "DUPLICATED_REQUEST"])
     fun `이미 처리됨 400 뒤 조회가 DONE이면 approvedAt을 담은 Approved를 반환한다`(code: String) {
         stubConfirmBadRequest(code)
-        stubInquiry("pk-1", status = "DONE", approvedAt = "2026-10-01T10:15:30+09:00")
+        stubInquiry("pk-1", status = "DONE", approvedAt = "2026-10-01T10:15:30+09:00", orderId = "order-1", totalAmount = 10_000)
 
         val result = adapter.charge("pk-1", "order-1", 10_000, UUID.randomUUID())
 
@@ -123,6 +123,48 @@ class TossPaymentGatewayAdapterAlreadyProcessedTest {
         wireMock.verify(0, getRequestedFor(urlEqualTo("/v1/payments/pk-7")))
     }
 
+    @Test
+    fun `조회된 DONE 결제의 orderId가 charge의 orderId와 다르면 승인하지 않고 Declined를 반환한다`() {
+        stubConfirmBadRequest("ALREADY_PROCESSED_PAYMENT")
+        stubInquiry("pk-8", status = "DONE", orderId = "order-of-another-reservation", totalAmount = 10_000)
+
+        val result = adapter.charge("pk-8", "order-8", 10_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+        assertThat((result as PaymentGatewayResult.Declined).reason).contains("다른 주문")
+    }
+
+    @Test
+    fun `조회된 DONE 결제의 totalAmount가 charge의 amount와 다르면 승인하지 않고 Declined를 반환한다`() {
+        stubConfirmBadRequest("DUPLICATED_REQUEST")
+        stubInquiry("pk-9", status = "DONE", orderId = "order-9", totalAmount = 1_000)
+
+        val result = adapter.charge("pk-9", "order-9", 100_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+        assertThat((result as PaymentGatewayResult.Declined).reason).contains("다른 주문")
+    }
+
+    @Test
+    fun `조회된 DONE 결제에 orderId가 없으면 불일치로 보고 승인하지 않는다`() {
+        stubConfirmBadRequest("ALREADY_PROCESSED_PAYMENT")
+        stubInquiry("pk-10", status = "DONE", totalAmount = 10_000)
+
+        val result = adapter.charge("pk-10", "order-10", 10_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+    }
+
+    @Test
+    fun `조회된 DONE 결제에 totalAmount가 없으면 불일치로 보고 승인하지 않는다`() {
+        stubConfirmBadRequest("ALREADY_PROCESSED_PAYMENT")
+        stubInquiry("pk-11", status = "DONE", orderId = "order-11")
+
+        val result = adapter.charge("pk-11", "order-11", 10_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+    }
+
     private fun stubConfirmBadRequest(code: String) {
         wireMock.stubFor(
             post(urlEqualTo("/v1/payments/confirm"))
@@ -139,15 +181,22 @@ class TossPaymentGatewayAdapterAlreadyProcessedTest {
         paymentKey: String,
         status: String,
         approvedAt: String? = null,
+        orderId: String? = null,
+        totalAmount: Int? = null,
     ) {
-        val approvedAtField = approvedAt?.let { ""","approvedAt":"$it"""" }.orEmpty()
+        val optionalFields =
+            listOfNotNull(
+                approvedAt?.let { """"approvedAt":"$it"""" },
+                orderId?.let { """"orderId":"$it"""" },
+                totalAmount?.let { """"totalAmount":$it""" },
+            ).joinToString("") { ",$it" }
         wireMock.stubFor(
             get(urlEqualTo("/v1/payments/$paymentKey"))
                 .willReturn(
                     aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
-                        .withBody("""{"paymentKey":"$paymentKey","status":"$status"$approvedAtField}"""),
+                        .withBody("""{"paymentKey":"$paymentKey","status":"$status"$optionalFields}"""),
                 ),
         )
     }
