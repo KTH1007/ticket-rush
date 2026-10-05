@@ -12,6 +12,9 @@ interface PaymentGatewayPort {
         idempotencyKey: UUID,
     ): PaymentGatewayResult
 
+    // paymentKey로 PG의 결제 상태를 조회한다. 승인 여부가 불확실할 때 PG에 직접 확인하는 용도
+    fun inquire(paymentKey: String): PaymentInquiryResult
+
     // 환불. 실제 PG에선 원 승인 거래를 pgTransactionId로 특정해서 취소 요청함
     fun refund(
         pgTransactionId: String,
