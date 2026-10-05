@@ -24,6 +24,8 @@ private val logger = KotlinLogging.logger {}
 
 private const val IDEMPOTENT_REQUEST_PROCESSING = "IDEMPOTENT_REQUEST_PROCESSING"
 private const val NOT_FOUND_PAYMENT = "NOT_FOUND_PAYMENT"
+private const val ALREADY_PROCESSING_REQUEST = "ALREADY_PROCESSING_REQUEST"
+private val ALREADY_PROCESSED_CODES = setOf("ALREADY_PROCESSED_PAYMENT", "DUPLICATED_REQUEST")
 
 // application.yml의 jdbc.time_zone과 같은 존. LocalDateTime이 이 존 기준으로 저장된다
 private val SEOUL: ZoneId = ZoneId.of("Asia/Seoul")
@@ -56,18 +58,37 @@ class TossPaymentGatewayAdapter(
                     .body(TossPaymentResponse::class.java)
             toResult(requireNotNull(response) { "토스 confirm 응답 본문이 비어 있습니다" })
         } catch (e: HttpClientErrorException) {
-            declinedOrRethrow(e)
+            declinedOrRethrow(e, paymentKey)
         }
 
     // 4xx만 거절로 변환한다. 5xx/타임아웃은 그대로 던져서 인프라 장애로 구분되게 한다.
-    private fun declinedOrRethrow(e: HttpClientErrorException): PaymentGatewayResult {
+    private fun declinedOrRethrow(
+        e: HttpClientErrorException,
+        paymentKey: String,
+    ): PaymentGatewayResult {
+        val code = errorBodyFrom(e)?.code
         // 첫 요청이 아직 처리 중이라 나중에 승인될 수 있으므로 거절로 확정하지 않는다
-        if (e.statusCode == HttpStatus.CONFLICT && errorBodyFrom(e)?.code == IDEMPOTENT_REQUEST_PROCESSING) {
+        if (e.statusCode == HttpStatus.CONFLICT && code == IDEMPOTENT_REQUEST_PROCESSING) {
+            throw PaymentConflictException(e)
+        }
+        if (e.statusCode == HttpStatus.BAD_REQUEST && code == ALREADY_PROCESSING_REQUEST) {
             throw PaymentConflictException(e)
         }
         throwIfUnauthorized(e)
+        if (e.statusCode == HttpStatus.BAD_REQUEST && code in ALREADY_PROCESSED_CODES) {
+            return resolveByInquiry(paymentKey)
+        }
         return PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
     }
+
+    // 이미 승인됐을 수 있어 거절로 확정하지 않고 Toss에 직접 물어 판정한다.
+    // 같은 빈 안의 호출이라 프록시를 타지 않으므로 서킷은 charge 한 번으로만 집계된다
+    private fun resolveByInquiry(paymentKey: String): PaymentGatewayResult =
+        when (val inquiry = inquire(paymentKey)) {
+            is PaymentInquiryResult.Done -> PaymentGatewayResult.Approved(inquiry.pgTransactionId, inquiry.approvedAt)
+            is PaymentInquiryResult.NotApproved -> PaymentGatewayResult.Declined(reason = "Toss status: ${inquiry.status}")
+            PaymentInquiryResult.NotFound -> PaymentGatewayResult.Declined(reason = "Toss에 해당 결제가 없습니다")
+        }
 
     // 시크릿 키 설정 실수가 거절이나 미승인으로 확정돼 결제가 잘못 닫히는 걸 막으려고 그대로 던진다
     private fun throwIfUnauthorized(e: HttpClientErrorException) {
