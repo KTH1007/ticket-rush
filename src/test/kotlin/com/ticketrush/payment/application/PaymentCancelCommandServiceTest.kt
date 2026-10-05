@@ -7,6 +7,7 @@ import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentHistoryRepositoryPort
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
+import com.ticketrush.payment.domain.RefundIdempotencyKey
 import com.ticketrush.reservation.domain.GradeRepositoryPort
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationAlreadyCanceledException
@@ -23,6 +24,7 @@ import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.beans.factory.annotation.Autowired
@@ -77,7 +79,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     fun `취소하면 outbox에 RESERVATION_CANCELED 이벤트가 같이 커밋된다`() {
         // given
         val reservation = 결제완료_예약_준비()
-        every { paymentGateway.refund(any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-6")
+        every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-6")
 
         // when
         cancelService.cancel(reservation.reservationNo!!, PHONE)
@@ -92,7 +94,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     fun `PAID 상태의 예약을 취소하면 CANCELED로 바뀌고 좌석이 AVAILABLE로 돌아간다`() {
         // given
         val reservation = 결제완료_예약_준비()
-        every { paymentGateway.refund(any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-1")
+        every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-1")
 
         // when
         cancelService.cancel(reservation.reservationNo!!, PHONE)
@@ -108,7 +110,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     fun `취소 시 환불이 성공하면 Payment가 REFUNDED로 바뀐다`() {
         // given
         val reservation = 결제완료_예약_준비()
-        every { paymentGateway.refund(any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-2")
+        every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-2")
 
         // when
         val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
@@ -118,10 +120,25 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     }
 
     @Test
+    fun `환불 요청에 원 거래 id와 결제 금액과 예약 키에서 유도한 환불 키를 넘긴다`() {
+        // given
+        val reservation = 결제완료_예약_준비()
+        every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-7")
+
+        // when
+        cancelService.cancel(reservation.reservationNo!!, PHONE)
+
+        // then
+        verify(exactly = 1) {
+            paymentGateway.refund("PG-TXN-ORIGINAL", 200_000, RefundIdempotencyKey.of(reservation.idempotencyKey))
+        }
+    }
+
+    @Test
     fun `환불이 실패해도 예약 취소 자체는 확정된다`() {
         // given
         val reservation = 결제완료_예약_준비()
-        every { paymentGateway.refund(any(), any()) } returns PaymentGatewayResult.Declined("환불 한도 초과")
+        every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Declined("환불 한도 초과")
 
         // when
         val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
@@ -136,7 +153,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     fun `환불 호출이 예외를 던져도 취소는 확정된다`() {
         // given
         val reservation = 결제완료_예약_준비()
-        every { paymentGateway.refund(any(), any()) } throws RuntimeException("네트워크 오류")
+        every { paymentGateway.refund(any(), any(), any()) } throws RuntimeException("네트워크 오류")
 
         // when
         val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
@@ -151,7 +168,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     fun `이미 CANCELED인 예약을 다시 취소하면 거부된다`() {
         // given
         val reservation = 결제완료_예약_준비()
-        every { paymentGateway.refund(any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-3")
+        every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-3")
         cancelService.cancel(reservation.reservationNo!!, PHONE)
 
         // when & then
@@ -180,7 +197,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     fun `payment_history에 SUCCESS에서 CANCELED로의 전이가 기록된다`() {
         // given
         val reservation = 결제완료_예약_준비()
-        every { paymentGateway.refund(any(), any()) } returns PaymentGatewayResult.Declined("환불 한도 초과")
+        every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Declined("환불 한도 초과")
 
         // when
         val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
@@ -194,7 +211,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     fun `환불 성공 시 payment_history에 CANCELED에서 REFUNDED로의 전이도 기록된다`() {
         // given
         val reservation = 결제완료_예약_준비()
-        every { paymentGateway.refund(any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-5")
+        every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-5")
 
         // when
         val result = cancelService.cancel(reservation.reservationNo!!, PHONE)

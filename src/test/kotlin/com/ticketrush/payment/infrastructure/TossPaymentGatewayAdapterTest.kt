@@ -227,7 +227,7 @@ class TossPaymentGatewayAdapterTest {
                 ),
         )
 
-        val result = adapter().refund("pk_refund_1", 10_000)
+        val result = adapter().refund("pk_refund_1", 10_000, UUID.randomUUID())
 
         assertThat(result).isInstanceOf(PaymentGatewayResult.Approved::class.java)
     }

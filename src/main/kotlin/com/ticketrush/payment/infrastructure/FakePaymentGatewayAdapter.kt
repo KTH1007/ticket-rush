@@ -24,5 +24,6 @@ class FakePaymentGatewayAdapter : PaymentGatewayPort {
     override fun refund(
         pgTransactionId: String,
         amount: Int,
+        idempotencyKey: UUID,
     ): PaymentGatewayResult = PaymentGatewayResult.Approved(pgTransactionId = "FAKE-REFUND-${UUID.randomUUID()}")
 }

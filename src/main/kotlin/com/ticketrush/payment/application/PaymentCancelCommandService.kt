@@ -7,6 +7,7 @@ import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
+import com.ticketrush.payment.domain.RefundIdempotencyKey
 import com.ticketrush.payment.domain.ReservationCanceledEvent
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationAlreadyCanceledException
@@ -95,7 +96,7 @@ class PaymentCancelCommandService(
             historyRecorder.record(canceled.id, fromStatus, PaymentStatus.CANCELED, reason = "사용자 취소 요청")
             eventPublisher.publishEvent(ReservationCanceledEvent(reservation.id))
 
-            applyRefund(canceled)
+            applyRefund(canceled, reservation)
         } catch (e: OptimisticLockingFailureException) {
             throw PaymentConflictException(cause = e)
         }
@@ -103,11 +104,14 @@ class PaymentCancelCommandService(
     // 환불 호출 자체가 예외를 던져도(네트워크 오류 등) 취소 확정을 롤백시키면 안 된다 -
     // "환불 실패해도 취소는 확정된다"는 계약을 예외 경로에서도 지킨다. 원인은 로그로만 남긴다.
     @Suppress("TooGenericExceptionCaught")
-    private fun applyRefund(payment: Payment): Payment {
+    private fun applyRefund(
+        payment: Payment,
+        reservation: Reservation,
+    ): Payment {
         val pgTransactionId = requireNotNull(payment.pgTransactionId) { "취소 대상인데 원 거래 id가 없습니다: ${payment.id}" }
         val result =
             try {
-                paymentGateway.refund(pgTransactionId, payment.amount)
+                paymentGateway.refund(pgTransactionId, payment.amount, RefundIdempotencyKey.of(reservation.idempotencyKey))
             } catch (e: Exception) {
                 logger.error(e) { "환불 요청 중 오류가 발생했습니다. 취소는 유지하고 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
                 return payment

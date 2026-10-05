@@ -135,6 +135,7 @@ class TossPaymentGatewayAdapter(
     override fun refund(
         pgTransactionId: String,
         amount: Int,
+        idempotencyKey: UUID,
     ): PaymentGatewayResult =
         try {
             val response =
@@ -142,8 +143,10 @@ class TossPaymentGatewayAdapter(
                     .post()
                     .uri("${toss.baseUrl}/v1/payments/$pgTransactionId/cancel")
                     .header("Authorization", basicAuth())
+                    .header("Idempotency-Key", idempotencyKey.toString())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(mapOf("cancelReason" to "사용자 취소 요청"))
+                    // cancelAmount를 생략하면 Toss가 전액 취소하므로, 의도한 금액을 명시한다
+                    .body(mapOf("cancelReason" to "사용자 취소 요청", "cancelAmount" to amount))
                     .retrieve()
                     .body(TossPaymentResponse::class.java)
             toCancelResult(requireNotNull(response) { "토스 cancel 응답 본문이 비어 있습니다" })
