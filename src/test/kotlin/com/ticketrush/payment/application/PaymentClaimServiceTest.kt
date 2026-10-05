@@ -27,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.LocalDateTime
+import java.util.UUID
 import kotlin.test.Test
 
 class PaymentClaimServiceTest : IntegrationTest() {
@@ -187,6 +188,40 @@ class PaymentClaimServiceTest : IntegrationTest() {
         assertThat(history.reason).isEqualTo("Toss 미승인(ABORTED), 예약을 쓸 수 없어 실패 확정")
         assertReservationAndSeatHoldUntouched(reservation)
     }
+
+    // HoldExpiryScheduler가 만료시킨 EXPIRED 예약. applyFailure는 HOLDING만 받으므로 결제 상태만 닫는 이 경로가 따로 필요하다
+    @Test
+    @Transactional
+    fun `markFailedByReconciliation은 이미 EXPIRED인 예약에서도 결제만 FAILED로 바꾸고 예약은 그대로 둔다`() {
+        val reservation = 이미_만료된_예약()
+        val claimed = 클레임(reservation, LocalDateTime.now(clock))
+
+        claimService.markFailedByReconciliation(claimed, "Toss에 결제 내역 없음, 예약을 쓸 수 없어 실패 확정")
+
+        assertThat(paymentRepository.findByReservationId(reservation.id)?.status).isEqualTo(PaymentStatus.FAILED)
+        val history = paymentHistoryRepository.findAllByPaymentId(claimed.id).single()
+        assertThat(history.fromStatus).isEqualTo(PaymentStatus.PENDING)
+        assertThat(history.toStatus).isEqualTo(PaymentStatus.FAILED)
+        entityManager.flush()
+        entityManager.clear()
+        val savedReservation = requireNotNull(reservationRepository.findById(reservation.id))
+        assertThat(savedReservation.status).isEqualTo(ReservationStatus.EXPIRED)
+        assertThat(savedReservation.holdExpiresAt).isEqualTo(HOLD_PASSED_AT)
+    }
+
+    private fun 이미_만료된_예약(): Reservation =
+        reservationRepository.save(
+            Reservation(
+                eventId = eventRepository.공연_하나_저장().id,
+                phoneHash = PhoneHash(ByteArray(32) { 1 }),
+                quantity = 1,
+                amount = 100_000,
+                holdToken = UUID.randomUUID(),
+                idempotencyKey = UUID.randomUUID(),
+                holdExpiresAt = HOLD_PASSED_AT,
+                status = ReservationStatus.EXPIRED,
+            ),
+        )
 
     private fun 홀드가_지난_예약과_좌석(): Reservation {
         val event = eventRepository.공연_하나_저장()

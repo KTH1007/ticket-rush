@@ -299,6 +299,31 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
         assertReservationAndSeatUntouched(reservation)
     }
 
+    // HoldExpiryScheduler가 만료시킨 EXPIRED 예약이 실제 운영에서 가드에 걸리는 주된 경우다. applyFailure는 HOLDING만 받아 여기서 던진다
+    @Test
+    @Transactional
+    fun `예약이 이미 EXPIRED인데 Toss가 승인하지 않았으면 결제만 FAILED로 확정하고 예약은 그대로 둔다`() {
+        val reservation = 예약_저장(status = ReservationStatus.EXPIRED, holdExpiresAt = HOLD_PASSED_AT)
+        클레임(reservation, paymentKey = "pk-expired-aborted")
+        every { paymentGateway.inquire("pk-expired-aborted") } returns PaymentInquiryResult.NotApproved("ABORTED")
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        assertFailedByReconciliation(reservation)
+    }
+
+    @Test
+    @Transactional
+    fun `예약이 이미 EXPIRED인데 Toss에 결제가 없으면 결제만 FAILED로 확정하고 예약은 그대로 둔다`() {
+        val reservation = 예약_저장(status = ReservationStatus.EXPIRED, holdExpiresAt = HOLD_PASSED_AT)
+        클레임(reservation, paymentKey = "pk-expired-missing")
+        every { paymentGateway.inquire("pk-expired-missing") } returns PaymentInquiryResult.NotFound
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        assertFailedByReconciliation(reservation)
+    }
+
     @Test
     @Transactional
     fun `조회가 예외를 던지면 그 행은 PENDING으로 남고 다음 행은 계속 처리한다`() {
@@ -356,6 +381,21 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
         val seat = seatRepository.findAllByReservationId(reservation.id).single()
         assertThat(seat.status).isEqualTo(SeatStatus.HELD)
         assertThat(seat.holdExpiresAt).isEqualTo(HOLD_PASSED_AT)
+    }
+
+    private fun assertFailedByReconciliation(reservation: Reservation) {
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.FAILED)
+        val history = paymentHistoryRepository.findAllByPaymentId(payment.id).single()
+        assertThat(history.fromStatus).isEqualTo(PaymentStatus.PENDING)
+        assertThat(history.toStatus).isEqualTo(PaymentStatus.FAILED)
+        assertThat(history.reason).isNotBlank()
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
+        entityManager.flush()
+        entityManager.clear()
+        val savedReservation = requireNotNull(reservationRepository.findById(reservation.id))
+        assertThat(savedReservation.status).isEqualTo(ReservationStatus.EXPIRED)
+        assertThat(savedReservation.holdExpiresAt).isEqualTo(HOLD_PASSED_AT)
     }
 
     private fun 예약_저장(
