@@ -6,6 +6,9 @@ spring:
     locations: classpath:db/migration,classpath:db/testmigration
   threads:
     virtual: { enabled: false }   # 테스트는 결정적으로 돌아야 한다
+  datasource:
+    hikari:
+      minimum-idle: 2   # 캐시된 컨텍스트마다 풀이 최대치(20)를 미리 쥐면 컨텍스트가 늘 때 DB 연결 한도를 넘는다
 
 ticket-rush:
   queue:
