@@ -121,6 +121,8 @@ ticket-rush:
   payment:
     stale-claim-timeout: 10s # PG 호출 최악 시간(RestClient connect 3s + read 3s)보다 충분히 넉넉하게
     reclaim-interval: 5s
+    refund-retry-delay: 5m # 환불이 실패한 CANCELED 결제를 다시 시도하기 전 대기. Toss 장애가 풀릴 시간을 준다
+    refund-max-attempts: 5 # 한도를 넘기면 자동 재시도를 멈추고 ERROR로 알려 사람이 처리한다
   toss:
     base-url: https://api.tosspayments.com
     secret-key: ${TOSS_SECRET_KEY}

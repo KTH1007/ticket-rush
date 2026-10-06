@@ -25,6 +25,7 @@ class Payment(
     paidAt: LocalDateTime? = null,
     tossPaymentKey: String? = null,
     tossOrderId: String? = null,
+    refundAttemptCount: Int = 0,
     version: Long = 0,
 ) : BaseEntity() {
     @Column(name = "reservation_id", nullable = false)
@@ -54,6 +55,10 @@ class Payment(
 
     @Column(name = "toss_order_id", length = 64)
     var tossOrderId: String? = tossOrderId
+        protected set
+
+    @Column(name = "refund_attempt_count", nullable = false)
+    var refundAttemptCount: Int = refundAttemptCount
         protected set
 
     @Version
@@ -94,6 +99,12 @@ class Payment(
     fun markRefunded() {
         check(status == PaymentStatus.CANCELED) { "CANCELED 상태에서만 환불 완료 처리할 수 있습니다: $status" }
         status = PaymentStatus.REFUNDED
+    }
+
+    // 환불 재시도가 실패할 때마다 올린다. 저장하면 updatedAt도 갱신돼 다음 재시도까지 간격이 자연스럽게 벌어진다
+    fun recordRefundAttempt() {
+        check(status == PaymentStatus.CANCELED) { "CANCELED 상태에서만 환불 시도를 기록할 수 있습니다: $status" }
+        refundAttemptCount++
     }
 
     override fun equals(other: Any?): Boolean {

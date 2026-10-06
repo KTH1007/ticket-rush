@@ -13,4 +13,13 @@ interface PaymentJpaRepository : JpaRepository<Payment, Long> {
             "AND p.tossPaymentKey IS NOT NULL AND p.updatedAt < :staleBefore ORDER BY p.updatedAt",
     )
     fun findStalePending(staleBefore: LocalDateTime): List<Payment>
+
+    @Query(
+        "SELECT p FROM Payment p WHERE p.status = com.ticketrush.payment.domain.PaymentStatus.CANCELED " +
+            "AND p.updatedAt < :staleBefore AND p.refundAttemptCount < :maxAttempts ORDER BY p.updatedAt",
+    )
+    fun findStaleCanceled(
+        staleBefore: LocalDateTime,
+        maxAttempts: Int,
+    ): List<Payment>
 }

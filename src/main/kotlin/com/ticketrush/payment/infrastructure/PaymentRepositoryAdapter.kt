@@ -14,4 +14,9 @@ class PaymentRepositoryAdapter(
     override fun findByReservationId(reservationId: Long): Payment? = jpaRepository.findByReservationId(reservationId)
 
     override fun findStalePending(staleBefore: LocalDateTime): List<Payment> = jpaRepository.findStalePending(staleBefore)
+
+    override fun findStaleCanceled(
+        staleBefore: LocalDateTime,
+        maxAttempts: Int,
+    ): List<Payment> = jpaRepository.findStaleCanceled(staleBefore, maxAttempts)
 }

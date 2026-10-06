@@ -145,6 +145,37 @@ class PaymentTest {
             .isInstanceOf(IllegalStateException::class.java)
     }
 
+    @Test
+    fun `환불 시도 횟수는 0에서 시작한다`() {
+        assertThat(결제(id = 1L).refundAttemptCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `CANCELED 상태에서 환불 시도를 기록할 때마다 횟수가 1씩 늘어난다`() {
+        // given
+        val payment = 결제(id = 1L)
+        payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0))
+        payment.markCanceled()
+
+        // when
+        payment.recordRefundAttempt()
+        payment.recordRefundAttempt()
+
+        // then
+        assertThat(payment.refundAttemptCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `CANCELED가 아닌 결제에 환불 시도를 기록하려 하면 예외가 발생한다`() {
+        // given
+        val payment = 결제(id = 1L)
+        payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0))
+
+        // when & then
+        assertThatThrownBy { payment.recordRefundAttempt() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
     private fun 결제(id: Long): Payment =
         Payment(
             id = id,
