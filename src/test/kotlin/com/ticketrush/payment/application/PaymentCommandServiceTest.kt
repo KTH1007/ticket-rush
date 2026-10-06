@@ -228,6 +228,18 @@ class PaymentCommandServiceTest : IntegrationTest() {
             .isInstanceOf(ReservationNotHoldingException::class.java)
     }
 
+    // PG 호출은 최대 6~12초가 걸릴 수 있어, 남은 홀드가 그보다 짧으면 호출 중에 만료돼 청구만 되고 티켓이 없는 상태가 될 수 있다
+    @Test
+    fun `남은 홀드 시간이 승인에 필요한 시간보다 짧으면 PG를 부르지 않고 결제를 거부한다`() {
+        // given
+        val reservation = 홀드된_예약_준비(holdExpiresAt = LocalDateTime.now(clock).plusSeconds(5))
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "near-expiry-payment-key") }
+            .isInstanceOf(ReservationNotHoldingException::class.java)
+        verify(exactly = 0) { paymentGateway.charge("near-expiry-payment-key", any(), any(), any()) }
+    }
+
     @Test
     fun `홀드 시각은 지났지만 status가 아직 HOLDING인 예약은 결제를 거부한다`() {
         // given: 스위퍼가 아직 못 훑은 상황을 흉내냄 - status는 HOLDING인데 holdExpiresAt은 과거

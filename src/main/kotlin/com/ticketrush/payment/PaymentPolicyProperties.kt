@@ -9,6 +9,7 @@ data class PaymentPolicyProperties(
     val reclaimInterval: Duration,
     val refundRetryDelay: Duration = Duration.ofMinutes(5),
     val refundMaxAttempts: Int = 5,
+    val minHoldRemaining: Duration = Duration.ofSeconds(15),
 ) {
     init {
         require(!staleClaimTimeout.isNegative && !staleClaimTimeout.isZero) {
@@ -21,5 +22,8 @@ data class PaymentPolicyProperties(
             "refundRetryDelay는 양수여야 합니다: $refundRetryDelay"
         }
         require(refundMaxAttempts > 0) { "refundMaxAttempts는 양수여야 합니다: $refundMaxAttempts" }
+        require(!minHoldRemaining.isNegative && !minHoldRemaining.isZero) {
+            "minHoldRemaining은 양수여야 합니다: $minHoldRemaining"
+        }
     }
 }

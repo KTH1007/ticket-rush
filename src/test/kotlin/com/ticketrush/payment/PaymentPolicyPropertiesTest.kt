@@ -29,6 +29,24 @@ class PaymentPolicyPropertiesTest {
     }
 
     @Test
+    fun `승인을 시작하는 데 필요한 남은 홀드 시간의 기본값은 15초다`() {
+        val policy = PaymentPolicyProperties(staleClaimTimeout = Duration.ofSeconds(10), reclaimInterval = Duration.ofSeconds(5))
+
+        assertThat(policy.minHoldRemaining).isEqualTo(Duration.ofSeconds(15))
+    }
+
+    @Test
+    fun `minHoldRemaining이 0 이하면 예외가 난다`() {
+        assertThatThrownBy {
+            PaymentPolicyProperties(
+                staleClaimTimeout = Duration.ofSeconds(10),
+                reclaimInterval = Duration.ofSeconds(5),
+                minHoldRemaining = Duration.ZERO,
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
     fun `refundRetryDelay가 0 이하면 예외가 난다`() {
         assertThatThrownBy {
             PaymentPolicyProperties(

@@ -15,6 +15,8 @@ class PaymentRepositoryAdapter(
 
     override fun findStalePending(staleBefore: LocalDateTime): List<Payment> = jpaRepository.findStalePending(staleBefore)
 
+    override fun countRefundRequired(): Long = jpaRepository.countRefundRequired()
+
     override fun findStaleCanceled(
         staleBefore: LocalDateTime,
         maxAttempts: Int,

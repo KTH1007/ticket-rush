@@ -24,6 +24,7 @@ import jakarta.persistence.PersistenceContext
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.LocalDateTime
@@ -57,6 +58,9 @@ class PaymentClaimServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var clock: Clock
+
+    @Autowired
+    lateinit var jdbcTemplate: JdbcTemplate
 
     @PersistenceContext
     lateinit var entityManager: EntityManager
@@ -100,6 +104,24 @@ class PaymentClaimServiceTest : IntegrationTest() {
 
         assertThat(takenOver.id).isEqualTo(first.id)
         assertThat(takenOver.status).isEqualTo(PaymentStatus.PENDING)
+    }
+
+    // 같은 paymentKey와 orderId로 이어받으면 바뀌는 값이 없어 UPDATE가 안 나가고, 행이 계속 stale로 보여 다른 요청이 또 이어받는다
+    @Test
+    @Transactional
+    fun `같은 키로 stale한 PENDING을 이어받아도 DB에 반영되어 바로 다른 요청이 이어받으면 충돌한다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event)
+        val first = 클레임(reservation, LocalDateTime.now(clock))
+        entityManager.flush()
+        jdbcTemplate.update("UPDATE payment SET updated_at = updated_at - interval '1 hour' WHERE id = ?", first.id)
+        entityManager.clear()
+
+        클레임(reservation, LocalDateTime.now(clock))
+        entityManager.flush()
+
+        assertThatThrownBy { 클레임(reservation, LocalDateTime.now(clock)) }
+            .isInstanceOf(PaymentConflictException::class.java)
     }
 
     @Test
@@ -233,6 +255,26 @@ class PaymentClaimServiceTest : IntegrationTest() {
         val savedReservation = requireNotNull(reservationRepository.findById(reservation.id))
         assertThat(savedReservation.status).isEqualTo(ReservationStatus.EXPIRED)
         assertThat(savedReservation.holdExpiresAt).isEqualTo(HOLD_PASSED_AT)
+    }
+
+    // 돈이 움직이는 판단이라 자동 환불하지 않고 PENDING 그대로 두되, 사람이 처리할 건을 DB에 남겨 재시작해도 사라지지 않게 한다
+    @Test
+    @Transactional
+    fun `markRefundRequired는 환불 필요 시각과 이력을 DB에 남기고 결제 상태와 예약은 건드리지 않는다`() {
+        val reservation = 이미_만료된_예약()
+        val claimed = 클레임(reservation, LocalDateTime.now(clock))
+
+        claimService.markRefundRequired(claimed, LocalDateTime.now(clock), "환불 필요: Toss 승인(DONE), 예약 만료")
+
+        entityManager.flush()
+        entityManager.clear()
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(payment.refundRequiredAt).isNotNull()
+        val history = paymentHistoryRepository.findAllByPaymentId(payment.id).single { it.reason?.contains("환불 필요") == true }
+        assertThat(history.fromStatus).isEqualTo(PaymentStatus.PENDING)
+        assertThat(history.toStatus).isEqualTo(PaymentStatus.PENDING)
+        assertThat(requireNotNull(reservationRepository.findById(reservation.id)).status).isEqualTo(ReservationStatus.EXPIRED)
     }
 
     private fun 이미_만료된_예약(): Reservation =

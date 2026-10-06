@@ -3,6 +3,7 @@ package com.ticketrush.payment.application
 import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.ChargeIdempotencyKey
 import com.ticketrush.payment.domain.Payment
+import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentInquiryResult
@@ -11,11 +12,12 @@ import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Clock
 import java.time.LocalDateTime
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 private val logger = KotlinLogging.logger {}
 
@@ -30,22 +32,38 @@ class PaymentReclaimScheduler(
     private val policy: PaymentPolicyProperties,
     private val clock: Clock,
 ) {
-    // Toss가 승인했는데 예약이 만료된 결제. 매 틱 Toss를 다시 부르거나 ERROR를 쏟아내지 않도록 인스턴스당 한 번만 처리한다
-    private val alertedPaymentIds = ConcurrentHashMap.newKeySet<Long>()
+    // PG 호출이 길어져 틱이 겹치면 같은 행을 동시에 이어받게 되므로, 한 인스턴스에서는 한 번에 한 틱만 돈다
+    private val running = AtomicBoolean(false)
 
-    @Scheduled(fixedRateString = "\${ticket-rush.payment.reclaim-interval}")
+    // 기동 직후 즉시 도는 첫 틱을 한 주기 미룬다. 테스트에서는 다른 테스트가 커밋한 행을 첫 틱이 집어가는 문제가 있었다
+    @Scheduled(
+        fixedRateString = "\${ticket-rush.payment.reclaim-interval}",
+        initialDelayString = "\${ticket-rush.payment.reclaim-interval}",
+    )
     fun reclaim() {
         reclaim(LocalDateTime.now(clock).minus(policy.staleClaimTimeout))
     }
 
-    @Suppress("TooGenericExceptionCaught")
     fun reclaim(staleBefore: LocalDateTime) {
-        paymentRepository.findStalePending(staleBefore).forEach { payment ->
-            try {
-                reclaimOne(payment)
-            } catch (e: Exception) {
-                logger.warn(e) { "결제 재시도 실패: reservationId=${payment.reservationId}" }
-            }
+        if (!running.compareAndSet(false, true)) return
+        try {
+            paymentRepository.findStalePending(staleBefore).forEach(::reclaimSafely)
+        } finally {
+            running.set(false)
+        }
+    }
+
+    // 다른 요청이나 인스턴스와 겹쳐 지는 충돌은 정상 경합이라 스택트레이스 없이 한 줄만 남긴다
+    @Suppress("TooGenericExceptionCaught")
+    private fun reclaimSafely(payment: Payment) {
+        try {
+            reclaimOne(payment)
+        } catch (expected: PaymentConflictException) {
+            logger.warn { "다른 요청이 처리 중이라 건너뜁니다: reservationId=${payment.reservationId}" }
+        } catch (expected: OptimisticLockingFailureException) {
+            logger.warn { "다른 요청이 먼저 반영해 건너뜁니다: reservationId=${payment.reservationId}" }
+        } catch (e: Exception) {
+            logger.warn(e) { "결제 재시도 실패: reservationId=${payment.reservationId}" }
         }
     }
 
@@ -61,11 +79,12 @@ class PaymentReclaimScheduler(
             requireNotNull(reservationRepository.findById(payment.reservationId)) { "예약을 찾을 수 없습니다: ${payment.reservationId}" }
         val now = LocalDateTime.now(clock)
 
-        // HoldExpiryScheduler가 PENDING 결제를 보지 않고 예약을 만료시킨다. 늦은 승인이 와도 반영할 수 없으니 승인 요청은 하지 않는다
-        if (reservation.isHoldActiveAt(now)) {
-            retryCharge(payment, reservation, paymentKey, orderId, now)
-        } else {
-            reconcileByInquiry(payment, reservation, paymentKey)
+        // HoldExpiryScheduler가 PENDING 결제를 보지 않고 예약을 만료시킨다. 늦은 승인이 와도 반영할 수 없으니 승인 요청은 하지 않는다.
+        // 곧 만료될 홀드도 호출이 만료와 겹칠 수 있어 이번 틱은 건너뛰고, 만료된 뒤 조회로 정리한다
+        when {
+            reservation.isHoldActiveAt(now.plus(policy.minHoldRemaining)) -> retryCharge(payment, reservation, paymentKey, orderId, now)
+            reservation.isHoldActiveAt(now) -> Unit
+            else -> reconcileByInquiry(payment, reservation, paymentKey)
         }
     }
 
@@ -97,7 +116,6 @@ class PaymentReclaimScheduler(
         reservation: Reservation,
         paymentKey: String,
     ) {
-        if (payment.id in alertedPaymentIds) return
         when (val inquiry = paymentGateway.inquire(paymentKey)) {
             is PaymentInquiryResult.Done -> alertRefundNeeded(payment, reservation, inquiry)
             is PaymentInquiryResult.NotApproved ->
@@ -107,16 +125,15 @@ class PaymentReclaimScheduler(
         }
     }
 
-    // 돈이 움직이는 판단이라 자동 환불하지 않고 PENDING 그대로 둔 채 사람이 처리하도록 알린다
+    // 돈이 움직이는 판단이라 자동 환불하지 않고 PENDING 그대로 둔 채 사람이 처리하도록 알린다. 표시를 DB에 남기므로 알림은 건당 한 번이다
     private fun alertRefundNeeded(
         payment: Payment,
         reservation: Reservation,
         inquiry: PaymentInquiryResult.Done,
     ) {
-        alertedPaymentIds.add(payment.id)
-        logger.error {
-            "Toss는 승인(DONE)했지만 예약이 만료됨, 환불 필요: reservationId=${reservation.id}, paymentId=${payment.id}, " +
-                "reservationStatus=${reservation.status}, approvedAt=${inquiry.approvedAt}"
-        }
+        val detail =
+            "reservationId=${reservation.id}, paymentId=${payment.id}, reservationStatus=${reservation.status}, approvedAt=${inquiry.approvedAt}"
+        claimService.markRefundRequired(payment, LocalDateTime.now(clock), "환불 필요: Toss는 승인(DONE)했지만 예약이 만료됨, $detail")
+        logger.error { "Toss는 승인(DONE)했지만 예약이 만료됨, 환불 필요: $detail" }
     }
 }

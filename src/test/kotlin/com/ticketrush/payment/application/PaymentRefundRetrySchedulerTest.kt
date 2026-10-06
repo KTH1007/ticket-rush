@@ -325,7 +325,7 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
     // 감사 필드는 JPA flush 때만 갱신되므로 JDBC로 시간을 되돌린다
     private fun 오래된_행으로_만들기(payment: Payment) {
         entityManager.flush()
-        jdbcTemplate.update("UPDATE payment SET updated_at = updated_at - interval '1 hour' WHERE id = ?", payment.id)
+        jdbcTemplate.update("UPDATE payment SET updated_at = updated_at - interval '2 hours' WHERE id = ?", payment.id)
         entityManager.clear()
     }
 

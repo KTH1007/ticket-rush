@@ -42,7 +42,7 @@ class PaymentClaimService(
         val claimed = if (existing != null) takeOverIfStale(existing, now) else insertNewClaim(reservationId, amount)
         // 이미 확정된 행에 늦게 도착한 시도의 키를 덮어쓰지 않는다
         if (claimed.status != PaymentStatus.PENDING) return claimed
-        claimed.recordAttempt(paymentKey, orderId)
+        claimed.recordAttempt(paymentKey, orderId, now)
         return paymentRepository.save(claimed)
     }
 
@@ -127,6 +127,18 @@ class PaymentClaimService(
         payment.markFailed()
         val saved = paymentRepository.save(payment)
         historyRecorder.record(saved.id, fromStatus, PaymentStatus.FAILED, reason = reason)
+    }
+
+    // 돈이 움직이는 판단이라 자동 환불하지 않는다. 사람이 처리할 건을 DB에 남겨 재시작해도 사라지지 않고, 같은 건을 다시 조회하지 않게 한다
+    @Transactional
+    fun markRefundRequired(
+        payment: Payment,
+        now: LocalDateTime,
+        reason: String,
+    ) {
+        payment.markRefundRequired(now)
+        val saved = paymentRepository.save(payment)
+        historyRecorder.record(saved.id, PaymentStatus.PENDING, PaymentStatus.PENDING, reason = reason)
     }
 
     private fun findUnusedReservationNo(): String {

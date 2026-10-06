@@ -6,6 +6,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.Payment
+import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
@@ -133,6 +134,38 @@ class PaymentReclaimSchedulerRaceTest {
         // then
         verify(exactly = 1) { claimService.claimOrTakeOver(RESERVATION_ID, AMOUNT, "pk-new", "order-new", any()) }
         verify(exactly = 1) { paymentGateway.charge("pk-new", "order-new", AMOUNT, reservation.idempotencyKey) }
+    }
+
+    @Test
+    fun `이전 틱이 아직 돌고 있으면 같은 인스턴스의 다음 틱은 PG를 부르지 않고 끝난다`() {
+        // given: PG 호출이 길어지는 사이 다음 틱이 들어온 상황
+        stubStaleSnapshot(결제(PaymentStatus.PENDING))
+        every { paymentRepository.findByReservationId(RESERVATION_ID) } returns 결제(PaymentStatus.PENDING)
+        every { reservationRepository.findById(RESERVATION_ID) } returns 예약(ReservationStatus.HOLDING)
+        every { claimService.claimOrTakeOver(any(), any(), any(), any(), any()) } returns 결제(PaymentStatus.PENDING)
+        justRun { claimService.applySuccess(any(), any(), any(), any()) }
+        every { paymentGateway.charge(any(), any(), any(), any()) } answers {
+            scheduler.reclaim(LocalDateTime.now(clock))
+            PaymentGatewayResult.Approved("pk-test")
+        }
+
+        // when
+        scheduler.reclaim(LocalDateTime.now(clock))
+
+        // then
+        verify(exactly = 1) { paymentGateway.charge(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `다른 요청과 겹쳐 충돌 예외가 나면 스택트레이스 없이 WARN 한 줄만 남긴다`() {
+        stubStaleSnapshot(결제(PaymentStatus.PENDING))
+        every { paymentRepository.findByReservationId(RESERVATION_ID) } returns 결제(PaymentStatus.PENDING)
+        every { reservationRepository.findById(RESERVATION_ID) } returns 예약(ReservationStatus.HOLDING)
+        every { claimService.claimOrTakeOver(any(), any(), any(), any(), any()) } throws PaymentConflictException()
+
+        scheduler.reclaim(LocalDateTime.now(clock))
+
+        assertThat(logs.list.single { it.level == Level.WARN }.throwableProxy).isNull()
     }
 
     private fun stubStaleSnapshot(snapshot: Payment) {

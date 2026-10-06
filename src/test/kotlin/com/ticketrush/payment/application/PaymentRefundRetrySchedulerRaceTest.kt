@@ -1,5 +1,9 @@
 package com.ticketrush.payment.application
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentGatewayPort
@@ -14,6 +18,11 @@ import io.mockk.every
 import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
+import org.slf4j.LoggerFactory
+import org.springframework.orm.ObjectOptimisticLockingFailureException
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -38,6 +47,32 @@ class PaymentRefundRetrySchedulerRaceTest {
             PaymentPolicyProperties(staleClaimTimeout = Duration.ofSeconds(10), reclaimInterval = Duration.ofSeconds(5)),
             clock,
         )
+
+    private val logs = ListAppender<ILoggingEvent>()
+    private val schedulerLogger = LoggerFactory.getLogger(PaymentRefundRetryScheduler::class.java.name) as Logger
+
+    @BeforeEach
+    fun captureLogs() {
+        logs.start()
+        schedulerLogger.addAppender(logs)
+    }
+
+    @AfterEach
+    fun releaseLogs() {
+        schedulerLogger.detachAppender(logs)
+        logs.stop()
+    }
+
+    @Test
+    fun `반영 단계에서 다른 인스턴스와 낙관적 락으로 겹치면 스택트레이스 없이 WARN 한 줄만 남긴다`() {
+        stubRow(1L, 10L)
+        every { paymentRepository.findStaleCanceled(any(), any()) } returns listOf(결제(1L, 10L, PaymentStatus.CANCELED))
+        every { recorder.recordSuccess(any(), any()) } throws ObjectOptimisticLockingFailureException(Payment::class.java, 1L)
+
+        scheduler.retry(LocalDateTime.now(clock))
+
+        assertThat(logs.list.single { it.level == Level.WARN }.throwableProxy).isNull()
+    }
 
     @Test
     fun `재조회했을 때 결제가 이미 REFUNDED면 환불을 다시 요청하지 않는다`() {

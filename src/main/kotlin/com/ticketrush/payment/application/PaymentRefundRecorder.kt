@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional
 
 private val logger = KotlinLogging.logger {}
 
-// 환불 결과(취소 시점과 재시도 모두)를 반영하는 트랜잭션 단위. 스케줄러의 Toss 호출은 트랜잭션 밖이라 self-invocation을 피하려고 별도 빈으로 둔다
+// 환불 실패(취소 시점과 재시도)와 재시도 성공을 반영하는 트랜잭션 단위. 스케줄러의 Toss 호출은 트랜잭션 밖이라 별도 빈으로 둔다
 @Component
 class PaymentRefundRecorder(
     private val paymentRepository: PaymentRepositoryPort,
@@ -39,7 +39,7 @@ class PaymentRefundRecorder(
             saved.id,
             PaymentStatus.CANCELED,
             PaymentStatus.CANCELED,
-            reason = "환불 실패 ${saved.refundAttemptCount}/${policy.refundMaxAttempts}: $reason".take(REASON_MAX_LENGTH),
+            reason = "환불 실패 ${saved.refundAttemptCount}/${policy.refundMaxAttempts}: $reason",
         )
         // 한도에 도달한 순간 한 번만 알린다. 이후엔 조회에서 빠져 같은 알림이 반복되지 않고, 취소 시점의 실패로 한도에 닿아도 알린다
         if (saved.refundAttemptCount >= policy.refundMaxAttempts) {
@@ -49,10 +49,5 @@ class PaymentRefundRecorder(
             }
         }
         return saved
-    }
-
-    companion object {
-        // payment_history.reason 컬럼 길이. Toss 에러 메시지가 길면 이력 저장이 실패한다
-        private const val REASON_MAX_LENGTH = 200
     }
 }

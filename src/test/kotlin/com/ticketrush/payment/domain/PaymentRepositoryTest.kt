@@ -149,6 +149,40 @@ class PaymentRepositoryTest : IntegrationTest() {
             .containsExactly(oldest.id, middle.id, newest.id)
     }
 
+    // 표시된 행을 계속 조회하면 회수 스케줄러가 틱마다 Toss를 다시 부르고 같은 알림을 반복한다. 표시가 DB에 있어 재시작해도 유지된다
+    @Test
+    @Transactional
+    fun `환불 필요로 표시된 PENDING 결제는 stale 조회에서 빠지고 건수에 센다`() {
+        // given
+        val unmarked = paymentRepository.save(결제(예약_하나_저장().id, tossPaymentKey = "pk-unmarked"))
+        val marked = paymentRepository.save(결제(예약_하나_저장().id, tossPaymentKey = "pk-marked"))
+        marked.markRefundRequired(LocalDateTime.now(clock))
+        paymentRepository.save(marked)
+        listOf(unmarked, marked).forEach { updatedAt을_과거로_되돌리기(it, hours = 1) }
+        val before = paymentRepository.countRefundRequired()
+
+        // when
+        val ids = paymentRepository.findStalePending(LocalDateTime.now(clock).minusMinutes(30)).map { it.id }
+
+        // then
+        assertThat(ids).contains(unmarked.id).doesNotContain(marked.id)
+        assertThat(before).isGreaterThanOrEqualTo(1)
+    }
+
+    @Test
+    @Transactional
+    fun `환불 필요 건수는 표시됐지만 더 이상 PENDING이 아닌 결제를 세지 않는다`() {
+        val resolved = paymentRepository.save(결제(예약_하나_저장().id, tossPaymentKey = "pk-resolved"))
+        resolved.markRefundRequired(LocalDateTime.now(clock))
+        val before = paymentRepository.countRefundRequired()
+
+        // 사람이 Toss 관리자에서 환불한 뒤 상태를 정리하면 건수에서 빠진다
+        resolved.markFailed()
+        paymentRepository.save(resolved)
+
+        assertThat(paymentRepository.countRefundRequired()).isEqualTo(before - 1)
+    }
+
     @Test
     @Transactional
     fun `환불 시도 횟수는 0으로 저장되고 기록하면 늘어난 값이 DB에 저장된다`() {

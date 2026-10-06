@@ -1,5 +1,6 @@
 package com.ticketrush.payment.application
 
+import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.ChargeIdempotencyKey
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConfirmationResult
@@ -28,10 +29,11 @@ class PaymentCommandService(
     private val paymentRepository: PaymentRepositoryPort,
     private val paymentGateway: PaymentGatewayPort,
     private val claimService: PaymentClaimService,
+    private val policy: PaymentPolicyProperties,
     private val clock: Clock,
 ) {
-    // 더 이상 @Transactional이 아니다. PG 호출이 트랜잭션 밖에서 일어나야 하므로 이 메서드
-    // 자체를 트랜잭션으로 감쌀 수 없다(claimService의 각 단계가 자기 트랜잭션을 갖는다).
+    // @Transactional이 아니다. PG 호출이 트랜잭션 밖에서 일어나야 하므로 이 메서드 자체를 트랜잭션으로 감쌀 수 없다
+    // (claimService의 각 단계가 자기 트랜잭션을 갖는다).
     fun confirmPayment(
         reservationId: Long,
         holdToken: UUID,
@@ -48,6 +50,8 @@ class PaymentCommandService(
         requireOrderMatches(reservation, orderId, amount)
 
         val claimed = claim(reservation, paymentKey, orderId)
+        // 결제를 읽은 뒤 다른 요청이 먼저 확정했다면 그 행을 그대로 돌려받는다. PG를 또 부르지 않고 충돌로 응답하면 재요청이 결과를 받는다
+        if (claimed.status != PaymentStatus.PENDING) throw PaymentConflictException()
         return callGatewayAndApply(reservation, claimed, paymentKey, orderId, amount)
     }
 
@@ -94,7 +98,10 @@ class PaymentCommandService(
 
     private fun requireHolding(reservation: Reservation) {
         if (reservation.status != ReservationStatus.HOLDING) throw ReservationNotHoldingException(reservation.status)
-        if (!reservation.isHoldActiveAt(LocalDateTime.now(clock))) throw ReservationNotHoldingException(ReservationStatus.EXPIRED)
+        // 남은 홀드가 PG 호출 시간보다 짧으면 호출 중에 만료돼 청구만 되고 티켓이 없을 수 있어 시작 전에 거부한다
+        if (!reservation.isHoldActiveAt(LocalDateTime.now(clock).plus(policy.minHoldRemaining))) {
+            throw ReservationNotHoldingException(ReservationStatus.EXPIRED)
+        }
     }
 
     private fun requireOrderMatches(

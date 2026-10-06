@@ -11,6 +11,7 @@ import com.ticketrush.payment.domain.RefundIdempotencyKey
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Clock
@@ -32,24 +33,33 @@ class PaymentRefundRetryScheduler(
     // 환불 호출이 길어져 틱이 겹치면 같은 행을 동시에 요청하게 되므로, 한 인스턴스에서는 한 번에 한 틱만 돈다
     private val running = AtomicBoolean(false)
 
-    @Scheduled(fixedRateString = "\${ticket-rush.payment.reclaim-interval}")
+    // 기동 직후 즉시 도는 첫 틱을 한 주기 미룬다. 첫 틱이 돌고 있으면 겹침 방지 가드 때문에 같은 시점에 직접 부른 호출이 건너뛰어진다
+    @Scheduled(
+        fixedRateString = "\${ticket-rush.payment.reclaim-interval}",
+        initialDelayString = "\${ticket-rush.payment.reclaim-interval}",
+    )
     fun retry() {
         retry(LocalDateTime.now(clock).minus(policy.refundRetryDelay))
     }
 
-    @Suppress("TooGenericExceptionCaught")
     fun retry(staleBefore: LocalDateTime) {
         if (!running.compareAndSet(false, true)) return
         try {
-            paymentRepository.findStaleCanceled(staleBefore, policy.refundMaxAttempts).forEach { payment ->
-                try {
-                    retryOne(payment)
-                } catch (e: Exception) {
-                    logger.warn(e) { "환불 재시도 반영 실패: reservationId=${payment.reservationId}" }
-                }
-            }
+            paymentRepository.findStaleCanceled(staleBefore, policy.refundMaxAttempts).forEach(::retrySafely)
         } finally {
             running.set(false)
+        }
+    }
+
+    // 다른 인스턴스와 낙관적 락으로 겹치는 건 정상 경합이라 스택트레이스 없이 한 줄만 남긴다
+    @Suppress("TooGenericExceptionCaught")
+    private fun retrySafely(payment: Payment) {
+        try {
+            retryOne(payment)
+        } catch (expected: OptimisticLockingFailureException) {
+            logger.warn { "다른 인스턴스가 먼저 반영해 건너뜁니다: reservationId=${payment.reservationId}" }
+        } catch (e: Exception) {
+            logger.warn(e) { "환불 재시도 반영 실패: reservationId=${payment.reservationId}" }
         }
     }
 

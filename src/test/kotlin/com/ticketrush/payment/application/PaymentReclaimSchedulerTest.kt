@@ -136,6 +136,20 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
         }
     }
 
+    // 새 PG 호출이 홀드 만료와 겹치면 승인된 뒤 반영이 막힌다. 곧 만료될 홀드는 호출하지 않고 만료된 뒤 조회로 정리한다
+    @Test
+    @Transactional
+    fun `홀드가 곧 만료되는 PENDING은 PG를 부르지 않고 이번 틱은 건너뛴다`() {
+        val reservation = reservationRepository.예약_하나_저장(event = 공연(), holdExpiresAt = LocalDateTime.now(clock).plusSeconds(5))
+        클레임(reservation, paymentKey = "pk-near-expiry")
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
+        verify(exactly = 0) { paymentGateway.inquire(any()) }
+        assertThat(paymentRepository.findByReservationId(reservation.id)?.status).isEqualTo(PaymentStatus.PENDING)
+    }
+
     @Test
     @Transactional
     fun `이전 거절로 승인 거절 횟수가 오른 행은 그 횟수를 섞은 멱등키로 재시도한다`() {
@@ -256,7 +270,9 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
 
         val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
         assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
-        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id)).isEmpty()
+        // 알림은 로그뿐 아니라 DB에도 남겨서 재시작해도 사라지지 않고 같은 건을 다시 조회하지 않는다
+        assertThat(payment.refundRequiredAt).isNotNull()
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).single().reason).contains("환불 필요", "approvedAt=$approvedAt")
         verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
         assertReservationAndSeatUntouched(reservation)
         val refundAlert = logs.list.single { it.level == Level.ERROR }.formattedMessage
