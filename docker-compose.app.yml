@@ -18,6 +18,7 @@ services:
       INSTANCE_ID: app-1
       DB_PASSWORD: localpassword
       PHONE_HMAC_KEY: ${PHONE_HMAC_KEY}
+      PHONE_ENCRYPTION_KEY: ${PHONE_ENCRYPTION_KEY}
     # 검증 중에는 인스턴스별 직접 접근이 필요해 포트를 연다.
     # 검증이 끝나면 expose: ["8080"]으로 바꿔 nginx 우회와 헤더 위조를 막고,
     # Prometheus도 app-1:8080을 직접 scrape하도록 바꾼다.
@@ -49,6 +50,7 @@ services:
       INSTANCE_ID: app-2
       DB_PASSWORD: localpassword
       PHONE_HMAC_KEY: ${PHONE_HMAC_KEY}
+      PHONE_ENCRYPTION_KEY: ${PHONE_ENCRYPTION_KEY}
     ports: ["127.0.0.1:8082:8080"]
     depends_on:
       postgres: { condition: service_healthy }

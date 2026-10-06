@@ -133,6 +133,14 @@ class TossPaymentGatewayAdapterRefundTest {
     }
 
     @Test
+    fun `429 호출 제한이면 환불 실패로 세지 않도록 PaymentConflictException을 던진다`() {
+        stubCancelError(429, "TOO_MANY_REQUESTS", "요청이 너무 많습니다")
+
+        assertThatThrownBy { adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID()) }
+            .isInstanceOf(PaymentConflictException::class.java)
+    }
+
+    @Test
     fun `401 인증 실패는 Declined가 아니라 예외를 던진다`() {
         stubCancelError(401, "UNAUTHORIZED_KEY", "인증되지 않은 시크릿 키 혹은 클라이언트 키 입니다.")
 

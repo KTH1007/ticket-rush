@@ -107,6 +107,57 @@ class TossPaymentGatewayAdapterTest {
         assertThat((result as PaymentGatewayResult.Declined).reason).contains("REJECT_CARD_COMPANY")
     }
 
+    // 429(호출 제한)와 408(시간 초과)은 PG가 요청을 처리하지 못한 일시 오류다. 확정 거절로 굳히면 결제가 FAILED가 되고 홀드가 줄어든다
+    @Test
+    fun `429 호출 제한은 거절로 확정하지 않고 나중에 다시 시도하도록 PaymentConflictException을 던진다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(429)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""{"code":"TOO_MANY_REQUESTS","message":"요청이 너무 많습니다"}"""),
+                ),
+        )
+
+        assertThatThrownBy { adapter().charge("pk_rate", "order-rate", 10_000, UUID.randomUUID()) }
+            .isInstanceOf(PaymentConflictException::class.java)
+    }
+
+    @Test
+    fun `408 시간 초과도 거절로 확정하지 않고 PaymentConflictException을 던진다`() {
+        wireMock.stubFor(post(urlEqualTo("/v1/payments/confirm")).willReturn(aResponse().withStatus(408)))
+
+        assertThatThrownBy { adapter().charge("pk_timeout", "order-timeout", 10_000, UUID.randomUUID()) }
+            .isInstanceOf(PaymentConflictException::class.java)
+    }
+
+    // toss 프로필이 아닐 때는 키가 필요 없어 설정 기본값이 빈 문자열이므로, 프로필을 켜고 키를 빠뜨리면 기동 때 바로 드러나야 한다
+    @Test
+    fun `시크릿 키가 비어 있으면 어댑터를 만들 때 실패한다`() {
+        assertThatThrownBy {
+            TossPaymentGatewayAdapter(RestClient.create(), TossProperties(baseUrl = wireMock.baseUrl(), secretKey = " "))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    // 거절 사유는 이력에 저장되고 클라이언트 응답에도 실린다. JSON이 아닌 본문(프록시의 HTML 등)을 그대로 싣지 않는다
+    @Test
+    fun `4xx 본문이 JSON이 아니면 원문 대신 상태 코드만 사유로 쓴다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(400)
+                        .withHeader("Content-Type", "text/html")
+                        .withBody("<html><body>blocked by upstream proxy ${"x".repeat(500)}</body></html>"),
+                ),
+        )
+
+        val result = adapter().charge("pk_test_html", "order-html", 10_000, UUID.randomUUID())
+
+        assertThat((result as PaymentGatewayResult.Declined).reason).isEqualTo("HTTP 400")
+    }
+
     @Test
     fun `403 REJECT_CARD_COMPANY도 Declined를 반환한다`() {
         wireMock.stubFor(

@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Profile
 import org.springframework.stereotype.Component
 import java.util.UUID
 
-// 실제 PG 연동 전까지 쓰는 가짜 구현체. 항상 승인
+// toss 프로필이 아닐 때(로컬 개발과 테스트) 쓰는 가짜 구현체. 항상 승인
 @Profile("!toss")
 @Component
 class FakePaymentGatewayAdapter : PaymentGatewayPort {

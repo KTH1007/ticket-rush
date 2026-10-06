@@ -45,6 +45,24 @@ class DependencyRuleTest {
                 "com.querydsl..",
             )
 
+    // 서킷브레이커와 HTTP 클라이언트는 PG 어댑터(infrastructure)의 관심사다. 도메인과 서비스가 이 타입을 알면 PG를 바꿀 때 번진다
+    @ArchTest
+    val `도메인은 서킷브레이커와 HTTP 타입을 의존하지 않는다`: ArchRule =
+        noClasses()
+            .that(resideInAPackage("..domain..").and(not(annotatedWith(Generated::class.java))))
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage("io.github.resilience4j..", "org.springframework.http..")
+
+    @ArchTest
+    val `애플리케이션 계층은 서킷브레이커와 웹, HTTP 타입을 의존하지 않는다`: ArchRule =
+        noClasses()
+            .that()
+            .resideInAPackage("..application..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage("io.github.resilience4j..", "org.springframework.web..", "org.springframework.http..")
+
     @ArchTest
     val `API 계층은 리포지토리를 직접 호출하지 않는다`: ArchRule =
         noClasses()

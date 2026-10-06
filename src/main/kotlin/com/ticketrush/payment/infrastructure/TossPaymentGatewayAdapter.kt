@@ -39,6 +39,10 @@ class TossPaymentGatewayAdapter(
     private val restClient: RestClient,
     private val toss: TossProperties,
 ) : PaymentGatewayPort {
+    init {
+        require(toss.secretKey.isNotBlank()) { "toss 프로필에는 TOSS_SECRET_KEY가 필요합니다" }
+    }
+
     @CircuitBreaker(name = "paymentGateway")
     override fun charge(
         paymentKey: String,
@@ -78,6 +82,7 @@ class TossPaymentGatewayAdapter(
             throw PaymentConflictException(e)
         }
         throwIfUnauthorized(e)
+        throwIfTransient(e)
         if (e.statusCode == HttpStatus.BAD_REQUEST && code in ALREADY_PROCESSED_CODES) {
             return resolveByInquiry(paymentKey, orderId, amount)
         }
@@ -99,6 +104,12 @@ class TossPaymentGatewayAdapter(
             payment.orderId != orderId || payment.totalAmount != amount -> PaymentGatewayResult.Declined(reason = "다른 주문의 결제")
             else -> PaymentGatewayResult.Approved(payment.paymentKey, parseApprovedAt(payment.approvedAt))
         }
+    }
+
+    // 429(호출 제한)와 408(시간 초과)은 PG가 요청을 처리하지 못한 일시 오류다. 거절로 확정하면 결제가 FAILED가 되고 홀드가 줄어들어
+    // 사용자가 억울하게 거절당하므로, 처리 중과 같이 결과를 확정하지 않고 나중에 다시 시도한다
+    private fun throwIfTransient(e: HttpClientErrorException) {
+        if (e.statusCode == HttpStatus.TOO_MANY_REQUESTS || e.statusCode == HttpStatus.REQUEST_TIMEOUT) throw PaymentConflictException(e)
     }
 
     // 시크릿 키 설정 실수가 거절이나 미승인으로 확정돼 결제가 잘못 닫히는 걸 막으려고 그대로 던진다
@@ -142,7 +153,7 @@ class TossPaymentGatewayAdapter(
             val response =
                 restClient
                     .post()
-                    .uri("${toss.baseUrl}/v1/payments/$pgTransactionId/cancel")
+                    .uri("${toss.baseUrl}/v1/payments/{paymentKey}/cancel", pgTransactionId)
                     .header("Authorization", basicAuth())
                     .header("Idempotency-Key", idempotencyKey.toString())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -165,6 +176,7 @@ class TossPaymentGatewayAdapter(
             throw PaymentConflictException(e)
         }
         throwIfUnauthorized(e)
+        throwIfTransient(e)
         if (e.statusCode == HttpStatus.BAD_REQUEST && code == ALREADY_CANCELED_PAYMENT) {
             return resolveRefundByInquiry(pgTransactionId)
         }
@@ -221,7 +233,8 @@ class TossPaymentGatewayAdapter(
 
     private fun declinedReasonFrom(e: HttpClientErrorException): String {
         val error = errorBodyFrom(e)
-        return if (error != null) "${error.code}: ${error.message}" else e.message.orEmpty()
+        // 사유는 이력과 클라이언트 응답에 실리므로, JSON이 아닌 본문(프록시의 HTML 등)은 원문 대신 상태 코드만 쓴다
+        return if (error != null) "${error.code}: ${error.message}" else "HTTP ${e.statusCode.value()}"
     }
 
     private data class TossPaymentResponse(

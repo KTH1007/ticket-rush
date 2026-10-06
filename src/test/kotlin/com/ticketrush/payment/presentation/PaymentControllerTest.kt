@@ -13,6 +13,7 @@ import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationStatus
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.restdocs.test.autoconfigure.AutoConfigureRestDocs
 import org.springframework.boot.test.context.TestConfiguration
@@ -123,6 +124,23 @@ class PaymentControllerTest {
 
         // when & then
         mockMvc.perform(결제_확정_요청(holdToken = holdToken)).andExpect(status().isConflict)
+    }
+
+    // 컬럼(toss_payment_key 200자, toss_order_id 64자)을 넘는 값이 DB까지 가면 제약 위반으로 500이 된다
+    @Test
+    fun `paymentKey가 200자를 넘으면 400을 반환하고 서비스를 부르지 않는다`() {
+        val holdToken = UUID.randomUUID()
+
+        mockMvc.perform(결제_확정_요청(holdToken = holdToken, paymentKey = "k".repeat(201))).andExpect(status().isBadRequest)
+
+        verify(exactly = 0) { paymentCommandService.confirmPayment(any(), holdToken, any(), any(), any()) }
+    }
+
+    @Test
+    fun `orderId가 64자를 넘으면 400을 반환한다`() {
+        val holdToken = UUID.randomUUID()
+
+        mockMvc.perform(결제_확정_요청(holdToken = holdToken, orderId = "o".repeat(65))).andExpect(status().isBadRequest)
     }
 
     private fun 결제_확정_요청(

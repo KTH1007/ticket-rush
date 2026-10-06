@@ -143,7 +143,7 @@ v1에서는 Kafka를 사용하지 않는다.
 ```bash
 # 1. 환경 변수 준비
 cp .env.example .env   # PHONE_HMAC_KEY, PHONE_ENCRYPTION_KEY, TOSS_SECRET_KEY, GRAFANA_ADMIN_PASSWORD 채우기
-                       # (application.yml이 앞의 셋을 모두 참조한다. TOSS_SECRET_KEY는 toss 프로필에서만 실제로 쓰인다)
+                       # (TOSS_SECRET_KEY는 toss 프로필에서만 필요하다. 그 프로필을 키 없이 켜면 기동 때 실패한다)
 
 # 2. 인프라 기동 (PostgreSQL, Redis, Flyway 마이그레이션)
 docker compose up -d
