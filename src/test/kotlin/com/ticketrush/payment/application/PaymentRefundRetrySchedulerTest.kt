@@ -85,17 +85,20 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
 
     private val logs = ListAppender<ILoggingEvent>()
     private val schedulerLogger = LoggerFactory.getLogger(PaymentRefundRetryScheduler::class.java.name) as Logger
+    private val recorderLogger = LoggerFactory.getLogger(PaymentRefundRecorder::class.java.name) as Logger
 
     @BeforeEach
     fun reset() {
         clearMocks(paymentGateway)
         logs.start()
         schedulerLogger.addAppender(logs)
+        recorderLogger.addAppender(logs)
     }
 
     @AfterEach
     fun releaseLogs() {
         schedulerLogger.detachAppender(logs)
+        recorderLogger.detachAppender(logs)
         logs.stop()
     }
 
@@ -114,7 +117,8 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
         assertThat(history.fromStatus).isEqualTo(PaymentStatus.CANCELED)
         assertThat(history.toStatus).isEqualTo(PaymentStatus.REFUNDED)
         assertThat(history.reason).contains("환불 재시도 성공")
-        verify(exactly = 1) { paymentGateway.refund("pk-retry", reservation.amount, RefundIdempotencyKey.of(reservation.idempotencyKey)) }
+        val firstKey = RefundIdempotencyKey.of(reservation.idempotencyKey, 0)
+        verify(exactly = 1) { paymentGateway.refund("pk-retry", reservation.amount, firstKey) }
     }
 
     @Test
@@ -170,6 +174,22 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
         assertThat(payment.refundAttemptCount).isEqualTo(0)
         assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id)).isEmpty()
         assertThat(logs.list.filter { it.level == Level.ERROR }).isEmpty()
+    }
+
+    @Test
+    @Transactional
+    fun `환불이 실패하면 다음 재시도는 시도 횟수를 섞은 새 환불 키로 요청한다`() {
+        // Toss는 에러 응답도 같은 키로 재생하므로 같은 키로 다시 보내면 복구되지 않는다
+        val reservation = 예약()
+        취소된_결제(reservation, pgTransactionId = "pk-key-rotation")
+        every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Declined("거절")
+
+        retryScheduler.retry(staleBefore())
+        오래된_행으로_만들기(결제(reservation))
+        retryScheduler.retry(staleBefore())
+
+        verify(exactly = 1) { paymentGateway.refund("pk-key-rotation", any(), RefundIdempotencyKey.of(reservation.idempotencyKey, 0)) }
+        verify(exactly = 1) { paymentGateway.refund("pk-key-rotation", any(), RefundIdempotencyKey.of(reservation.idempotencyKey, 1)) }
     }
 
     @Test

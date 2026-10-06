@@ -153,7 +153,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
 
         // then
         verify(exactly = 1) {
-            paymentGateway.refund("PG-TXN-ORIGINAL", 200_000, RefundIdempotencyKey.of(reservation.idempotencyKey))
+            paymentGateway.refund("PG-TXN-ORIGINAL", 200_000, RefundIdempotencyKey.of(reservation.idempotencyKey, 0))
         }
     }
 
@@ -171,6 +171,11 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         val updated = requireNotNull(reservationRepository.findById(reservation.id))
         assertThat(updated.status).isEqualTo(ReservationStatus.CANCELED)
         assertThat(logs.list.single { it.level == Level.WARN }.formattedMessage).contains("환불 한도 초과")
+        // 이 실패도 시도로 세어야 스케줄러의 첫 재시도가 실패했던 같은 키로 나가 저장된 에러를 재생받지 않는다
+        assertThat(result.payment.refundAttemptCount).isEqualTo(1)
+        val failure = paymentHistoryRepository.findAllByPaymentId(result.payment.id).single { it.reason?.contains("환불 한도 초과") == true }
+        assertThat(failure.fromStatus).isEqualTo(PaymentStatus.CANCELED)
+        assertThat(failure.toStatus).isEqualTo(PaymentStatus.CANCELED)
     }
 
     @Test
@@ -187,6 +192,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         val updated = requireNotNull(reservationRepository.findById(reservation.id))
         assertThat(updated.status).isEqualTo(ReservationStatus.CANCELED)
         assertThat(logs.list.single { it.level == Level.ERROR }.throwableProxy).isNotNull()
+        assertThat(result.payment.refundAttemptCount).isEqualTo(1)
     }
 
     @Test
@@ -204,6 +210,8 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         assertThat(updated.status).isEqualTo(ReservationStatus.CANCELED)
         assertThat(logs.list.single { it.level == Level.WARN }.throwableProxy).isNull()
         assertThat(logs.list.filter { it.level == Level.ERROR }).isEmpty()
+        // 처리 중(409)은 실패가 아니라서 시도로 세지 않고 같은 키로 다시 확인한다
+        assertThat(result.payment.refundAttemptCount).isEqualTo(0)
     }
 
     @Test

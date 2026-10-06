@@ -16,7 +16,7 @@ interface PaymentGatewayPort {
     fun inquire(paymentKey: String): PaymentInquiryResult
 
     // 환불. 실제 PG에선 원 승인 거래를 pgTransactionId로 특정해서 취소 요청함.
-    // idempotencyKey는 재시도해도 PG가 중복 취소하지 않게 하는 키라 같은 환불엔 항상 같은 값을 쓴다
+    // idempotencyKey는 처리 중인 같은 요청을 PG가 중복 취소하지 않게 하는 키다. PG가 실패 응답도 키에 묶어 재생하므로 실패하면 바꾼다
     fun refund(
         pgTransactionId: String,
         amount: Int,

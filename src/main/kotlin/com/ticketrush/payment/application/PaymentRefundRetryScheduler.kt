@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private val logger = KotlinLogging.logger {}
 
-// 환불이 안 끝나 CANCELED에 남은 결제를 같은 환불 키로 다시 요청한다. 키가 같아 Toss가 중복 환불하지 않는다.
+// 환불이 안 끝나 CANCELED에 남은 결제를 다시 요청한다. 실패할 때마다 키가 바뀌고, 이미 취소됐다는 응답은 조회로 판정해 중복 환불하지 않는다.
 @Component
 class PaymentRefundRetryScheduler(
     private val paymentRepository: PaymentRepositoryPort,
@@ -63,7 +63,7 @@ class PaymentRefundRetryScheduler(
         val result = requestRefund(payment, reservation, pgTransactionId) ?: return
         when (result) {
             is PaymentGatewayResult.Approved -> recorder.recordSuccess(payment, result.pgTransactionId)
-            is PaymentGatewayResult.Declined -> recordFailure(payment, reservation, result.reason)
+            is PaymentGatewayResult.Declined -> recorder.recordFailure(payment, result.reason)
         }
     }
 
@@ -77,29 +77,16 @@ class PaymentRefundRetryScheduler(
         payment: Payment,
         reservation: Reservation,
         pgTransactionId: String,
-    ): PaymentGatewayResult? =
-        try {
-            paymentGateway.refund(pgTransactionId, payment.amount, RefundIdempotencyKey.of(reservation.idempotencyKey))
+    ): PaymentGatewayResult? {
+        val refundKey = RefundIdempotencyKey.of(reservation.idempotencyKey, payment.refundAttemptCount)
+        return try {
+            paymentGateway.refund(pgTransactionId, payment.amount, refundKey)
         } catch (expected: PaymentConflictException) {
             logger.warn { "환불이 PG에서 아직 처리 중입니다. 시도로 세지 않고 다음 틱에 다시 확인합니다: paymentId=${payment.id}" }
             null
         } catch (e: Exception) {
             logger.warn(e) { "환불 재시도 호출 실패: paymentId=${payment.id}" }
             PaymentGatewayResult.Declined(reason = e.message ?: e.javaClass.simpleName)
-        }
-
-    // 한도에 도달한 순간 한 번만 알린다. 이후엔 조회에서 빠져 같은 알림이 반복되지 않는다
-    private fun recordFailure(
-        payment: Payment,
-        reservation: Reservation,
-        reason: String,
-    ) {
-        val saved = recorder.recordFailure(payment, reason, policy.refundMaxAttempts)
-        if (saved.refundAttemptCount >= policy.refundMaxAttempts) {
-            logger.error {
-                "환불 재시도 한도 초과, 수동 처리 필요: paymentId=${saved.id}, reservationId=${reservation.id}, " +
-                    "attempts=${saved.refundAttemptCount}"
-            }
         }
     }
 }

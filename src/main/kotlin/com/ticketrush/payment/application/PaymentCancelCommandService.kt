@@ -26,7 +26,7 @@ import org.springframework.transaction.annotation.Transactional
 
 private val logger = KotlinLogging.logger {}
 
-// 7개 모두 cancel 흐름에서 실제로 쓰이는 의존성이다(리포지토리 3종 + PG + 레이트리미터 + 해셔 + 이력 기록기).
+// 모두 cancel 흐름에서 실제로 쓰이는 의존성이다(리포지토리 3종 + PG + 레이트리미터 + 해셔 + 이력과 환불 기록기 + 이벤트 발행).
 @Suppress("LongParameterList")
 @Service
 class PaymentCancelCommandService(
@@ -37,6 +37,7 @@ class PaymentCancelCommandService(
     private val rateLimiter: ReservationLookupRateLimiterPort,
     private val phoneHasher: PhoneHasher,
     private val historyRecorder: PaymentHistoryRecorder,
+    private val refundRecorder: PaymentRefundRecorder,
     private val eventPublisher: ApplicationEventPublisher,
 ) {
     @Transactional
@@ -101,32 +102,39 @@ class PaymentCancelCommandService(
             throw PaymentConflictException(cause = e)
         }
 
-    // 환불 호출 자체가 예외를 던져도(네트워크 오류 등) 취소 확정을 롤백시키면 안 된다 -
-    // "환불 실패해도 취소는 확정된다"는 계약을 예외 경로에서도 지킨다. 원인은 로그로만 남긴다.
-    @Suppress("TooGenericExceptionCaught")
     private fun applyRefund(
         payment: Payment,
         reservation: Reservation,
     ): Payment {
-        val pgTransactionId = requireNotNull(payment.pgTransactionId) { "취소 대상인데 원 거래 id가 없습니다: ${payment.id}" }
-        val result =
-            try {
-                paymentGateway.refund(pgTransactionId, payment.amount, RefundIdempotencyKey.of(reservation.idempotencyKey))
-            } catch (expected: PaymentConflictException) {
-                // 같은 환불이 PG에서 처리 중인 정상 경합이라 스택트레이스 없이 재시도 대상으로만 남긴다
-                logger.warn { "환불이 PG에서 아직 처리 중입니다. 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
-                return payment
-            } catch (e: Exception) {
-                logger.error(e) { "환불 요청 중 오류가 발생했습니다. 취소는 유지하고 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
-                return payment
-            }
-
+        val result = requestRefund(payment, reservation) ?: return payment
         return when (result) {
             is PaymentGatewayResult.Approved -> markRefunded(payment, result)
-            is PaymentGatewayResult.Declined -> {
+            // 실패도 시도로 세어야 스케줄러의 첫 재시도가 새 키로 나가 Toss가 저장해 둔 에러를 재생하지 않는다
+            is PaymentGatewayResult.Declined -> refundRecorder.recordFailure(payment, result.reason)
+        }
+    }
+
+    // 환불 호출이 예외를 던져도(네트워크 오류 등) 취소 확정을 롤백시키면 안 된다. "환불 실패해도 취소는 확정된다"는
+    // 계약을 예외 경로에서도 지키려고 거절로 바꿔 돌려준다. PG가 같은 환불을 처리 중인 충돌은 실패가 아니라서 null로 돌려 시도로 세지 않는다.
+    @Suppress("TooGenericExceptionCaught")
+    private fun requestRefund(
+        payment: Payment,
+        reservation: Reservation,
+    ): PaymentGatewayResult? {
+        val pgTransactionId = requireNotNull(payment.pgTransactionId) { "취소 대상인데 원 거래 id가 없습니다: ${payment.id}" }
+        val refundKey = RefundIdempotencyKey.of(reservation.idempotencyKey, payment.refundAttemptCount)
+        return try {
+            val result = paymentGateway.refund(pgTransactionId, payment.amount, refundKey)
+            if (result is PaymentGatewayResult.Declined) {
                 logger.warn { "환불이 거절됐습니다. 취소는 유지하고 결제는 CANCELED로 남깁니다: paymentId=${payment.id}, reason=${result.reason}" }
-                payment
             }
+            result
+        } catch (expected: PaymentConflictException) {
+            logger.warn { "환불이 PG에서 아직 처리 중입니다. 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
+            null
+        } catch (e: Exception) {
+            logger.error(e) { "환불 요청 중 오류가 발생했습니다. 취소는 유지하고 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
+            PaymentGatewayResult.Declined(reason = e.message ?: e.javaClass.simpleName)
         }
     }
 
