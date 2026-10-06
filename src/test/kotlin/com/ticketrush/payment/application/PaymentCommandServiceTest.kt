@@ -346,6 +346,30 @@ class PaymentCommandServiceTest : IntegrationTest() {
     }
 
     @Test
+    fun `Toss가 같은 멱등키로 거절을 재생해도 거절 뒤 재시도는 새 키로 요청해서 승인된다`() {
+        // given: 실제 Toss처럼 키별로 첫 응답을 저장해 두고 같은 키면 그 응답을 그대로 돌려준다(실제 샌드박스에서 확인한 동작)
+        val reservation = 홀드된_예약_준비()
+        val storedByKey = mutableMapOf<UUID, PaymentGatewayResult>()
+        every { paymentGateway.charge(any(), any(), any(), any()) } answers {
+            storedByKey.getOrPut(arg<UUID>(3)) {
+                when (arg<String>(0)) {
+                    "declined-payment-key" -> PaymentGatewayResult.Declined("카드 거절")
+                    else -> PaymentGatewayResult.Approved("PG-TXN-9")
+                }
+            }
+        }
+        every { reservationNoGenerator.generate() } returns "RESNO000009"
+        runCatching { paymentCommandService.결제_확정(reservation, paymentKey = "declined-payment-key") }
+
+        // when: 같은 예약으로 새 결제 인증(paymentKey)을 받아 재시도한다
+        val result = paymentCommandService.결제_확정(reservation, paymentKey = "retried-payment-key")
+
+        // then
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
+        assertThat(storedByKey.keys).hasSize(2)
+    }
+
+    @Test
     fun `예매번호가 기존 값과 충돌하면 재시도해서 다른 번호로 저장에 성공한다`() {
         // given: "COLLIDE00001"을 이미 쓰고 있는 다른 예약
         val other = 홀드된_예약_준비()
@@ -411,6 +435,8 @@ class PaymentCommandServiceTest : IntegrationTest() {
 
         val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
         assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        // 처리 중(409)은 거절이 아니라서 거절 횟수를 올리지 않고 같은 키로 다시 확인한다
+        assertThat(payment.chargeAttemptCount).isEqualTo(0)
         assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id)).extracting("toStatus").doesNotContain(PaymentStatus.FAILED)
         val updated = requireNotNull(reservationRepository.findById(reservation.id))
         assertThat(updated.holdExpiresAt).isEqualTo(FAR_FUTURE)
@@ -423,7 +449,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
     }
 
     @Test
-    fun `재시도로 성공하면 payment_history에 FAILED에서 SUCCESS로의 전이가 추가로 기록된다`() {
+    fun `재시도로 성공하면 payment_history에 FAILED에서 PENDING으로 다시 열린 뒤 PENDING에서 SUCCESS로의 전이가 추가로 기록된다`() {
         // given
         val reservation = 홀드된_예약_준비()
         every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Declined("한도 초과")
@@ -436,15 +462,44 @@ class PaymentCommandServiceTest : IntegrationTest() {
 
         // then
         val history = paymentHistoryRepository.findAllByPaymentId(result.payment.id)
-        assertThat(history).hasSize(2)
-        assertThat(history).extracting("toStatus").containsExactlyInAnyOrder(PaymentStatus.FAILED, PaymentStatus.SUCCESS)
+        assertThat(history).hasSize(3)
+        assertThat(history)
+            .extracting("toStatus")
+            .containsExactlyInAnyOrder(PaymentStatus.FAILED, PaymentStatus.PENDING, PaymentStatus.SUCCESS)
     }
 
-    private fun PaymentCommandService.결제_확정(reservation: Reservation): PaymentConfirmationResult =
+    // PENDING이어야 회수 스케줄러가 대사한다. FAILED로 남으면 Toss가 승인했어도 아무도 모른다
+    @Test
+    fun `거절 뒤 재시도가 응답 없이 예외로 끝나면 결제는 PENDING으로 남고 거절 횟수는 그대로다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Declined("한도 초과")
+        runCatching { paymentCommandService.결제_확정(reservation) }
+        every { paymentGateway.charge(any(), any(), any(), any()) } throws IllegalStateException("타임아웃")
+
+        // when
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "retry-payment-key") }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        // then
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(payment.tossPaymentKey).isEqualTo("retry-payment-key")
+        assertThat(payment.chargeAttemptCount).isEqualTo(1)
+
+        // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
+        payment.markFailed()
+        paymentRepository.save(payment)
+    }
+
+    private fun PaymentCommandService.결제_확정(
+        reservation: Reservation,
+        paymentKey: String = "test-payment-key",
+    ): PaymentConfirmationResult =
         confirmPayment(
             reservationId = reservation.id,
             holdToken = reservation.holdToken,
-            paymentKey = "test-payment-key",
+            paymentKey = paymentKey,
             orderId = reservation.idempotencyKey.toString(),
             amount = reservation.amount,
         )

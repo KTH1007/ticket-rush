@@ -7,6 +7,7 @@ import ch.qos.logback.core.read.ListAppender
 import com.ticketrush.event.domain.Event
 import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.payment.PaymentPolicyProperties
+import com.ticketrush.payment.domain.ChargeIdempotencyKey
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
@@ -133,6 +134,23 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
         verify(exactly = 1) {
             paymentGateway.charge("pk-stale", reservation.idempotencyKey.toString(), reservation.amount, reservation.idempotencyKey)
         }
+    }
+
+    @Test
+    @Transactional
+    fun `이전 거절로 승인 거절 횟수가 오른 행은 그 횟수를 섞은 멱등키로 재시도한다`() {
+        val reservation = reservationRepository.예약_하나_저장(event = 공연())
+        클레임(reservation, paymentKey = "pk-after-decline")
+        jdbcTemplate.update("UPDATE payment SET charge_attempt_count = 1 WHERE reservation_id = ?", reservation.id)
+        entityManager.clear()
+        every { paymentGateway.charge(any(), any(), any(), any()) } returns
+            PaymentGatewayResult.Approved(pgTransactionId = "pk-after-decline")
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        val expectedKey = ChargeIdempotencyKey.of(reservation.idempotencyKey, 1)
+        val orderId = reservation.idempotencyKey.toString()
+        verify(exactly = 1) { paymentGateway.charge("pk-after-decline", orderId, reservation.amount, expectedKey) }
     }
 
     @Test

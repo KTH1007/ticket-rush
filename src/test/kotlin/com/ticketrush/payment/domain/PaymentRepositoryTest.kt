@@ -185,6 +185,28 @@ class PaymentRepositoryTest : IntegrationTest() {
     }
 
     @Test
+    fun `승인 거절 횟수 컬럼은 값을 안 넣으면 DB 기본값 0이 되고 음수는 CHECK 제약이 막는다`() {
+        val reservation = 예약_하나_저장()
+        jdbcTemplate.update(
+            "INSERT INTO payment (reservation_id, amount, status, created_at, updated_at) VALUES (?, 10000, 'PENDING', now(), now())",
+            reservation.id,
+        )
+
+        val count =
+            jdbcTemplate.queryForObject(
+                "SELECT charge_attempt_count FROM payment WHERE reservation_id = ?",
+                Int::class.java,
+                reservation.id,
+            )
+
+        assertThat(count).isEqualTo(0)
+        assertThatThrownBy {
+            jdbcTemplate.update("UPDATE payment SET charge_attempt_count = -1 WHERE reservation_id = ?", reservation.id)
+        }.isInstanceOf(DataIntegrityViolationException::class.java)
+            .hasMessageContaining("ck_payment_charge_attempt_count")
+    }
+
+    @Test
     fun `환불 시도 횟수가 음수면 CHECK 제약이 막는다`() {
         val reservation = 예약_하나_저장()
 

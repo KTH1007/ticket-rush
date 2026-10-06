@@ -1,5 +1,6 @@
 package com.ticketrush.payment.application
 
+import com.ticketrush.payment.domain.ChargeIdempotencyKey
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConfirmationResult
 import com.ticketrush.payment.domain.PaymentConflictException
@@ -46,9 +47,21 @@ class PaymentCommandService(
         requireHolding(reservation)
         requireOrderMatches(reservation, orderId, amount)
 
-        val claimed = claimService.claimOrTakeOver(reservation.id, reservation.amount, paymentKey, orderId, LocalDateTime.now(clock))
+        val claimed = claim(reservation, paymentKey, orderId)
         return callGatewayAndApply(reservation, claimed, paymentKey, orderId, amount)
     }
+
+    // 같은 결제를 동시에 이어받거나 다시 열다 진 쪽은 낙관적 락 충돌로 걸리는데, 서버 오류가 아니라 충돌로 응답한다
+    private fun claim(
+        reservation: Reservation,
+        paymentKey: String,
+        orderId: String,
+    ): Payment =
+        try {
+            claimService.claimOrTakeOver(reservation.id, reservation.amount, paymentKey, orderId, LocalDateTime.now(clock))
+        } catch (e: OptimisticLockingFailureException) {
+            throw PaymentConflictException(cause = e)
+        }
 
     // 만료된 클레임을 동시에 넘겨받은 두 요청 중 진 쪽은 결과 반영 저장에서 낙관적 락 충돌로 걸린다
     private fun callGatewayAndApply(
@@ -59,7 +72,9 @@ class PaymentCommandService(
         amount: Int,
     ): PaymentConfirmationResult =
         try {
-            when (val result = paymentGateway.charge(paymentKey, orderId, amount, reservation.idempotencyKey)) {
+            // Toss가 같은 키의 거절을 재생하므로 거절된 적이 있으면 그 횟수를 섞은 새 키로 요청한다
+            val chargeKey = ChargeIdempotencyKey.of(reservation.idempotencyKey, claimed.chargeAttemptCount)
+            when (val result = paymentGateway.charge(paymentKey, orderId, amount, chargeKey)) {
                 is PaymentGatewayResult.Approved ->
                     claimService.applySuccess(
                         claimed,

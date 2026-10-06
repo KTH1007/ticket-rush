@@ -25,6 +25,7 @@ class Payment(
     paidAt: LocalDateTime? = null,
     tossPaymentKey: String? = null,
     tossOrderId: String? = null,
+    chargeAttemptCount: Int = 0,
     refundAttemptCount: Int = 0,
     version: Long = 0,
 ) : BaseEntity() {
@@ -55,6 +56,10 @@ class Payment(
 
     @Column(name = "toss_order_id", length = 64)
     var tossOrderId: String? = tossOrderId
+        protected set
+
+    @Column(name = "charge_attempt_count", nullable = false)
+    var chargeAttemptCount: Int = chargeAttemptCount
         protected set
 
     @Column(name = "refund_attempt_count", nullable = false)
@@ -91,6 +96,18 @@ class Payment(
         status = PaymentStatus.FAILED
     }
 
+    // 확정 거절로 끝난 시도를 센다. 이 횟수가 다음 승인 요청의 멱등키에 섞여 저장된 거절이 재생되지 않게 한다
+    fun recordChargeFailure() {
+        check(status == PaymentStatus.FAILED) { "FAILED 상태에서만 승인 거절을 기록할 수 있습니다: $status" }
+        chargeAttemptCount++
+    }
+
+    // 거절된 결제를 새 시도에서 다시 연다. FAILED로 두면 응답이 없을 때 회수 스케줄러(PENDING만 조회)가 대사하지 못한다
+    fun reopen() {
+        check(status == PaymentStatus.FAILED) { "FAILED 상태에서만 다시 열 수 있습니다: $status" }
+        status = PaymentStatus.PENDING
+    }
+
     fun markCanceled() {
         check(status == PaymentStatus.SUCCESS) { "SUCCESS 상태에서만 취소할 수 있습니다: $status" }
         status = PaymentStatus.CANCELED
@@ -101,7 +118,7 @@ class Payment(
         status = PaymentStatus.REFUNDED
     }
 
-    // 환불 재시도가 실패할 때마다 올린다. 저장하면 updatedAt도 갱신돼 다음 재시도까지 간격이 자연스럽게 벌어진다
+    // 취소 시점과 재시도의 환불이 실패할 때마다 올린다. 저장하면 updatedAt도 갱신돼 다음 재시도까지 간격이 벌어지고 환불 키도 바뀐다
     fun recordRefundAttempt() {
         check(status == PaymentStatus.CANCELED) { "CANCELED 상태에서만 환불 시도를 기록할 수 있습니다: $status" }
         refundAttemptCount++

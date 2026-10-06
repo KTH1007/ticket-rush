@@ -146,6 +146,40 @@ class PaymentTest {
     }
 
     @Test
+    fun `승인 거절 횟수는 0에서 시작하고 FAILED로 거절을 기록할 때마다 1씩 늘어난다`() {
+        val payment = 결제(id = 1L)
+        assertThat(payment.chargeAttemptCount).isEqualTo(0)
+        payment.markFailed()
+
+        payment.recordChargeFailure()
+        payment.recordChargeFailure()
+
+        assertThat(payment.chargeAttemptCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `FAILED가 아닌 결제에 승인 거절을 기록하려 하면 예외가 발생한다`() {
+        assertThatThrownBy { 결제(id = 1L).recordChargeFailure() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `FAILED인 결제는 재시도하면 PENDING으로 다시 열린다`() {
+        val payment = 결제(id = 1L)
+        payment.markFailed()
+
+        payment.reopen()
+
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+    }
+
+    @Test
+    fun `FAILED가 아닌 결제를 다시 열려고 하면 예외가 발생한다`() {
+        assertThatThrownBy { 결제(id = 1L).reopen() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
     fun `환불 시도 횟수는 0에서 시작한다`() {
         assertThat(결제(id = 1L).refundAttemptCount).isEqualTo(0)
     }

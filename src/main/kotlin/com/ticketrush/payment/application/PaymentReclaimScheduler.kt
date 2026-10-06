@@ -1,6 +1,7 @@
 package com.ticketrush.payment.application
 
 import com.ticketrush.payment.PaymentPolicyProperties
+import com.ticketrush.payment.domain.ChargeIdempotencyKey
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
@@ -19,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
 private val logger = KotlinLogging.logger {}
 
 // OutboxReclaimScheduler와 같은 모양: stale PENDING을 찾아 같은 정보로 PG를 다시 부른다.
-// idempotencyKey가 같으므로 Toss가 안전하게 같은 결과를 돌려준다.
+// 키는 거절된 횟수를 섞은 값이라 같은 시도의 재요청에는 Toss가 같은 결과를 돌려주고, 거절 뒤 새 시도는 새 키를 쓴다.
 @Component
 class PaymentReclaimScheduler(
     private val paymentRepository: PaymentRepositoryPort,
@@ -82,7 +83,8 @@ class PaymentReclaimScheduler(
         val claimed = claimService.claimOrTakeOver(reservation.id, payment.amount, paymentKey, orderId, now)
         // 재확인 직후 확정됐다면 claimOrTakeOver가 그 행을 그대로 돌려주므로 다시 승인하지 않는다
         if (claimed.status != PaymentStatus.PENDING) return
-        when (val result = paymentGateway.charge(paymentKey, orderId, payment.amount, reservation.idempotencyKey)) {
+        val chargeKey = ChargeIdempotencyKey.of(reservation.idempotencyKey, claimed.chargeAttemptCount)
+        when (val result = paymentGateway.charge(paymentKey, orderId, payment.amount, chargeKey)) {
             is PaymentGatewayResult.Approved ->
                 claimService.applySuccess(claimed, reservation, result.pgTransactionId, result.approvedAt ?: now)
             is PaymentGatewayResult.Declined -> claimService.applyFailure(claimed, reservation, now, result.reason)

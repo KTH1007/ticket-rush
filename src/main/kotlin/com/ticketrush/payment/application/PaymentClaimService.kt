@@ -50,10 +50,18 @@ class PaymentClaimService(
         existing: Payment,
         now: LocalDateTime,
     ): Payment {
+        if (existing.status == PaymentStatus.FAILED) return reopen(existing)
         if (existing.status != PaymentStatus.PENDING) return existing
         val claimedAt = requireNotNull(existing.updatedAt) { "저장된 Payment는 updatedAt이 있어야 합니다: ${existing.id}" }
         if (claimedAt.plus(policy.staleClaimTimeout).isAfter(now)) throw PaymentConflictException()
         return existing
+    }
+
+    // 거절된 결제의 재시도는 새 클레임이라 PENDING으로 다시 연다. 이후 응답이 없어도 회수 스케줄러가 대사한다
+    private fun reopen(failed: Payment): Payment {
+        failed.reopen()
+        historyRecorder.record(failed.id, PaymentStatus.FAILED, PaymentStatus.PENDING, reason = "결제 재시도")
+        return failed
     }
 
     private fun insertNewClaim(
@@ -104,6 +112,7 @@ class PaymentClaimService(
 
         val fromStatus = payment.status
         payment.markFailed()
+        payment.recordChargeFailure()
         val saved = paymentRepository.save(payment)
         historyRecorder.record(saved.id, fromStatus, PaymentStatus.FAILED, reason = reason)
     }

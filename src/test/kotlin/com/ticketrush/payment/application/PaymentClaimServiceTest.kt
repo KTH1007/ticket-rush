@@ -132,19 +132,38 @@ class PaymentClaimServiceTest : IntegrationTest() {
         assertThat(result.tossOrderId).isEqualTo(reservation.idempotencyKey.toString())
     }
 
+    // FAILED 상태로 두면 재시도 중 응답이 타임아웃나 Toss가 승인해도 회수 스케줄러(PENDING만 조회)가 대사하지 못한다
     @Test
     @Transactional
-    fun `이미 FAILED인 Payment도 새 시도의 paymentKey와 orderId로 덮어쓰지 않는다`() {
+    fun `FAILED인 Payment는 새 시도에서 PENDING으로 다시 열고 새 paymentKey와 orderId를 기록한다`() {
         val event = eventRepository.공연_하나_저장()
         val reservation = reservationRepository.예약_하나_저장(event = event)
         val claimed = 클레임(reservation, LocalDateTime.now(clock))
         claimed.markFailed()
         paymentRepository.save(claimed)
 
-        val result = 클레임(reservation, LocalDateTime.now(clock), paymentKey = "late-payment-key", orderId = "late-order-id")
+        val result = 클레임(reservation, LocalDateTime.now(clock), paymentKey = "retry-payment-key", orderId = "retry-order-id")
 
-        assertThat(result.tossPaymentKey).isEqualTo("test-payment-key")
-        assertThat(result.tossOrderId).isEqualTo(reservation.idempotencyKey.toString())
+        assertThat(result.id).isEqualTo(claimed.id)
+        assertThat(result.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(result.tossPaymentKey).isEqualTo("retry-payment-key")
+        assertThat(result.tossOrderId).isEqualTo("retry-order-id")
+        val reopened = paymentHistoryRepository.findAllByPaymentId(claimed.id).single { it.toStatus == PaymentStatus.PENDING }
+        assertThat(reopened.fromStatus).isEqualTo(PaymentStatus.FAILED)
+    }
+
+    @Test
+    @Transactional
+    fun `다시 연 PENDING은 신선해서 바로 다른 요청이 이어받으려 하면 충돌 예외를 던진다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event)
+        val claimed = 클레임(reservation, LocalDateTime.now(clock))
+        claimed.markFailed()
+        paymentRepository.save(claimed)
+        클레임(reservation, LocalDateTime.now(clock), paymentKey = "retry-payment-key")
+
+        assertThatThrownBy { 클레임(reservation, LocalDateTime.now(clock), paymentKey = "concurrent-payment-key") }
+            .isInstanceOf(PaymentConflictException::class.java)
     }
 
     @Test
@@ -170,7 +189,12 @@ class PaymentClaimServiceTest : IntegrationTest() {
 
         claimService.applyFailure(claimed, reservation, LocalDateTime.now(clock), reason = "한도 초과")
 
-        assertThat(paymentRepository.findByReservationId(reservation.id)?.status).isEqualTo(PaymentStatus.FAILED)
+        entityManager.flush()
+        entityManager.clear()
+        val failed = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(failed.status).isEqualTo(PaymentStatus.FAILED)
+        // 확정 거절이면 횟수를 올려야 다음 시도가 새 멱등키를 쓴다(Toss가 같은 키의 에러를 재생하므로)
+        assertThat(failed.chargeAttemptCount).isEqualTo(1)
     }
 
     @Test
@@ -199,6 +223,8 @@ class PaymentClaimServiceTest : IntegrationTest() {
         claimService.markFailedByReconciliation(claimed, "Toss에 결제 내역 없음, 예약을 쓸 수 없어 실패 확정")
 
         assertThat(paymentRepository.findByReservationId(reservation.id)?.status).isEqualTo(PaymentStatus.FAILED)
+        // 예약을 더 쓸 수 없어 재시도가 없으므로 키를 바꿀 필요가 없다
+        assertThat(paymentRepository.findByReservationId(reservation.id)?.chargeAttemptCount).isEqualTo(0)
         val history = paymentHistoryRepository.findAllByPaymentId(claimed.id).single()
         assertThat(history.fromStatus).isEqualTo(PaymentStatus.PENDING)
         assertThat(history.toStatus).isEqualTo(PaymentStatus.FAILED)
