@@ -132,12 +132,15 @@ class TossPaymentGatewayAdapterRefundTest {
             .isInstanceOf(PaymentConflictException::class.java)
     }
 
+    // 충돌로 던지면 시도 횟수와 갱신 시각이 그대로라 재시도 스케줄러가 매 틱 같은 키로 Toss를 다시 부른다. 실패로 세야 키가 바뀌고 5분 간격과 한도가 걸린다
     @Test
-    fun `429 호출 제한이면 환불 실패로 세지 않도록 PaymentConflictException을 던진다`() {
+    fun `429 호출 제한은 환불 실패로 세도록 Declined를 반환한다`() {
         stubCancelError(429, "TOO_MANY_REQUESTS", "요청이 너무 많습니다")
 
-        assertThatThrownBy { adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID()) }
-            .isInstanceOf(PaymentConflictException::class.java)
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+        assertThat((result as PaymentGatewayResult.Declined).reason).contains("TOO_MANY_REQUESTS")
     }
 
     @Test

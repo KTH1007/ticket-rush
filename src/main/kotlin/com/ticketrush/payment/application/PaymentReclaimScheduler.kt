@@ -88,9 +88,11 @@ class PaymentReclaimScheduler(
         }
     }
 
-    // 목록 조회 뒤 PG 호출을 거치는 사이 다른 인스턴스나 사용자 재시도가 먼저 확정했을 수 있어 최신 상태를 다시 읽는다
+    // 목록 조회 뒤 PG 호출을 거치는 사이 다른 인스턴스나 사용자 재시도가 먼저 확정하거나 환불 필요로 표시했을 수 있어 최신 상태를 다시 읽는다
     private fun findStillPending(snapshot: Payment): Payment? =
-        paymentRepository.findByReservationId(snapshot.reservationId)?.takeIf { it.status == PaymentStatus.PENDING }
+        paymentRepository
+            .findByReservationId(snapshot.reservationId)
+            ?.takeIf { it.status == PaymentStatus.PENDING && it.refundRequiredAt == null }
 
     private fun retryCharge(
         payment: Payment,

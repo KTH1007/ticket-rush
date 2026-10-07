@@ -26,7 +26,7 @@ ticket-rush:
     stale-claim-timeout: 500ms
     # 캐시된 컨텍스트의 틱이 다른 테스트가 커밋한 PENDING 행을 가로채지 않게 늘린다. 스케줄러 테스트는 reclaim(staleBefore)를 직접 부른다
     reclaim-interval: 1h
-    # 다른 테스트가 커밋해 둔 CANCELED 행을 빌드가 5분을 넘긴 뒤에 틱이 집어가지 않게 한다. 스케줄러 테스트는 retry(staleBefore)를 직접 부른다
+    # 첫 틱은 한 주기 늦게 돌므로, 이 값은 그 뒤의 틱이 다른 테스트가 커밋해 둔 CANCELED 행을 집어가지 않게 한다. 스케줄러 테스트는 retry(staleBefore)를 직접 부른다
     refund-retry-delay: 1h
   toss:
     base-url: http://localhost:0

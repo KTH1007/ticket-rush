@@ -106,8 +106,8 @@ class TossPaymentGatewayAdapter(
         }
     }
 
-    // 429(호출 제한)와 408(시간 초과)은 PG가 요청을 처리하지 못한 일시 오류다. 거절로 확정하면 결제가 FAILED가 되고 홀드가 줄어들어
-    // 사용자가 억울하게 거절당하므로, 처리 중과 같이 결과를 확정하지 않고 나중에 다시 시도한다
+    // 승인 전용. 429(호출 제한)와 408(시간 초과)을 거절로 확정하면 결제가 FAILED가 되고 홀드가 줄어 사용자가 억울하게 거절당하므로 결과를 확정하지 않는다.
+    // 환불에는 쓰지 않는다: 시도 횟수가 안 올라 재시도 스케줄러가 매 틱 같은 키로 Toss를 다시 부르게 되므로 일반 실패로 센다
     private fun throwIfTransient(e: HttpClientErrorException) {
         if (e.statusCode == HttpStatus.TOO_MANY_REQUESTS || e.statusCode == HttpStatus.REQUEST_TIMEOUT) throw PaymentConflictException(e)
     }
@@ -176,7 +176,6 @@ class TossPaymentGatewayAdapter(
             throw PaymentConflictException(e)
         }
         throwIfUnauthorized(e)
-        throwIfTransient(e)
         if (e.statusCode == HttpStatus.BAD_REQUEST && code == ALREADY_CANCELED_PAYMENT) {
             return resolveRefundByInquiry(pgTransactionId)
         }

@@ -120,7 +120,8 @@ class PaymentClaimServiceTest : IntegrationTest() {
         클레임(reservation, LocalDateTime.now(clock))
         entityManager.flush()
 
-        assertThatThrownBy { 클레임(reservation, LocalDateTime.now(clock)) }
+        // 기준 시각을 과거로 둬서 저장된 updatedAt이 새로 써졌을 때만 충돌한다. 안 써졌다면 1시간 전 값이라 이어받아져 실패한다
+        assertThatThrownBy { 클레임(reservation, LocalDateTime.now(clock).minusMinutes(1)) }
             .isInstanceOf(PaymentConflictException::class.java)
     }
 

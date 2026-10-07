@@ -96,6 +96,25 @@ class PaymentReclaimSchedulerRaceTest {
     }
 
     @Test
+    fun `재확인했을 때 이미 환불 필요로 표시된 결제면 다시 처리하지 않는다`() {
+        // given: 다른 인스턴스가 목록 조회 뒤에 환불 필요로 표시했다. 다시 처리하면 표시 시각을 덮어쓰고 이력과 ERROR가 한 번 더 남는다
+        val marked = 결제(PaymentStatus.PENDING).also { it.markRefundRequired(LocalDateTime.now(clock)) }
+        stubStaleSnapshot(결제(PaymentStatus.PENDING))
+        every { paymentRepository.findByReservationId(RESERVATION_ID) } returns marked
+        every { reservationRepository.findById(RESERVATION_ID) } returns 예약(ReservationStatus.HOLDING)
+        every { claimService.claimOrTakeOver(any(), any(), any(), any(), any()) } returns 결제(PaymentStatus.PENDING)
+        every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("pk-late")
+        justRun { claimService.applySuccess(any(), any(), any(), any()) }
+
+        // when
+        scheduler.reclaim(LocalDateTime.now(clock))
+
+        // then
+        verify(exactly = 0) { claimService.claimOrTakeOver(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `클레임이 이미 확정된 행을 돌려주면 PG를 부르지 않고 결과도 반영하지 않는다`() {
         // given: 재확인 직후 다른 쪽이 확정해서 claimOrTakeOver가 SUCCESS 행을 그대로 돌려주는 경쟁
         val reservation = 예약(ReservationStatus.HOLDING)
