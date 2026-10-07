@@ -106,6 +106,36 @@ class PaymentClaimServiceTest : IntegrationTest() {
         assertThat(takenOver.status).isEqualTo(PaymentStatus.PENDING)
     }
 
+    // 불확실한 PENDING을 다른 paymentKey로 덮어쓰면 앞선 결제를 조회할 단서가 사라지므로 이전 값을 이력에 남긴다
+    @Test
+    @Transactional
+    fun `stale한 PENDING을 다른 paymentKey로 이어받으면 이전 paymentKey를 이력에 남긴다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event)
+        val claimedAt = LocalDateTime.now(clock)
+        val first = 클레임(reservation, claimedAt, paymentKey = "pk-first")
+
+        클레임(reservation, claimedAt.plus(policy.staleClaimTimeout).plusSeconds(1), paymentKey = "pk-second")
+
+        val history = paymentHistoryRepository.findAllByPaymentId(first.id).single()
+        assertThat(history.fromStatus).isEqualTo(PaymentStatus.PENDING)
+        assertThat(history.toStatus).isEqualTo(PaymentStatus.PENDING)
+        assertThat(history.reason).contains("pk-first", "pk-second")
+    }
+
+    @Test
+    @Transactional
+    fun `stale한 PENDING을 같은 paymentKey로 이어받으면 이력을 남기지 않는다`() {
+        val event = eventRepository.공연_하나_저장()
+        val reservation = reservationRepository.예약_하나_저장(event = event)
+        val claimedAt = LocalDateTime.now(clock)
+        val first = 클레임(reservation, claimedAt, paymentKey = "pk-same")
+
+        클레임(reservation, claimedAt.plus(policy.staleClaimTimeout).plusSeconds(1), paymentKey = "pk-same")
+
+        assertThat(paymentHistoryRepository.findAllByPaymentId(first.id)).isEmpty()
+    }
+
     // 같은 paymentKey와 orderId로 이어받으면 바뀌는 값이 없어 UPDATE가 안 나가고, 행이 계속 stale로 보여 다른 요청이 또 이어받는다
     @Test
     @Transactional
