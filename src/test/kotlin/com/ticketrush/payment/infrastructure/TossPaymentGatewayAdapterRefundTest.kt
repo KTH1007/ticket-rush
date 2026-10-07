@@ -89,6 +89,47 @@ class TossPaymentGatewayAdapterRefundTest {
         assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
     }
 
+    // 운영자가 부분 취소로 잔액을 모두 돌려줬으면 Toss 상태는 PARTIAL_CANCELED로 남고 전액 취소 요청은 403으로 거절된다. 돈은 이미 돌아갔다
+    @Test
+    fun `취소 가능 금액 초과 403이고 조회가 PARTIAL_CANCELED에 잔액 0이면 환불 완료로 본다`() {
+        stubCancelError(403, "NOT_CANCELABLE_AMOUNT", "취소 할 수 없는 금액 입니다.")
+        stubInquiry("PARTIAL_CANCELED", balanceAmount = 0)
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY))
+    }
+
+    @Test
+    fun `취소 가능 금액 초과 403인데 조회 잔액이 남아 있으면 환불된 게 아니므로 Declined를 반환한다`() {
+        stubCancelError(403, "NOT_CANCELABLE_AMOUNT", "취소 할 수 없는 금액 입니다.")
+        stubInquiry("PARTIAL_CANCELED", balanceAmount = 100)
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+    }
+
+    @Test
+    fun `취소 가능 금액 초과 403인데 조회가 DONE이면 Declined를 반환한다`() {
+        stubCancelError(403, "NOT_CANCELABLE_AMOUNT", "취소 할 수 없는 금액 입니다.")
+        stubInquiry("DONE", balanceAmount = 20_000)
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+    }
+
+    @Test
+    fun `이미 취소됨 400이고 조회가 PARTIAL_CANCELED에 잔액 0이어도 환불 완료로 본다`() {
+        stubCancelError(400, "ALREADY_CANCELED_PAYMENT", "이미 취소된 결제 입니다")
+        stubInquiry("PARTIAL_CANCELED", balanceAmount = 0)
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY))
+    }
+
     @Test
     fun `이미 취소됨 400인데 조회가 404이면 Declined를 반환한다`() {
         stubCancelError(400, "ALREADY_CANCELED_PAYMENT", "이미 취소된 결제 입니다")
@@ -152,15 +193,6 @@ class TossPaymentGatewayAdapterRefundTest {
     }
 
     @Test
-    fun `403 NOT_CANCELABLE_AMOUNT는 Declined를 반환한다`() {
-        stubCancelError(403, "NOT_CANCELABLE_AMOUNT", "취소 할 수 없는 금액 입니다.")
-
-        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
-
-        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
-    }
-
-    @Test
     fun `취소 응답이 PARTIAL_CANCELED이면 전액 환불이 아니므로 Declined를 반환한다`() {
         wireMock.stubFor(
             post(urlEqualTo("/v1/payments/$PAYMENT_KEY/cancel"))
@@ -210,10 +242,14 @@ class TossPaymentGatewayAdapterRefundTest {
         )
     }
 
-    private fun stubInquiry(status: String) {
+    private fun stubInquiry(
+        status: String,
+        balanceAmount: Int? = null,
+    ) {
+        val balance = balanceAmount?.let { ""","balanceAmount":$it""" }.orEmpty()
         wireMock.stubFor(
             get(urlEqualTo("/v1/payments/$PAYMENT_KEY"))
-                .willReturn(jsonResponse(200, """{"paymentKey":"$PAYMENT_KEY","status":"$status"}""")),
+                .willReturn(jsonResponse(200, """{"paymentKey":"$PAYMENT_KEY","status":"$status"$balance}""")),
         )
     }
 

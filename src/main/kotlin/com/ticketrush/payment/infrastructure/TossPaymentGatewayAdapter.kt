@@ -26,6 +26,7 @@ private const val IDEMPOTENT_REQUEST_PROCESSING = "IDEMPOTENT_REQUEST_PROCESSING
 private const val NOT_FOUND_PAYMENT = "NOT_FOUND_PAYMENT"
 private const val ALREADY_PROCESSING_REQUEST = "ALREADY_PROCESSING_REQUEST"
 private const val ALREADY_CANCELED_PAYMENT = "ALREADY_CANCELED_PAYMENT"
+private const val NOT_CANCELABLE_AMOUNT = "NOT_CANCELABLE_AMOUNT"
 private val ALREADY_PROCESSED_CODES = setOf("ALREADY_PROCESSED_PAYMENT", "DUPLICATED_REQUEST")
 
 // application.yml의 jdbc.time_zone과 같은 존. LocalDateTime이 이 존 기준으로 저장된다
@@ -176,19 +177,22 @@ class TossPaymentGatewayAdapter(
             throw PaymentConflictException(e)
         }
         throwIfUnauthorized(e)
-        if (e.statusCode == HttpStatus.BAD_REQUEST && code == ALREADY_CANCELED_PAYMENT) {
+        val alreadyCanceled = e.statusCode == HttpStatus.BAD_REQUEST && code == ALREADY_CANCELED_PAYMENT
+        val noCancelableAmount = e.statusCode == HttpStatus.FORBIDDEN && code == NOT_CANCELABLE_AMOUNT
+        if (alreadyCanceled || noCancelableAmount) {
             return resolveRefundByInquiry(pgTransactionId)
         }
         return PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
     }
 
-    // 이전 시도나 외부(운영자)의 전액 취소를 우리가 모르는 경우라, 조회가 CANCELED일 때만 환불 완료로 본다
+    // 이전 시도나 외부(운영자)의 취소를 우리가 모르는 경우라, 조회가 CANCELED이거나 부분 취소로 잔액이 0일 때만 환불 완료로 본다
     private fun resolveRefundByInquiry(pgTransactionId: String): PaymentGatewayResult {
         val payment = fetchPayment(pgTransactionId)
         return when {
             payment == null -> PaymentGatewayResult.Declined(reason = "Toss에 해당 결제가 없습니다")
-            payment.status != "CANCELED" -> PaymentGatewayResult.Declined(reason = "Toss status: ${payment.status}")
-            else -> PaymentGatewayResult.Approved(pgTransactionId = pgTransactionId)
+            payment.status == "CANCELED" || (payment.status == "PARTIAL_CANCELED" && payment.balanceAmount == 0) ->
+                PaymentGatewayResult.Approved(pgTransactionId = pgTransactionId)
+            else -> PaymentGatewayResult.Declined(reason = "Toss status: ${payment.status}")
         }
     }
 
@@ -242,6 +246,7 @@ class TossPaymentGatewayAdapter(
         val approvedAt: String? = null,
         val orderId: String? = null,
         val totalAmount: Int? = null,
+        val balanceAmount: Int? = null,
     )
 
     private data class TossErrorResponse(
