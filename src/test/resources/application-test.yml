@@ -6,6 +6,9 @@ spring:
     locations: classpath:db/migration,classpath:db/testmigration
   threads:
     virtual: { enabled: false }   # 테스트는 결정적으로 돌아야 한다
+  datasource:
+    hikari:
+      minimum-idle: 2   # 캐시된 컨텍스트마다 풀이 최대치(20)를 미리 쥐면 컨텍스트가 늘 때 DB 연결 한도를 넘는다
 
 ticket-rush:
   queue:
@@ -19,6 +22,15 @@ ticket-rush:
     retry-delay: 200ms
     stale-claim-timeout: 500ms
     reclaim-interval: 200ms
+  payment:
+    stale-claim-timeout: 500ms
+    # 캐시된 컨텍스트의 틱이 다른 테스트가 커밋한 PENDING 행을 가로채지 않게 늘린다. 스케줄러 테스트는 reclaim(staleBefore)를 직접 부른다
+    reclaim-interval: 1h
+    # 첫 틱은 한 주기 늦게 돌므로, 이 값은 그 뒤의 틱이 다른 테스트가 커밋해 둔 CANCELED 행을 집어가지 않게 한다. 스케줄러 테스트는 retry(staleBefore)를 직접 부른다
+    refund-retry-delay: 1h
+  toss:
+    base-url: http://localhost:0
+    secret-key: test-secret-key
   security:
     phone-hmac-key: test-hmac-key-for-local-only
     phone-encryption-key: dGVzdC1waG9uZS1lbmNyeXB0aW9uLWtleS0zMmJ5dGU=

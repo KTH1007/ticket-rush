@@ -50,40 +50,41 @@
 - 선착순 대기열
 - 순번 조회
 - TPS 기반 Active 승격
-- 이탈자 정리
+- 이탈자 정리 (토큰 TTL이 만료된 대기자는 승격 때 건너뜀. heartbeat 기반 이탈 감지는 미구현)
 
 ### 좌석
 
 - 지정석 배치도 조회
-- 좌석 상태 비트맵
+- 좌석 상태 비트맵 (미구현, 현재는 DB 조회)
 - 최대 2석 선점
 - all-or-nothing 선점
 - 홀드 만료
-- 결제 전 좌석 변경
+- 결제 전 좌석 변경 (미구현)
 - DB 기반 최종 정합성 보장
 
 ### 결제
 
-- MockPG 연동
+- PG 연동: 기본은 가짜 PG(`FakePaymentGatewayAdapter`), `toss` 프로필이면 Toss Payments
 - 서버 측 금액 검증
 - Idempotency-Key 기반 멱등성
-- Circuit Breaker
-- 결제 실패 보상 처리
+- Circuit Breaker (`toss` 프로필의 PG 호출에만 적용)
+- 결제 실패 보상 처리 (실패 시 홀드 시간 단축. 거절된 결제는 같은 예약으로 다시 시도할 수 있고, PG 응답을 못 받은 PENDING 결제는 회수 스케줄러가 재시도하거나 PG 조회로 정리)
 
 ### 취소 및 후처리
 
 - 예약 취소
 - 좌석 반환
+- 환불 실패 재시도 (취소 시점의 첫 시도를 포함해 최대 5회, 이후에는 ERROR로 알려 수동 처리)
 - Outbox 기반 SMS 처리
-- 실패 작업 재시도
-- 실패 작업 재처리
-- 정산 집계
+- 실패 작업 재시도 (고정 30초 간격, 최대 5회, 이후 FAILED)
+- 실패 작업 재처리 (FAILED 건을 되살리는 도구는 미구현)
+- 정산 집계 (미구현)
 
 ### 보호 기능
 
 - 1인 2매 제한
-- API Rate Limit
-- 매진 Kill Switch
+- API Rate Limit (예매 조회/취소의 예매번호별 시도 제한만 구현. 전역 API 제한은 미구현)
+- 매진 Kill Switch (미구현)
 - 표준 에러 응답
 - Trace ID
 
@@ -115,6 +116,8 @@ Idempotency-Key
 -> DB UNIQUE 제약으로 최종 방어
 ```
 
+PG(Toss) 호출의 `Idempotency-Key`는 예약당 하나가 아니라 시도마다 다르다. Toss는 성공뿐 아니라 거절 응답도 같은 키로 15일간 재생한다(실제 샌드박스에서 확인). 서버 오류(5xx)도 에러 재현 헤더로 만든 모의 에러에서는 재생됐지만, 실제 5xx와 타임아웃이 저장되는지는 확인하지 못했다. 키를 고정하면 카드가 거절된 뒤 같은 예약으로 새 카드를 시도해도 첫 거절이 계속 돌아온다. 그래서 확정 거절과 환불 실패로 끝날 때마다 시도 횟수를 올려 키에 섞는다. 키를 바꿔도 이중 청구와 이중 환불은 Toss가 막는다(이미 승인된 결제는 `ALREADY_PROCESSED_PAYMENT`, 이미 취소된 결제는 `ALREADY_CANCELED_PAYMENT`로 응답하고, 우리는 조회로 최종 상태를 확인한다).
+
 ### Outbox
 
 예매 완료 후처리는 Outbox에 기록한 뒤 비동기로 처리한다.
@@ -139,7 +142,8 @@ v1에서는 Kafka를 사용하지 않는다.
 
 ```bash
 # 1. 환경 변수 준비
-cp .env.example .env   # PHONE_HMAC_KEY, GRAFANA_ADMIN_PASSWORD 채우기
+cp .env.example .env   # PHONE_HMAC_KEY, PHONE_ENCRYPTION_KEY, TOSS_SECRET_KEY, GRAFANA_ADMIN_PASSWORD 채우기
+                       # (TOSS_SECRET_KEY는 toss 프로필에서만 필요하다. 그 프로필을 키 없이 켜면 기동 때 실패한다)
 
 # 2. 인프라 기동 (PostgreSQL, Redis, Flyway 마이그레이션)
 docker compose up -d
@@ -172,7 +176,7 @@ nginx -> App 1
 
 App -> PostgreSQL
     -> Redis
-    -> MockPG
+    -> PG (기본은 Fake, toss 프로필이면 Toss Payments)
 
 Prometheus -> App
 Grafana -> Prometheus
@@ -197,7 +201,7 @@ Grafana -> Prometheus
 | Persistence | Spring Data JPA, QueryDSL |
 | Migration | Flyway |
 | Reliability | Resilience4j, Outbox |
-| Test | JUnit 5, MockK, Testcontainers, k6 |
+| Test | JUnit 5, MockK, Testcontainers, WireMock (k6 부하 테스트는 계획만 있고 스크립트는 아직 없음) |
 | Monitoring | Actuator, Micrometer, Prometheus, Grafana |
 | Infrastructure | Docker Compose, nginx |
 
@@ -230,6 +234,8 @@ Grafana -> Prometheus
 - Outbox 처리 실패
 
 실측 결과와 병목 원인을 기록하고 필요하면 설정과 설계를 다시 조정한다.
+
+현재까지 수행한 검증: `@Tag("concurrency")` 동시성 테스트(좌석 홀드, 결제 확정, 예매 조회 레이트리미터, 홀드 만료 스위퍼, Outbox claim)와, 앱 1대 기준 curl 스모크 테스트(Redis 재시작 후 회복, 대기열 승격 예산, 레이트리밋 윈도우 포함). 위 "부하" 항목(k6)과 앱 2대 구성의 실측은 아직 수행하지 않았다. PG 장애는 WireMock 기반 자동 테스트(5xx, 서킷 OPEN 재현)로 검증했고, 3초 타임아웃 자체를 재현하는 테스트는 아직 없다. 실제 Toss 샌드박스(문서 공개 테스트 키)로는 승인, 환불, 거절 뒤 재시도, 환불 재시도를 수동으로 확인했다. 결제 회수 스케줄러의 실제 Toss 왕복과 실제 5xx, 타임아웃이 멱등키에 저장되는지는 확인하지 못했다.
 
 ### 검증하지 않는 것
 

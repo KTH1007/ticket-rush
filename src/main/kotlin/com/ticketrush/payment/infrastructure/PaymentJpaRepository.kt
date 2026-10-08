@@ -2,7 +2,30 @@ package com.ticketrush.payment.infrastructure
 
 import com.ticketrush.payment.domain.Payment
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Query
+import java.time.LocalDateTime
 
 interface PaymentJpaRepository : JpaRepository<Payment, Long> {
     fun findByReservationId(reservationId: Long): Payment?
+
+    @Query(
+        "SELECT p FROM Payment p WHERE p.status = com.ticketrush.payment.domain.PaymentStatus.PENDING " +
+            "AND p.tossPaymentKey IS NOT NULL AND p.refundRequiredAt IS NULL AND p.updatedAt < :staleBefore ORDER BY p.updatedAt",
+    )
+    fun findStalePending(staleBefore: LocalDateTime): List<Payment>
+
+    @Query(
+        "SELECT COUNT(p) FROM Payment p WHERE p.status = com.ticketrush.payment.domain.PaymentStatus.PENDING " +
+            "AND p.refundRequiredAt IS NOT NULL",
+    )
+    fun countRefundRequired(): Long
+
+    @Query(
+        "SELECT p FROM Payment p WHERE p.status = com.ticketrush.payment.domain.PaymentStatus.CANCELED " +
+            "AND p.updatedAt < :staleBefore AND p.refundAttemptCount < :maxAttempts ORDER BY p.updatedAt",
+    )
+    fun findStaleCanceled(
+        staleBefore: LocalDateTime,
+        maxAttempts: Int,
+    ): List<Payment>
 }

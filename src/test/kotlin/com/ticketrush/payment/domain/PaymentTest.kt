@@ -85,16 +85,35 @@ class PaymentTest {
     }
 
     @Test
-    fun `FAILED였던 결제도 재시도로 성공 처리할 수 있다`() {
+    fun `FAILED였던 결제는 다시 연 뒤에 성공 처리할 수 있다`() {
         // given
         val payment = 결제(id = 1L)
         payment.markFailed()
+        payment.reopen()
 
         // when
         payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0))
 
         // then
         assertThat(payment.status).isEqualTo(PaymentStatus.SUCCESS)
+    }
+
+    @Test
+    fun `다시 열지 않은 FAILED 결제를 바로 성공 처리하려 하면 예외가 발생한다`() {
+        val payment = 결제(id = 1L)
+        payment.markFailed()
+
+        assertThatThrownBy { payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0)) }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `SUCCESS인 결제를 실패 처리하려 하면 예외가 발생한다`() {
+        val payment = 결제(id = 1L)
+        payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0))
+
+        assertThatThrownBy { payment.markFailed() }
+            .isInstanceOf(IllegalStateException::class.java)
     }
 
     @Test
@@ -142,6 +161,92 @@ class PaymentTest {
 
         // when & then
         assertThatThrownBy { payment.markRefunded() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `승인 거절 횟수는 0에서 시작하고 FAILED로 거절을 기록할 때마다 1씩 늘어난다`() {
+        val payment = 결제(id = 1L)
+        assertThat(payment.chargeAttemptCount).isEqualTo(0)
+        payment.markFailed()
+
+        payment.recordChargeFailure()
+        payment.recordChargeFailure()
+
+        assertThat(payment.chargeAttemptCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `FAILED가 아닌 결제에 승인 거절을 기록하려 하면 예외가 발생한다`() {
+        assertThatThrownBy { 결제(id = 1L).recordChargeFailure() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `FAILED인 결제는 재시도하면 PENDING으로 다시 열린다`() {
+        val payment = 결제(id = 1L)
+        payment.markFailed()
+
+        payment.reopen()
+
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+    }
+
+    @Test
+    fun `FAILED가 아닌 결제를 다시 열려고 하면 예외가 발생한다`() {
+        assertThatThrownBy { 결제(id = 1L).reopen() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `PENDING 결제에 환불 필요를 표시하면 표시 시각이 남고 상태는 PENDING 그대로다`() {
+        val payment = 결제(id = 1L)
+        assertThat(payment.refundRequiredAt).isNull()
+        val markedAt = LocalDateTime.of(2026, 10, 7, 12, 0)
+
+        payment.markRefundRequired(markedAt)
+
+        assertThat(payment.refundRequiredAt).isEqualTo(markedAt)
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+    }
+
+    @Test
+    fun `PENDING이 아닌 결제에 환불 필요를 표시하려 하면 예외가 발생한다`() {
+        val payment = 결제(id = 1L)
+        payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0))
+
+        assertThatThrownBy { payment.markRefundRequired(LocalDateTime.of(2026, 10, 7, 12, 0)) }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `환불 시도 횟수는 0에서 시작한다`() {
+        assertThat(결제(id = 1L).refundAttemptCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `CANCELED 상태에서 환불 시도를 기록할 때마다 횟수가 1씩 늘어난다`() {
+        // given
+        val payment = 결제(id = 1L)
+        payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0))
+        payment.markCanceled()
+
+        // when
+        payment.recordRefundAttempt()
+        payment.recordRefundAttempt()
+
+        // then
+        assertThat(payment.refundAttemptCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `CANCELED가 아닌 결제에 환불 시도를 기록하려 하면 예외가 발생한다`() {
+        // given
+        val payment = 결제(id = 1L)
+        payment.markSuccess(pgTransactionId = "PG-TXN-1", paidAt = LocalDateTime.of(2026, 1, 1, 0, 0))
+
+        // when & then
+        assertThatThrownBy { payment.recordRefundAttempt() }
             .isInstanceOf(IllegalStateException::class.java)
     }
 

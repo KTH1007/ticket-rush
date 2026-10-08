@@ -25,6 +25,8 @@ abstract class IntegrationTest {
                 .withUsername("test")
                 .withPassword("test")
                 .withReuse(true)
+                // 컨텍스트마다 풀이 20개씩 잡혀 설정이 다른 컨텍스트가 늘면 기본 한도(100)를 넘는다. fsync=off는 기본 명령이라 유지한다
+                .withCommand("postgres", "-c", "fsync=off", "-c", "max_connections=300")
                 .apply { start() }
 
         private val redis =

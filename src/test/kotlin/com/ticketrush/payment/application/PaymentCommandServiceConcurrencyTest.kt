@@ -1,6 +1,7 @@
 package com.ticketrush.payment.application
 
 import com.ticketrush.event.domain.EventRepositoryPort
+import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.PaymentConfirmationResult
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
@@ -26,6 +27,8 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import java.time.Clock
+import java.time.LocalDateTime
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -61,6 +64,15 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
     @Autowired
     lateinit var paymentCommandService: PaymentCommandService
 
+    @Autowired
+    lateinit var claimService: PaymentClaimService
+
+    @Autowired
+    lateinit var policy: PaymentPolicyProperties
+
+    @Autowired
+    lateinit var clock: Clock
+
     @TestConfiguration
     class MockConfig {
         @Bean
@@ -77,7 +89,7 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
         // given
         val reservation = 홀드된_예약_준비()
         every { reservationNoGenerator.generate() } answers { "RESNO" + System.nanoTime().toString().takeLast(7) }
-        every { paymentGateway.charge(any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-CONC")
+        every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-CONC")
 
         // when
         val results = 동시_결제_확정_시도(reservation, threadCount = 2)
@@ -88,10 +100,44 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
         assertThat(failure).isInstanceOf(PaymentConflictException::class.java)
 
         val winner = results.first { it.isSuccess }.getOrThrow()
-        val retried = paymentCommandService.confirmPayment(reservation.id, reservation.holdToken)
+        val retried = paymentCommandService.결제_확정(reservation)
         assertThat(retried.reservationNo).isEqualTo(winner.reservationNo)
         assertThat(retried.payment.pgTransactionId).isEqualTo(winner.payment.pgTransactionId)
     }
+
+    // stale해진 같은 클레임을 두 요청이 동시에 이어받으면 결과 반영 저장에서 낙관적 락이 충돌해야 한다
+    @RepeatedTest(5)
+    fun `stale 클레임을 동시에 이어받으면 하나만 성공하고 나머지는 충돌 예외를 받는다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        claimService.claimOrTakeOver(
+            reservation.id,
+            reservation.amount,
+            "test-payment-key",
+            reservation.idempotencyKey.toString(),
+            LocalDateTime.now(clock),
+        )
+        Thread.sleep(policy.staleClaimTimeout.toMillis() + 100)
+        every { reservationNoGenerator.generate() } answers { "RESNO" + System.nanoTime().toString().takeLast(7) }
+        every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-STALE")
+
+        // when
+        val results = 동시_결제_확정_시도(reservation, threadCount = 2)
+
+        // then
+        assertThat(results.count { it.isSuccess }).isEqualTo(1)
+        val failure = results.mapNotNull { it.exceptionOrNull() }.single()
+        assertThat(failure).isInstanceOf(PaymentConflictException::class.java)
+    }
+
+    private fun PaymentCommandService.결제_확정(reservation: Reservation): PaymentConfirmationResult =
+        confirmPayment(
+            reservationId = reservation.id,
+            holdToken = reservation.holdToken,
+            paymentKey = "test-payment-key",
+            orderId = reservation.idempotencyKey.toString(),
+            amount = reservation.amount,
+        )
 
     private fun 동시_결제_확정_시도(
         reservation: Reservation,
@@ -106,7 +152,7 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
             repeat(threadCount) {
                 executor.submit {
                     startGate.await()
-                    results.add(runCatching { paymentCommandService.confirmPayment(reservation.id, reservation.holdToken) })
+                    results.add(runCatching { paymentCommandService.결제_확정(reservation) })
                     doneLatch.countDown()
                 }
             }

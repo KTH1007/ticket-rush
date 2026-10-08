@@ -20,7 +20,14 @@ class PaymentController(
         @PathVariable reservationId: Long,
         @Valid @RequestBody request: PaymentConfirmationRequest,
     ): ResponseEntity<PaymentConfirmationResponse> {
-        val result = paymentCommandService.confirmPayment(reservationId, request.holdToken)
+        val result =
+            paymentCommandService.confirmPayment(
+                reservationId = reservationId,
+                holdToken = request.holdToken,
+                paymentKey = request.paymentKey,
+                orderId = request.orderId,
+                amount = request.amount,
+            )
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentConfirmationResponse.from(result))
     }
 }

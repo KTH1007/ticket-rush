@@ -44,6 +44,19 @@ class PaymentHistoryRecorderTest : IntegrationTest() {
         assertThat(history.single().reason).isEqualTo("테스트")
     }
 
+    // reason 컬럼이 varchar(200)이라 긴 PG 메시지가 그대로 들어가면 이력 저장이 실패하고 같은 트랜잭션의 결제 반영도 롤백된다
+    @Test
+    fun `사유가 컬럼 길이보다 길면 200자로 잘라서 저장한다`() {
+        // given
+        val payment = 결제_하나_저장()
+
+        // when
+        recorder.record(paymentId = payment.id, from = PaymentStatus.PENDING, to = PaymentStatus.FAILED, reason = "x".repeat(300))
+
+        // then
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).single().reason).hasSize(200)
+    }
+
     @Test
     fun `fromStatus 없이(최초) 기록할 수 있다`() {
         // given

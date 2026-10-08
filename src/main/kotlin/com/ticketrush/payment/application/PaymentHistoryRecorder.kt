@@ -23,9 +23,14 @@ class PaymentHistoryRecorder(
                 paymentId = paymentId,
                 fromStatus = from,
                 toStatus = to,
-                reason = reason,
+                reason = reason?.take(REASON_MAX_LENGTH),
                 createdAt = LocalDateTime.now(clock),
             ),
         )
+    }
+
+    companion object {
+        // payment_history.reason 컬럼 길이. 넘기면 이력 저장이 실패하고 같은 트랜잭션의 결제 반영도 롤백된다
+        private const val REASON_MAX_LENGTH = 200
     }
 }

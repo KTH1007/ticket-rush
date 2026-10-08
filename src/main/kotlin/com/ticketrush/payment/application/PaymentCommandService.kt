@@ -1,51 +1,49 @@
 package com.ticketrush.payment.application
 
+import com.ticketrush.payment.PaymentPolicyProperties
+import com.ticketrush.payment.domain.ChargeIdempotencyKey
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConfirmationResult
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentInquiryResult
+import com.ticketrush.payment.domain.PaymentOrderMismatchException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
-import com.ticketrush.payment.domain.ReservationPaidEvent
-import com.ticketrush.reservation.SeatPolicyProperties
 import com.ticketrush.reservation.domain.HoldTokenMismatchException
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationNotFoundException
 import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
-import com.ticketrush.reservation.domain.SeatRepositoryPort
-import org.springframework.context.ApplicationEventPublisher
-import org.springframework.dao.DataIntegrityViolationException
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.LocalDateTime
 import java.util.UUID
 
-// 8개 모두 confirmPayment 흐름에서 실제로 쓰이는 의존성이다(리포지토리 3종 + PG + 번호 생성기 + 정책 + Clock + 이력 기록기). 인위적으로 묶기보다 그대로 둔다.
-@Suppress("LongParameterList")
+private val logger = KotlinLogging.logger {}
+
 @Service
 class PaymentCommandService(
     private val reservationRepository: ReservationRepositoryPort,
-    private val seatRepository: SeatRepositoryPort,
     private val paymentRepository: PaymentRepositoryPort,
     private val paymentGateway: PaymentGatewayPort,
-    private val reservationNoGenerator: ReservationNoGenerator,
-    private val seatPolicy: SeatPolicyProperties,
+    private val claimService: PaymentClaimService,
+    private val policy: PaymentPolicyProperties,
     private val clock: Clock,
-    private val historyRecorder: PaymentHistoryRecorder,
-    private val eventPublisher: ApplicationEventPublisher,
 ) {
-    // 직전에 기록한 실패 처리(Payment FAILED, 홀드 시간 단축)까지 롤백되면 안 되므로,
-    // 이 예외만 롤백 대상에서 뺀다(Spring @Transactional의 기본 동작은 RuntimeException 전체 롤백).
-    @Transactional(noRollbackFor = [PaymentDeclinedException::class])
+    // @Transactional이 아니다. PG 호출이 트랜잭션 밖에서 일어나야 하므로 이 메서드 자체를 트랜잭션으로 감쌀 수 없다
+    // (claimService의 각 단계가 자기 트랜잭션을 갖는다).
     fun confirmPayment(
         reservationId: Long,
         holdToken: UUID,
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
     ): PaymentConfirmationResult {
         val reservation = loadOwnedReservation(reservationId, holdToken)
 
@@ -53,13 +51,125 @@ class PaymentCommandService(
         successResultOrNull(reservation, existingPayment)?.let { return it }
 
         requireHolding(reservation)
+        requireOrderMatches(reservation, orderId, amount)
 
-        return chargeAndApply(reservation, existingPayment)
+        confirmPreviousIfApproved(reservation, existingPayment, paymentKey)?.let { return it }
+
+        val claimed = claim(reservation, paymentKey, orderId)
+        // 결제를 읽은 뒤 다른 요청이 먼저 확정했다면 그 행을 그대로 돌려받는다. PG를 또 부르지 않고 충돌로 응답하면 재요청이 결과를 받는다
+        if (claimed.status != PaymentStatus.PENDING) throw PaymentConflictException()
+        return callGatewayAndApply(reservation, claimed, paymentKey, orderId, amount)
     }
+
+    // 같은 결제를 동시에 이어받거나 다시 열다 진 쪽은 낙관적 락 충돌로 걸리는데, 서버 오류가 아니라 충돌로 응답한다
+    private fun claim(
+        reservation: Reservation,
+        paymentKey: String,
+        orderId: String,
+    ): Payment =
+        try {
+            claimService.claimOrTakeOver(reservation.id, reservation.amount, paymentKey, orderId, LocalDateTime.now(clock))
+        } catch (e: OptimisticLockingFailureException) {
+            throw PaymentConflictException(cause = e)
+        }
+
+    // 응답을 못 받은 오래된 PENDING을 다른 paymentKey로 덮어쓰기 전에 이전 키를 조회한다. 이미 승인됐으면 그 승인을 확정하고, 아니면 교체한다.
+    // 조회가 안 되면 승인 여부를 모르는 채로 단서를 잃지 않도록 덮어쓰지 않고 충돌로 응답해 나중에 다시 시도하게 한다
+    @Suppress("TooGenericExceptionCaught")
+    private fun confirmPreviousIfApproved(
+        reservation: Reservation,
+        existing: Payment?,
+        newPaymentKey: String,
+    ): PaymentConfirmationResult? {
+        val previous =
+            existing?.takeIf { isStaleClaim(it) && it.tossPaymentKey != null && it.tossPaymentKey != newPaymentKey } ?: return null
+        val inquiry =
+            try {
+                paymentGateway.inquire(requireNotNull(previous.tossPaymentKey))
+            } catch (e: Exception) {
+                logger.warn(e) { "이전 paymentKey 조회에 실패해 덮어쓰지 않고 충돌로 응답합니다: paymentId=${previous.id}" }
+                throw PaymentConflictException(cause = e)
+            }
+        return when (inquiry) {
+            is PaymentInquiryResult.Done ->
+                if (isPaymentOf(reservation, inquiry)) applyPreviousSuccess(reservation, previous, inquiry) else null
+            is PaymentInquiryResult.NotApproved, PaymentInquiryResult.NotFound -> null
+        }
+    }
+
+    // 저장된 paymentKey는 클라이언트가 보낸 값이라, 다른 예약에서 승인된 결제를 이 예약의 승인으로 확정하지 않게 주문번호와 금액을 대조한다
+    private fun isPaymentOf(
+        reservation: Reservation,
+        inquiry: PaymentInquiryResult.Done,
+    ): Boolean {
+        val matches = inquiry.orderId == reservation.idempotencyKey.toString() && inquiry.totalAmount == reservation.amount
+        if (!matches) logger.warn { "이전 paymentKey의 승인이 이 예약의 결제가 아니라 확정하지 않습니다: reservationId=${reservation.id}" }
+        return matches
+    }
+
+    // PG 호출이 끝나지 않은 채 stale-claim-timeout을 넘긴 PENDING. claimOrTakeOver의 이어받기 조건과 같다
+    private fun isStaleClaim(payment: Payment): Boolean {
+        val claimedAt = payment.updatedAt ?: return false
+        return payment.status == PaymentStatus.PENDING && !claimedAt.plus(policy.staleClaimTimeout).isAfter(LocalDateTime.now(clock))
+    }
+
+    private fun applyPreviousSuccess(
+        reservation: Reservation,
+        previous: Payment,
+        inquiry: PaymentInquiryResult.Done,
+    ): PaymentConfirmationResult =
+        try {
+            claimService.applySuccess(previous, reservation, inquiry.pgTransactionId, inquiry.approvedAt ?: LocalDateTime.now(clock)).also {
+                logger.warn { "응답을 못 받았던 이전 paymentKey의 승인을 확정했습니다: paymentId=${previous.id}, paymentKey=${inquiry.pgTransactionId}" }
+            }
+        } catch (e: OptimisticLockingFailureException) {
+            throw PaymentConflictException(cause = e)
+        }
+
+    // 만료된 클레임을 동시에 넘겨받은 두 요청 중 진 쪽은 결과 반영 저장에서 낙관적 락 충돌로 걸린다
+    private fun callGatewayAndApply(
+        reservation: Reservation,
+        claimed: Payment,
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
+    ): PaymentConfirmationResult =
+        try {
+            // Toss가 같은 키의 거절을 재생하므로 거절된 적이 있으면 그 횟수를 섞은 새 키로 요청한다
+            val chargeKey = ChargeIdempotencyKey.of(reservation.idempotencyKey, claimed.chargeAttemptCount)
+            when (val result = paymentGateway.charge(paymentKey, orderId, amount, chargeKey)) {
+                is PaymentGatewayResult.Approved ->
+                    claimService.applySuccess(
+                        claimed,
+                        reservation,
+                        result.pgTransactionId,
+                        // PG 승인 시각이 정산 기준이라 우선하고, 없을 때만 서버 시각으로 대체한다
+                        result.approvedAt ?: LocalDateTime.now(clock),
+                    )
+                is PaymentGatewayResult.Declined -> {
+                    claimService.applyFailure(claimed, reservation, LocalDateTime.now(clock), result.reason)
+                    throw PaymentDeclinedException(result.reason)
+                }
+            }
+        } catch (e: OptimisticLockingFailureException) {
+            throw PaymentConflictException(cause = e)
+        }
 
     private fun requireHolding(reservation: Reservation) {
         if (reservation.status != ReservationStatus.HOLDING) throw ReservationNotHoldingException(reservation.status)
-        if (!reservation.isHoldActiveAt(LocalDateTime.now(clock))) throw ReservationNotHoldingException(ReservationStatus.EXPIRED)
+        // 남은 홀드가 PG 호출 시간보다 짧으면 호출 중에 만료돼 청구만 되고 티켓이 없을 수 있어 시작 전에 거부한다
+        if (!reservation.isHoldActiveAt(LocalDateTime.now(clock).plus(policy.minHoldRemaining))) {
+            throw ReservationNotHoldingException(ReservationStatus.EXPIRED)
+        }
+    }
+
+    private fun requireOrderMatches(
+        reservation: Reservation,
+        orderId: String,
+        amount: Int,
+    ) {
+        if (reservation.idempotencyKey.toString() != orderId) throw PaymentOrderMismatchException()
+        if (reservation.amount != amount) throw PaymentOrderMismatchException()
     }
 
     private fun loadOwnedReservation(
@@ -78,77 +188,5 @@ class PaymentCommandService(
         if (payment?.status != PaymentStatus.SUCCESS) return null
         val reservationNo = requireNotNull(reservation.reservationNo) { "SUCCESS 결제인데 예약번호가 없습니다: ${reservation.id}" }
         return PaymentConfirmationResult(payment, reservationNo)
-    }
-
-    // 정확히 동시에 들어온 요청 중 진 쪽은 여기서 걸림
-    private fun chargeAndApply(
-        reservation: Reservation,
-        existingPayment: Payment?,
-    ): PaymentConfirmationResult =
-        try {
-            when (val result = paymentGateway.charge(reservation.id, reservation.amount, reservation.idempotencyKey)) {
-                is PaymentGatewayResult.Approved -> handleApproved(reservation, existingPayment, result)
-                is PaymentGatewayResult.Declined -> handleDeclined(reservation, existingPayment, result)
-            }
-        } catch (e: OptimisticLockingFailureException) {
-            throw PaymentConflictException(cause = e)
-        } catch (e: DataIntegrityViolationException) {
-            if (e.message?.contains("uk_payment_reservation") == true) throw PaymentConflictException()
-            throw e
-        }
-
-    private fun handleApproved(
-        reservation: Reservation,
-        existingPayment: Payment?,
-        result: PaymentGatewayResult.Approved,
-    ): PaymentConfirmationResult {
-        // 번호부터 확정한 뒤 상태 전이와 번호 배정을 한 번에 한다. 순서를 바꾸면(상태
-        // 전이 먼저) reservation이 "PAID인데 번호는 아직 null"인 중간 상태로 더티 상태가
-        // 되고, 그 사이 조회 쿼리(existsByReservationNo)가 Hibernate의 자동 flush를
-        // 유발해 그 중간 상태 그대로 저장돼 ck_reservation_no_on_paid에 걸린다(실측 확인).
-        val reservationNo = findUnusedReservationNo()
-        reservation.confirmPayment()
-        reservation.assignReservationNo(reservationNo)
-        reservationRepository.save(reservation)
-        seatRepository.markSold(reservation.id)
-
-        val payment = existingPayment ?: Payment(reservationId = reservation.id, amount = reservation.amount)
-        val fromStatus = payment.status
-        payment.markSuccess(result.pgTransactionId, LocalDateTime.now(clock))
-        val saved = paymentRepository.save(payment)
-        historyRecorder.record(saved.id, fromStatus, PaymentStatus.SUCCESS)
-        eventPublisher.publishEvent(ReservationPaidEvent(reservation.id))
-        return PaymentConfirmationResult(saved, reservationNo)
-    }
-
-    // uk_reservation_no 충돌(확률상 사실상 0에 가깝지만 실측 후 재시도로 막기로 함)
-    private fun findUnusedReservationNo(): String {
-        repeat(MAX_RESERVATION_NO_ATTEMPTS) {
-            val candidate = reservationNoGenerator.generate()
-            if (!reservationRepository.existsByReservationNo(candidate)) return candidate
-        }
-        error("예매번호 생성 재시도 초과")
-    }
-
-    private fun handleDeclined(
-        reservation: Reservation,
-        existingPayment: Payment?,
-        result: PaymentGatewayResult.Declined,
-    ): Nothing {
-        val shortened = LocalDateTime.now(clock).plus(seatPolicy.paymentFailedHoldTtl)
-        reservation.shortenHoldOnPaymentFailure(shortened)
-        reservationRepository.save(reservation)
-        seatRepository.shortenHoldExpiry(reservation.id, shortened)
-
-        val payment = existingPayment ?: Payment(reservationId = reservation.id, amount = reservation.amount)
-        val fromStatus = payment.status
-        payment.markFailed()
-        val saved = paymentRepository.save(payment)
-        historyRecorder.record(saved.id, fromStatus, PaymentStatus.FAILED, reason = result.reason)
-        throw PaymentDeclinedException(result.reason)
-    }
-
-    companion object {
-        private const val MAX_RESERVATION_NO_ATTEMPTS = 3
     }
 }
