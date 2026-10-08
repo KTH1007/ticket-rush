@@ -7,6 +7,7 @@ import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentHistoryRepositoryPort
+import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.payment.domain.PaymentOrderMismatchException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
@@ -25,16 +26,19 @@ import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
 import com.ticketrush.support.예약_하나_저장
 import com.ticketrush.support.홀드된_좌석_하나_저장
+import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.BeforeEach
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import org.springframework.jdbc.core.JdbcTemplate
 import java.time.Clock
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
@@ -73,6 +77,9 @@ class PaymentCommandServiceTest : IntegrationTest() {
     @Autowired
     lateinit var clock: Clock
 
+    @Autowired
+    lateinit var jdbcTemplate: JdbcTemplate
+
     @TestConfiguration
     class MockConfig {
         @Bean
@@ -86,6 +93,12 @@ class PaymentCommandServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var outboxRepository: com.ticketrush.outbox.domain.OutboxRepositoryPort
+
+    // 모의 게이트웨이는 컨텍스트 안에서 공유돼 앞선 테스트의 호출 기록과 넓은 스텁이 남는다
+    @BeforeEach
+    fun resetGatewayMock() {
+        clearMocks(paymentGateway)
+    }
 
     @Test
     fun `결제를 확정하면 outbox에 RESERVATION_PAID 이벤트가 같이 커밋된다`() {
@@ -502,6 +515,125 @@ class PaymentCommandServiceTest : IntegrationTest() {
         // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
         payment.markFailed()
         paymentRepository.save(payment)
+    }
+
+    // 응답을 못 받은 PENDING을 다른 paymentKey로 덮어쓰기 전에 이전 키가 이미 승인됐는지 확인해야, 승인된 결제를 놓치지 않는다
+    @Test
+    fun `오래된 PENDING의 이전 paymentKey가 이미 승인됐으면 새 키로 승인하지 않고 그 승인을 확정한다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-done")
+        every { reservationNoGenerator.generate() } returns "RESNO000031"
+        val approvedAt = LocalDateTime.of(2026, 10, 7, 12, 0)
+        every { paymentGateway.inquire("pk-prev-done") } returns PaymentInquiryResult.Done("pk-prev-done", approvedAt)
+
+        // when
+        val result = paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-unused")
+
+        // then
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
+        assertThat(result.payment.pgTransactionId).isEqualTo("pk-prev-done")
+        assertThat(result.payment.paidAt).isEqualTo(approvedAt)
+        verify(exactly = 0) { paymentGateway.charge("pk-new-unused", any(), any(), any()) }
+        assertThat(requireNotNull(reservationRepository.findById(reservation.id)).status).isEqualTo(ReservationStatus.PAID)
+    }
+
+    @Test
+    fun `오래된 PENDING의 이전 paymentKey가 승인되지 않았으면 새 키로 이어받아 승인한다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-aborted")
+        every { reservationNoGenerator.generate() } returns "RESNO000032"
+        every { paymentGateway.inquire("pk-prev-aborted") } returns PaymentInquiryResult.NotApproved("ABORTED")
+        every { paymentGateway.charge("pk-new-after-aborted", any(), any(), any()) } returns
+            PaymentGatewayResult.Approved("pk-new-after-aborted")
+
+        // when
+        val result = paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-after-aborted")
+
+        // then
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
+        assertThat(result.payment.pgTransactionId).isEqualTo("pk-new-after-aborted")
+    }
+
+    @Test
+    fun `오래된 PENDING의 이전 paymentKey가 Toss에 없으면 새 키로 이어받아 승인한다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-missing")
+        every { reservationNoGenerator.generate() } returns "RESNO000033"
+        every { paymentGateway.inquire("pk-prev-missing") } returns PaymentInquiryResult.NotFound
+        every { paymentGateway.charge("pk-new-after-missing", any(), any(), any()) } returns
+            PaymentGatewayResult.Approved("pk-new-after-missing")
+
+        // when
+        val result = paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-after-missing")
+
+        // then
+        assertThat(result.payment.pgTransactionId).isEqualTo("pk-new-after-missing")
+    }
+
+    @Test
+    fun `이전 paymentKey 조회가 실패하면 덮어쓰지 않고 충돌로 응답하며 PENDING과 이전 키를 그대로 둔다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-unknown")
+        every { paymentGateway.inquire("pk-prev-unknown") } throws IllegalStateException("조회 타임아웃")
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-not-sent") }
+            .isInstanceOf(PaymentConflictException::class.java)
+        verify(exactly = 0) { paymentGateway.charge("pk-new-not-sent", any(), any(), any()) }
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-unknown")
+
+        // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
+        payment.markFailed()
+        paymentRepository.save(payment)
+    }
+
+    @Test
+    fun `같은 paymentKey로 이어받을 때는 이전 키를 조회하지 않는다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-same")
+        every { reservationNoGenerator.generate() } returns "RESNO000034"
+        every { paymentGateway.charge("pk-prev-same", any(), any(), any()) } returns PaymentGatewayResult.Approved("pk-prev-same")
+
+        // when
+        paymentCommandService.결제_확정(reservation, paymentKey = "pk-prev-same")
+
+        // then
+        verify(exactly = 0) { paymentGateway.inquire("pk-prev-same") }
+    }
+
+    @Test
+    fun `아직 처리 중인 신선한 PENDING을 다른 paymentKey로 요청하면 이전 키를 조회하지 않고 충돌로 응답한다`() {
+        // given: 갱신 시각을 미래로 밀어 테스트 속도와 무관하게 확실히 신선하게 만든다
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-fresh", updatedAtShift = "+ interval '1 hour'")
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-fresh") }
+            .isInstanceOf(PaymentConflictException::class.java)
+        verify(exactly = 0) { paymentGateway.inquire("pk-prev-fresh") }
+
+        // 커밋된 PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        payment.markFailed()
+        paymentRepository.save(payment)
+    }
+
+    // 응답 없이 끝난 승인(타임아웃)으로 PENDING을 남긴 뒤, 갱신 시각을 옮겨 오래된(또는 신선한) 클레임으로 만든다
+    private fun 불확실한_PENDING_만들기(
+        reservation: Reservation,
+        paymentKey: String,
+        updatedAtShift: String = "- interval '1 hour'",
+    ) {
+        every { paymentGateway.charge(paymentKey, any(), any(), any()) } throws IllegalStateException("타임아웃")
+        runCatching { paymentCommandService.결제_확정(reservation, paymentKey = paymentKey) }
+        jdbcTemplate.update("UPDATE payment SET updated_at = updated_at $updatedAtShift WHERE reservation_id = ?", reservation.id)
     }
 
     private fun PaymentCommandService.결제_확정(

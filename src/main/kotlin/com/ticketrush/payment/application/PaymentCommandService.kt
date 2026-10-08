@@ -8,6 +8,7 @@ import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.payment.domain.PaymentOrderMismatchException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
@@ -49,6 +50,8 @@ class PaymentCommandService(
         requireHolding(reservation)
         requireOrderMatches(reservation, orderId, amount)
 
+        confirmPreviousIfApproved(reservation, existingPayment, paymentKey)?.let { return it }
+
         val claimed = claim(reservation, paymentKey, orderId)
         // 결제를 읽은 뒤 다른 요청이 먼저 확정했다면 그 행을 그대로 돌려받는다. PG를 또 부르지 않고 충돌로 응답하면 재요청이 결과를 받는다
         if (claimed.status != PaymentStatus.PENDING) throw PaymentConflictException()
@@ -63,6 +66,45 @@ class PaymentCommandService(
     ): Payment =
         try {
             claimService.claimOrTakeOver(reservation.id, reservation.amount, paymentKey, orderId, LocalDateTime.now(clock))
+        } catch (e: OptimisticLockingFailureException) {
+            throw PaymentConflictException(cause = e)
+        }
+
+    // 응답을 못 받은 오래된 PENDING을 다른 paymentKey로 덮어쓰기 전에 이전 키를 조회한다. 이미 승인됐으면 그 승인을 확정하고, 아니면 교체한다.
+    // 조회가 안 되면 승인 여부를 모르는 채로 단서를 잃지 않도록 덮어쓰지 않고 충돌로 응답해 나중에 다시 시도하게 한다
+    @Suppress("TooGenericExceptionCaught")
+    private fun confirmPreviousIfApproved(
+        reservation: Reservation,
+        existing: Payment?,
+        newPaymentKey: String,
+    ): PaymentConfirmationResult? {
+        val previous =
+            existing?.takeIf { isStaleClaim(it) && it.tossPaymentKey != null && it.tossPaymentKey != newPaymentKey } ?: return null
+        val inquiry =
+            try {
+                paymentGateway.inquire(requireNotNull(previous.tossPaymentKey))
+            } catch (e: Exception) {
+                throw PaymentConflictException(cause = e)
+            }
+        return when (inquiry) {
+            is PaymentInquiryResult.Done -> applyPreviousSuccess(reservation, previous, inquiry)
+            is PaymentInquiryResult.NotApproved, PaymentInquiryResult.NotFound -> null
+        }
+    }
+
+    // PG 호출이 끝나지 않은 채 stale-claim-timeout을 넘긴 PENDING. claimOrTakeOver의 이어받기 조건과 같다
+    private fun isStaleClaim(payment: Payment): Boolean {
+        val claimedAt = payment.updatedAt ?: return false
+        return payment.status == PaymentStatus.PENDING && !claimedAt.plus(policy.staleClaimTimeout).isAfter(LocalDateTime.now(clock))
+    }
+
+    private fun applyPreviousSuccess(
+        reservation: Reservation,
+        previous: Payment,
+        inquiry: PaymentInquiryResult.Done,
+    ): PaymentConfirmationResult =
+        try {
+            claimService.applySuccess(previous, reservation, inquiry.pgTransactionId, inquiry.approvedAt ?: LocalDateTime.now(clock))
         } catch (e: OptimisticLockingFailureException) {
             throw PaymentConflictException(cause = e)
         }
