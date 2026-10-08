@@ -525,7 +525,8 @@ class PaymentCommandServiceTest : IntegrationTest() {
         불확실한_PENDING_만들기(reservation, "pk-prev-done")
         every { reservationNoGenerator.generate() } returns "RESNO000031"
         val approvedAt = LocalDateTime.of(2026, 10, 7, 12, 0)
-        every { paymentGateway.inquire("pk-prev-done") } returns PaymentInquiryResult.Done("pk-prev-done", approvedAt)
+        every { paymentGateway.inquire("pk-prev-done") } returns
+            PaymentInquiryResult.Done("pk-prev-done", approvedAt, reservation.idempotencyKey.toString(), reservation.amount)
 
         // when
         val result = paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-unused")
@@ -536,6 +537,43 @@ class PaymentCommandServiceTest : IntegrationTest() {
         assertThat(result.payment.paidAt).isEqualTo(approvedAt)
         verify(exactly = 0) { paymentGateway.charge("pk-new-unused", any(), any(), any()) }
         assertThat(requireNotNull(reservationRepository.findById(reservation.id)).status).isEqualTo(ReservationStatus.PAID)
+    }
+
+    // 저장된 키는 클라이언트가 보낸 값이라, 다른 예약에서 승인된 키를 얹어 두고 이 예약을 결제된 것으로 만들 수 없어야 한다
+    @Test
+    fun `이전 paymentKey의 승인이 다른 주문번호의 결제이면 그 승인을 확정하지 않고 새 키로 이어받는다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-other-order")
+        every { reservationNoGenerator.generate() } returns "RESNO000035"
+        every { paymentGateway.inquire("pk-prev-other-order") } returns
+            PaymentInquiryResult.Done("pk-prev-other-order", orderId = "another-order", totalAmount = reservation.amount)
+        every { paymentGateway.charge("pk-new-after-other-order", any(), any(), any()) } returns
+            PaymentGatewayResult.Approved("pk-new-after-other-order")
+
+        // when
+        val result = paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-after-other-order")
+
+        // then
+        assertThat(result.payment.pgTransactionId).isEqualTo("pk-new-after-other-order")
+    }
+
+    @Test
+    fun `이전 paymentKey의 승인 금액이 예약 금액과 다르면 그 승인을 확정하지 않고 새 키로 이어받는다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-other-amount")
+        every { reservationNoGenerator.generate() } returns "RESNO000036"
+        every { paymentGateway.inquire("pk-prev-other-amount") } returns
+            PaymentInquiryResult.Done("pk-prev-other-amount", orderId = reservation.idempotencyKey.toString(), totalAmount = 1_000)
+        every { paymentGateway.charge("pk-new-after-other-amount", any(), any(), any()) } returns
+            PaymentGatewayResult.Approved("pk-new-after-other-amount")
+
+        // when
+        val result = paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-after-other-amount")
+
+        // then
+        assertThat(result.payment.pgTransactionId).isEqualTo("pk-new-after-other-amount")
     }
 
     @Test

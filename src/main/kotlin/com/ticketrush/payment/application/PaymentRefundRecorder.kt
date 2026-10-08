@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional
 
 private val logger = KotlinLogging.logger {}
 
-// 환불 실패(취소 시점과 재시도)와 재시도 성공을 반영하는 트랜잭션 단위. 스케줄러의 Toss 호출은 트랜잭션 밖이라 별도 빈으로 둔다
+// 환불 결과(취소 시점과 재시도의 성공, 실패)를 반영하는 트랜잭션 단위. Toss 호출은 트랜잭션 밖이라 별도 빈으로 둔다
 @Component
 class PaymentRefundRecorder(
     private val paymentRepository: PaymentRepositoryPort,

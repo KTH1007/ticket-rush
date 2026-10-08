@@ -38,8 +38,16 @@ class TossPaymentGatewayAdapterInquiryTest {
 
         val result = adapter().inquire("pk-done")
 
+        // 주문번호와 금액을 같이 담아야 호출 측이 다른 주문의 결제인지 대조할 수 있다
         assertThat(result)
-            .isEqualTo(PaymentInquiryResult.Done(pgTransactionId = "pk-done", approvedAt = LocalDateTime.of(2026, 10, 1, 10, 15, 30)))
+            .isEqualTo(
+                PaymentInquiryResult.Done(
+                    pgTransactionId = "pk-done",
+                    approvedAt = LocalDateTime.of(2026, 10, 1, 10, 15, 30),
+                    orderId = "order-1",
+                    totalAmount = 10_000,
+                ),
+            )
     }
 
     @Test
@@ -49,7 +57,14 @@ class TossPaymentGatewayAdapterInquiryTest {
         val result = adapter().inquire("pk-done")
 
         assertThat(result)
-            .isEqualTo(PaymentInquiryResult.Done(pgTransactionId = "pk-done", approvedAt = LocalDateTime.of(2026, 10, 1, 10, 15, 30)))
+            .isEqualTo(
+                PaymentInquiryResult.Done(
+                    pgTransactionId = "pk-done",
+                    approvedAt = LocalDateTime.of(2026, 10, 1, 10, 15, 30),
+                    orderId = "order-1",
+                    totalAmount = 10_000,
+                ),
+            )
     }
 
     @Test
@@ -57,8 +72,10 @@ class TossPaymentGatewayAdapterInquiryTest {
         stubInquiry("pk-no-time", status = "DONE", approvedAt = null)
         stubInquiry("pk-bad-time", status = "DONE", approvedAt = "어제 오후 세 시")
 
-        assertThat(adapter().inquire("pk-no-time")).isEqualTo(PaymentInquiryResult.Done("pk-no-time", approvedAt = null))
-        assertThat(adapter().inquire("pk-bad-time")).isEqualTo(PaymentInquiryResult.Done("pk-bad-time", approvedAt = null))
+        assertThat(adapter().inquire("pk-no-time"))
+            .isEqualTo(PaymentInquiryResult.Done("pk-no-time", approvedAt = null, orderId = "order-1", totalAmount = 10_000))
+        assertThat(adapter().inquire("pk-bad-time"))
+            .isEqualTo(PaymentInquiryResult.Done("pk-bad-time", approvedAt = null, orderId = "order-1", totalAmount = 10_000))
     }
 
     @ParameterizedTest
@@ -170,7 +187,9 @@ class TossPaymentGatewayAdapterInquiryTest {
                     aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
-                        .withBody("""{"paymentKey":"$paymentKey","orderId":"order-1","status":"$status"$approvedAtField}"""),
+                        .withBody(
+                            """{"paymentKey":"$paymentKey","orderId":"order-1","totalAmount":10000,"status":"$status"$approvedAtField}""",
+                        ),
                 ),
         )
     }

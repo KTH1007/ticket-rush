@@ -66,7 +66,7 @@ class PaymentCancelCommandService(
                 is PaymentGatewayResult.Declined -> refundRecorder.recordFailure(payment, result.reason)
             }
         } catch (e: Exception) {
-            logger.error(e) { "환불 결과를 반영하지 못했습니다. 결제는 CANCELED로 남고 재시도 스케줄러가 이어받습니다: paymentId=${payment.id}" }
+            logger.error(e) { "환불 결과를 반영하지 못했습니다. 결제는 CANCELED로 남고 재시도 스케줄러가 이어받습니다: paymentId=${payment.id}, result=$result" }
             payment
         }
 }

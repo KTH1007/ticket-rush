@@ -207,7 +207,12 @@ class TossPaymentGatewayAdapter(
 
     private fun toInquiryResult(response: TossPaymentResponse): PaymentInquiryResult =
         if (response.status == "DONE") {
-            PaymentInquiryResult.Done(pgTransactionId = response.paymentKey, approvedAt = parseApprovedAt(response.approvedAt))
+            PaymentInquiryResult.Done(
+                pgTransactionId = response.paymentKey,
+                approvedAt = parseApprovedAt(response.approvedAt),
+                orderId = response.orderId,
+                totalAmount = response.totalAmount,
+            )
         } else {
             PaymentInquiryResult.NotApproved(status = response.status)
         }

@@ -18,11 +18,14 @@ import com.ticketrush.reservation.domain.ReservationNotFoundException
 import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
 import java.time.Clock
 import java.time.LocalDateTime
 import java.util.UUID
+
+private val logger = KotlinLogging.logger {}
 
 @Service
 class PaymentCommandService(
@@ -84,12 +87,24 @@ class PaymentCommandService(
             try {
                 paymentGateway.inquire(requireNotNull(previous.tossPaymentKey))
             } catch (e: Exception) {
+                logger.warn(e) { "이전 paymentKey 조회에 실패해 덮어쓰지 않고 충돌로 응답합니다: paymentId=${previous.id}" }
                 throw PaymentConflictException(cause = e)
             }
         return when (inquiry) {
-            is PaymentInquiryResult.Done -> applyPreviousSuccess(reservation, previous, inquiry)
+            is PaymentInquiryResult.Done ->
+                if (isPaymentOf(reservation, inquiry)) applyPreviousSuccess(reservation, previous, inquiry) else null
             is PaymentInquiryResult.NotApproved, PaymentInquiryResult.NotFound -> null
         }
+    }
+
+    // 저장된 paymentKey는 클라이언트가 보낸 값이라, 다른 예약에서 승인된 결제를 이 예약의 승인으로 확정하지 않게 주문번호와 금액을 대조한다
+    private fun isPaymentOf(
+        reservation: Reservation,
+        inquiry: PaymentInquiryResult.Done,
+    ): Boolean {
+        val matches = inquiry.orderId == reservation.idempotencyKey.toString() && inquiry.totalAmount == reservation.amount
+        if (!matches) logger.warn { "이전 paymentKey의 승인이 이 예약의 결제가 아니라 확정하지 않습니다: reservationId=${reservation.id}" }
+        return matches
     }
 
     // PG 호출이 끝나지 않은 채 stale-claim-timeout을 넘긴 PENDING. claimOrTakeOver의 이어받기 조건과 같다
@@ -104,7 +119,9 @@ class PaymentCommandService(
         inquiry: PaymentInquiryResult.Done,
     ): PaymentConfirmationResult =
         try {
-            claimService.applySuccess(previous, reservation, inquiry.pgTransactionId, inquiry.approvedAt ?: LocalDateTime.now(clock))
+            claimService.applySuccess(previous, reservation, inquiry.pgTransactionId, inquiry.approvedAt ?: LocalDateTime.now(clock)).also {
+                logger.warn { "응답을 못 받았던 이전 paymentKey의 승인을 확정했습니다: paymentId=${previous.id}, paymentKey=${inquiry.pgTransactionId}" }
+            }
         } catch (e: OptimisticLockingFailureException) {
             throw PaymentConflictException(cause = e)
         }

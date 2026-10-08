@@ -118,7 +118,7 @@ ticket-rush:
     reclaim-interval: 5s
     refund-retry-delay: 5m # 환불이 실패한 CANCELED 결제를 다시 시도하기 전 대기. Toss 장애가 풀릴 시간을 준다
     refund-max-attempts: 5 # 취소 시점의 첫 시도를 포함한 총 횟수. 소진하면 자동 재시도를 멈추고 ERROR로 알려 사람이 처리한다
-    min-hold-remaining: 15s # 승인 호출(최대 약 12s)이 끝나기 전에 홀드가 만료돼 청구만 되고 티켓이 없는 일을 막는 하한
+    min-hold-remaining: 15s # 승인 호출(최대 약 12s)이 끝나기 전에 홀드가 만료돼 청구만 되고 티켓이 없는 일을 막는 하한. 이전 키 조회가 붙는 드문 경로는 최대 약 18s로 여유가 없지만, 놓쳐도 PENDING으로 남아 회수 스케줄러가 처리함
   toss:
     base-url: https://api.tosspayments.com
     secret-key: ${TOSS_SECRET_KEY:}   # toss 프로필에서만 쓰이므로 기본값은 비워 두고, 그 프로필이 키 없이 뜨면 어댑터가 거부한다
