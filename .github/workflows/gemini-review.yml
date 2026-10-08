@@ -36,7 +36,7 @@ jobs:
           PR_NUMBER: ${{ github.event.issue.number }}
         run: gh pr checkout "$PR_NUMBER"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
