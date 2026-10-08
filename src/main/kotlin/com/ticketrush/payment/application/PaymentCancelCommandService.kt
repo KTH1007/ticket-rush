@@ -5,124 +5,40 @@ import com.ticketrush.payment.domain.PaymentCancelResult
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
-import com.ticketrush.payment.domain.PaymentRepositoryPort
-import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.payment.domain.RefundIdempotencyKey
-import com.ticketrush.payment.domain.ReservationCanceledEvent
-import com.ticketrush.reservation.domain.Reservation
-import com.ticketrush.reservation.domain.ReservationAlreadyCanceledException
-import com.ticketrush.reservation.domain.ReservationLookupFailedException
-import com.ticketrush.reservation.domain.ReservationLookupRateLimitedException
-import com.ticketrush.reservation.domain.ReservationLookupRateLimiterPort
-import com.ticketrush.reservation.domain.ReservationRepositoryPort
-import com.ticketrush.reservation.domain.ReservationStatus
-import com.ticketrush.reservation.domain.SeatRepositoryPort
-import com.ticketrush.shared.PhoneHasher
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.springframework.context.ApplicationEventPublisher
-import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
 
 private val logger = KotlinLogging.logger {}
 
-// 모두 cancel 흐름에서 실제로 쓰이는 의존성이다(리포지토리 3종 + PG + 레이트리미터 + 해셔 + 이력과 환불 기록기 + 이벤트 발행).
-@Suppress("LongParameterList")
+// @Transactional이 아니다. 취소 확정이 먼저 커밋돼야, 환불 성공 뒤 커밋이 실패해 롤백되면서
+// 돈은 돌아갔는데 예약이 PAID로 남는 일이 없다. 환불을 못 끝내면 CANCELED로 남아 재시도 스케줄러가 이어받는다.
 @Service
 class PaymentCancelCommandService(
-    private val reservationRepository: ReservationRepositoryPort,
-    private val seatRepository: SeatRepositoryPort,
-    private val paymentRepository: PaymentRepositoryPort,
+    private val cancelRecorder: PaymentCancelRecorder,
     private val paymentGateway: PaymentGatewayPort,
-    private val rateLimiter: ReservationLookupRateLimiterPort,
-    private val phoneHasher: PhoneHasher,
-    private val historyRecorder: PaymentHistoryRecorder,
     private val refundRecorder: PaymentRefundRecorder,
-    private val eventPublisher: ApplicationEventPublisher,
 ) {
-    @Transactional
     fun cancel(
         reservationNo: String,
         phone: String,
     ): PaymentCancelResult {
-        val reservation = verifyOwnership(reservationNo, phone)
-        requireCancelable(reservation)
-        val payment = confirmCancelAndRefund(reservation)
-        return PaymentCancelResult(payment, reservationNo)
+        val canceled = cancelRecorder.confirmCancel(reservationNo, phone)
+        return PaymentCancelResult(applyRefund(canceled), reservationNo)
     }
 
-    // #83과 같은 패턴: 확인은 DB 조회 전에 원자적으로 먼저(차단 여부), 실패해야만 기록,
-    // 성공해야만 반환. reservationNo가 없든 phone이 틀리든 같은 예외로 합쳐 존재 여부를 숨긴다
-    private fun verifyOwnership(
-        reservationNo: String,
-        phone: String,
-    ): Reservation {
-        if (!rateLimiter.tryReserveAttempt(reservationNo)) throw ReservationLookupRateLimitedException()
-
-        val reservation = reservationRepository.findByReservationNo(reservationNo)
-        if (reservation == null || reservation.phoneHash != phoneHasher.hash(phone)) {
-            throw ReservationLookupFailedException()
-        }
-
-        rateLimiter.releaseAttempt(reservationNo)
-        return reservation
+    private fun applyRefund(canceled: CanceledPayment): Payment {
+        val result = requestRefund(canceled) ?: return canceled.payment
+        return recordRefund(canceled.payment, result)
     }
 
-    // reservationNo는 PAID 전이 시점에만 배정되고 이후 지워지지 않는다(assignReservationNo).
-    // PAID -> EXPIRED로 가는 전이도 없다. 즉 여기 도달한 시점엔 PAID 아니면 CANCELED뿐이다.
-    // HOLDING/EXPIRED는 reservationNo가 애초에 없어서 verifyOwnership에서 이미 걸러진다
-    private fun requireCancelable(reservation: Reservation) {
-        when (reservation.status) {
-            ReservationStatus.PAID -> return
-            ReservationStatus.CANCELED -> throw ReservationAlreadyCanceledException()
-            ReservationStatus.HOLDING, ReservationStatus.EXPIRED ->
-                error("reservationNo로 조회됐는데 결제 전 상태입니다(불가능한 상태): id=${reservation.id}, status=${reservation.status}")
-        }
-    }
-
-    // 정확히 동시에 들어온 취소 요청 중 진 쪽은 여기서 걸림(결제 확정과 같은 패턴)
-    private fun confirmCancelAndRefund(reservation: Reservation): Payment =
-        try {
-            reservation.cancel()
-            reservationRepository.save(reservation)
-            seatRepository.returnToAvailable(reservation.id)
-
-            val payment =
-                requireNotNull(paymentRepository.findByReservationId(reservation.id)) {
-                    "PAID 예약인데 결제 기록이 없습니다: ${reservation.id}"
-                }
-            val fromStatus = payment.status
-            payment.markCanceled()
-            val canceled = paymentRepository.save(payment)
-            historyRecorder.record(canceled.id, fromStatus, PaymentStatus.CANCELED, reason = "사용자 취소 요청")
-            eventPublisher.publishEvent(ReservationCanceledEvent(reservation.id))
-
-            applyRefund(canceled, reservation)
-        } catch (e: OptimisticLockingFailureException) {
-            throw PaymentConflictException(cause = e)
-        }
-
-    private fun applyRefund(
-        payment: Payment,
-        reservation: Reservation,
-    ): Payment {
-        val result = requestRefund(payment, reservation) ?: return payment
-        return when (result) {
-            is PaymentGatewayResult.Approved -> markRefunded(payment, result)
-            // 실패도 시도로 세어야 스케줄러의 첫 재시도가 새 키로 나가 Toss가 저장해 둔 에러를 재생하지 않는다
-            is PaymentGatewayResult.Declined -> refundRecorder.recordFailure(payment, result.reason)
-        }
-    }
-
-    // 환불 호출이 예외를 던져도(네트워크 오류 등) 취소 확정을 롤백시키면 안 된다. "환불 실패해도 취소는 확정된다"는
+    // 환불 호출이 예외를 던져도(네트워크 오류 등) 확정된 취소는 그대로다. "환불 실패해도 취소는 확정된다"는
     // 계약을 예외 경로에서도 지키려고 거절로 바꿔 돌려준다. PG가 같은 환불을 처리 중인 충돌은 실패가 아니라서 null로 돌려 시도로 세지 않는다.
     @Suppress("TooGenericExceptionCaught")
-    private fun requestRefund(
-        payment: Payment,
-        reservation: Reservation,
-    ): PaymentGatewayResult? {
+    private fun requestRefund(canceled: CanceledPayment): PaymentGatewayResult? {
+        val payment = canceled.payment
         val pgTransactionId = requireNotNull(payment.pgTransactionId) { "취소 대상인데 원 거래 id가 없습니다: ${payment.id}" }
-        val refundKey = RefundIdempotencyKey.of(reservation.idempotencyKey, payment.refundAttemptCount)
+        val refundKey = RefundIdempotencyKey.of(canceled.reservationKey, payment.refundAttemptCount)
         return try {
             val result = paymentGateway.refund(pgTransactionId, payment.amount, refundKey)
             if (result is PaymentGatewayResult.Declined) {
@@ -138,13 +54,19 @@ class PaymentCancelCommandService(
         }
     }
 
-    private fun markRefunded(
+    // 취소는 이미 커밋돼 환불 결과를 못 적어도 요청을 실패시키지 않는다. 결제가 CANCELED로 남아 재시도 스케줄러가 같은 키로 다시 요청한다
+    @Suppress("TooGenericExceptionCaught")
+    private fun recordRefund(
         payment: Payment,
-        result: PaymentGatewayResult.Approved,
-    ): Payment {
-        payment.markRefunded()
-        val refunded = paymentRepository.save(payment)
-        historyRecorder.record(refunded.id, PaymentStatus.CANCELED, PaymentStatus.REFUNDED, reason = "환불 완료: ${result.pgTransactionId}")
-        return refunded
-    }
+        result: PaymentGatewayResult,
+    ): Payment =
+        try {
+            when (result) {
+                is PaymentGatewayResult.Approved -> refundRecorder.recordCancelSuccess(payment, result.pgTransactionId)
+                is PaymentGatewayResult.Declined -> refundRecorder.recordFailure(payment, result.reason)
+            }
+        } catch (e: Exception) {
+            logger.error(e) { "환불 결과를 반영하지 못했습니다. 결제는 CANCELED로 남고 재시도 스케줄러가 이어받습니다: paymentId=${payment.id}" }
+            payment
+        }
 }

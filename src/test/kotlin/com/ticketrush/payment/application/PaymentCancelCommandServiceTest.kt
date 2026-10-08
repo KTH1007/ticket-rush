@@ -40,8 +40,10 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import java.sql.Connection
 import java.time.LocalDateTime
 import java.util.UUID
+import javax.sql.DataSource
 import kotlin.test.Test
 
 @Import(PaymentCancelCommandServiceTest.MockConfig::class)
@@ -72,6 +74,9 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var cancelService: PaymentCancelCommandService
+
+    @Autowired
+    lateinit var dataSource: DataSource
 
     @TestConfiguration
     class MockConfig {
@@ -111,6 +116,26 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         val recorded = outboxRepository.findByAggregateId(reservation.id).singleOrNull()
         assertThat(recorded).isNotNull
         assertThat(recorded!!.eventType).isEqualTo("RESERVATION_CANCELED")
+    }
+
+    // 환불 호출이 취소 확정과 같은 트랜잭션이면, 환불 성공 뒤 커밋이 실패했을 때 돈은 돌아갔는데 예약이 PAID로 롤백된다
+    @Test
+    fun `환불을 호출하는 시점에는 취소 확정이 이미 커밋돼 있다`() {
+        // given
+        val reservation = 결제완료_예약_준비()
+        var statusesAtRefund: Pair<String?, String?>? = null
+        every { paymentGateway.refund(any(), any(), any()) } answers {
+            val reservationStatus = committedStatus("SELECT status FROM reservation WHERE id = ?", reservation.id)
+            val paymentStatus = committedStatus("SELECT status FROM payment WHERE reservation_id = ?", reservation.id)
+            statusesAtRefund = reservationStatus to paymentStatus
+            PaymentGatewayResult.Approved("FAKE-REFUND-COMMIT-ORDER")
+        }
+
+        // when
+        cancelService.cancel(reservation.reservationNo!!, PHONE)
+
+        // then
+        assertThat(statusesAtRefund).isEqualTo("CANCELED" to "CANCELED")
     }
 
     @Test
@@ -269,6 +294,22 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         // then
         val history = paymentHistoryRepository.findAllByPaymentId(result.payment.id)
         assertThat(history).extracting("toStatus").containsExactlyInAnyOrder(PaymentStatus.CANCELED, PaymentStatus.REFUNDED)
+    }
+
+    // JdbcTemplate은 진행 중인 스프링 트랜잭션의 커넥션을 같이 써서 커밋 안 된 변경도 읽는다. DataSource에서 새 커넥션을 직접 얻어야 커밋된 값만 보인다
+    private fun committedStatus(
+        sql: String,
+        id: Long,
+    ): String? = dataSource.connection.use { queryFirstString(it, sql, id) }
+
+    private fun queryFirstString(
+        connection: Connection,
+        sql: String,
+        id: Long,
+    ): String? {
+        val statement = connection.prepareStatement(sql)
+        statement.setLong(1, id)
+        return statement.use { it.executeQuery().use { rows -> if (rows.next()) rows.getString(1) else null } }
     }
 
     private fun 결제완료_예약_준비(): Reservation {

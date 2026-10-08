@@ -22,9 +22,24 @@ class PaymentRefundRecorder(
         payment: Payment,
         pgTransactionId: String,
     ) {
+        markRefunded(payment, "환불 재시도 성공: $pgTransactionId")
+    }
+
+    // 취소 요청에서 바로 성공한 환불. 재시도 성공과 이력 문구만 다르다. 저장된 결제를 돌려준다
+    @Transactional
+    fun recordCancelSuccess(
+        payment: Payment,
+        pgTransactionId: String,
+    ): Payment = markRefunded(payment, "환불 완료: $pgTransactionId")
+
+    private fun markRefunded(
+        payment: Payment,
+        reason: String,
+    ): Payment {
         payment.markRefunded()
         val saved = paymentRepository.save(payment)
-        historyRecorder.record(saved.id, PaymentStatus.CANCELED, PaymentStatus.REFUNDED, reason = "환불 재시도 성공: $pgTransactionId")
+        historyRecorder.record(saved.id, PaymentStatus.CANCELED, PaymentStatus.REFUNDED, reason = reason)
+        return saved
     }
 
     // 횟수를 올려 저장하면 updatedAt이 갱신돼 refundRetryDelay만큼 다음 시도가 미뤄지고 다음 환불 키도 바뀐다. 저장된 결제를 돌려준다
