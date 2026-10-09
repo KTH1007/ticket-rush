@@ -16,6 +16,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
 import java.time.Instant
@@ -43,6 +44,12 @@ class OutboxRelayRetryTest : IntegrationTest() {
     // 캐시된 다른 컨텍스트의 릴레이(실제 시각 기준)가 이 행을 가로채지 못하게 먼 미래로 고정한다
     private val clock = TestClock(Instant.parse("2100-01-01T00:00:00Z"))
     private val aggregateId = 900_200_001L
+
+    // 이 릴레이는 시각이 먼 미래라 공유 DB에 남은 다른 테스트의 PENDING 행도 집어가 상태를 바꾼다. 테스트는 병렬이 아니라서 시작 전에 비운다
+    @BeforeEach
+    fun clearOtherPendingRows() {
+        jdbcTemplate.update("DELETE FROM outbox WHERE status = 'PENDING'")
+    }
 
     @AfterEach
     fun cleanUp() {
