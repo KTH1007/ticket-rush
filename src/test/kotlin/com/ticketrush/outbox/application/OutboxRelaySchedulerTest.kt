@@ -124,17 +124,14 @@ class OutboxRelaySchedulerTest : IntegrationTest() {
     @Transactional
     fun `markFailedOrRetry를 max-attempts만큼 반복하면 FAILED가 된다`() {
         // given
-        val now = LocalDateTime.now(clock)
-        val claimed = claim(대기중인_outbox_이벤트_저장(999L).id)
-        val eventId = claimed.id
-        val claimedAt = requireNotNull(claimed.claimedAt)
+        val eventId = 대기중인_outbox_이벤트_저장(999L).id
+        var now = LocalDateTime.now(clock)
 
-        // when — recordFailure는 PROCESSING 상태에서만 되므로 매번 되돌린 뒤 기록
+        // when — 재시도마다 다음 시도 시각이 지난 뒤 실제로 다시 claim해서 실패를 기록
         repeat(policy.maxAttempts) {
-            val current = requireNotNull(outboxRepository.findById(eventId))
-            current.markProcessingForTest()
-            outboxRepository.save(current)
-            outboxRepository.markFailedOrRetry(eventId, claimedAt, now, policy.retryDelay, policy.maxAttempts)
+            val claimed = requireNotNull(outboxRepository.claimBatch(limit = 10, now = now).firstOrNull { event -> event.id == eventId })
+            outboxRepository.markFailedOrRetry(eventId, requireNotNull(claimed.claimedAt), now, policy.retryDelay, policy.maxAttempts)
+            now = now.plus(policy.retryDelay).plusSeconds(1)
         }
 
         // then

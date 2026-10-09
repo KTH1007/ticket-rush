@@ -78,7 +78,12 @@ class OutboxEvent(
     ) {
         check(status == OutboxStatus.PROCESSING) { "PROCESSING 상태에서만 실패를 기록할 수 있습니다: $status" }
         attemptCount += 1
-        status = if (attemptCount >= maxAttempts) OutboxStatus.FAILED else OutboxStatus.PENDING
+        if (attemptCount >= maxAttempts) {
+            status = OutboxStatus.FAILED
+        } else {
+            status = OutboxStatus.PENDING
+            claimedAt = null // ck_outbox_claim_state: PENDING 행은 claimed_at이 NULL이어야 한다
+        }
         nextAttemptAt = now.plus(retryDelay)
     }
 
