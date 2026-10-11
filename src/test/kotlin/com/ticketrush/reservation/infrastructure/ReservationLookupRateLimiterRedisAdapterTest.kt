@@ -4,11 +4,15 @@ import com.ticketrush.reservation.domain.ReservationLookupRateLimiterPort
 import com.ticketrush.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.data.redis.core.StringRedisTemplate
 import kotlin.test.Test
 
 class ReservationLookupRateLimiterRedisAdapterTest : IntegrationTest() {
     @Autowired
     lateinit var rateLimiter: ReservationLookupRateLimiterPort
+
+    @Autowired
+    lateinit var redisTemplate: StringRedisTemplate
 
     @Test
     fun `임계치 미만이면 예약에 성공한다`() {
@@ -62,6 +66,33 @@ class ReservationLookupRateLimiterRedisAdapterTest : IntegrationTest() {
         // then
         assertThat(first).isTrue()
         assertThat(second).isFalse()
+    }
+
+    // 해제가 중복되거나 윈도우 경계에서 늦게 들어오면 카운터가 음수로 내려가 그만큼 허용 횟수가 늘어난다
+    @Test
+    fun `release를 여러 번 해도 카운터가 0 아래로 내려가지 않아 허용 횟수가 늘지 않는다`() {
+        // given
+        val reservationNo = 예매번호()
+        rateLimiter.tryReserveAttempt(reservationNo)
+        repeat(3) { rateLimiter.releaseAttempt(reservationNo) }
+
+        // when
+        val allowed = (1..10).count { rateLimiter.tryReserveAttempt(reservationNo) }
+
+        // then: 임계치(5)만큼만 허용된다
+        assertThat(allowed).isEqualTo(5)
+    }
+
+    @Test
+    fun `키가 없을 때 release해도 새 키를 만들지 않는다`() {
+        // given
+        val reservationNo = 예매번호()
+
+        // when
+        rateLimiter.releaseAttempt(reservationNo)
+
+        // then
+        assertThat(redisTemplate.hasKey("reservation:lookup-fail:$reservationNo")).isFalse()
     }
 
     @Test
