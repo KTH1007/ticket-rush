@@ -143,6 +143,19 @@ class QueueRepositoryTest : IntegrationTest() {
         assertThat(queueRepository.findStatus(eventId, token)?.lastPromotedSequence).isEqualTo(0L)
     }
 
+    // 등록이 통과해 대기열이 열린 이벤트만 열린 것으로 본다. 등록 때 DB를 안 보고 Redis만으로 판단하는 근거
+    @Test
+    fun `등록이 있는 이벤트만 대기열이 열린 것으로 본다`() {
+        // given
+        val opened = System.nanoTime()
+        val neverOpened = opened + 1
+        queueRepository.register(opened, UUID.randomUUID().toString())
+
+        // when & then
+        assertThat(queueRepository.isActive(opened)).isTrue()
+        assertThat(queueRepository.isActive(neverOpened)).isFalse()
+    }
+
     @Test
     fun `승격하면 마지막 승격 순번이 갱신된다`() {
         // given

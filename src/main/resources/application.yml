@@ -94,8 +94,8 @@ ticket-rush:
     heartbeat-timeout: 60s # 클라이언트측 생존신호
     promotion-budget-per-second: 100 # 1초당 100명씩 통과
     poll-interval: # 순번 확인
-      far: 15s          # 1000위 밖
-      near: 2s          # 100위 이내
+      far: 15s          # near-rank-threshold(기본 100위) 밖
+      near: 2s          # near-rank-threshold 이내
       jitter-ratio: 0.2 # 지터로 무작위
     broadcast-cache-ttl: 1s # 남은 좌석수 등 캐싱해서 보여줌
   seat:

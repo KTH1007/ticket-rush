@@ -1,18 +1,16 @@
 package com.ticketrush.queue.application
 
+import com.ticketrush.queue.QueuePolicyProperties
 import com.ticketrush.queue.domain.InvalidQueueTokenException
 import com.ticketrush.queue.domain.QueueNotActiveException
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.presentation.QueueStatusResponse
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
-import java.time.Duration
 
 @Service
 class QueueQueryService(
     private val queueRepository: QueueRepositoryPort,
-    @Value("\${ticket-rush.queue.poll-interval.far}") private val farInterval: Duration,
-    @Value("\${ticket-rush.queue.poll-interval.near}") private val nearInterval: Duration,
+    private val policy: QueuePolicyProperties,
 ) {
     fun checkStatus(
         eventId: Long,
@@ -25,7 +23,7 @@ class QueueQueryService(
         }
 
         val rank = status.sequence - status.lastPromotedSequence
-        val interval = if (rank <= NEAR_THRESHOLD) nearInterval else farInterval
+        val interval = if (rank <= policy.nearRankThreshold) policy.pollInterval.near else policy.pollInterval.far
         return QueueStatusResponse(rank = rank, nextPollIntervalMs = interval.toMillis())
     }
 
@@ -35,9 +33,5 @@ class QueueQueryService(
     ) {
         val status = token?.let { queueRepository.findStatus(eventId, it) } ?: throw InvalidQueueTokenException()
         if (!status.active) throw QueueNotActiveException()
-    }
-
-    companion object {
-        private const val NEAR_THRESHOLD = 100L
     }
 }
