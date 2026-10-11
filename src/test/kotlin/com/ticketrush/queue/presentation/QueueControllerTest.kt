@@ -4,6 +4,8 @@ import com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper
 import com.ticketrush.queue.application.QueueCommandService
 import com.ticketrush.queue.application.QueueQueryService
 import com.ticketrush.queue.domain.InvalidQueueTokenException
+import com.ticketrush.queue.domain.QueueEventNotFoundException
+import com.ticketrush.queue.domain.QueueNotOpenException
 import io.mockk.every
 import io.mockk.mockk
 import org.springframework.beans.factory.annotation.Autowired
@@ -24,6 +26,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import java.time.LocalDateTime
 import kotlin.test.Test
 
 @WebMvcTest(QueueController::class)
@@ -65,6 +68,27 @@ class QueueControllerTest {
                     snippets = arrayOf(queueRegisterPathParameters, queueRegisterResponseHeaders),
                 ),
             )
+    }
+
+    // 없는 이벤트는 404, 있는데 아직 오픈 전이면 409로 구분해야 클라이언트가 "공연 없음"과 "오픈 전 안내"를 나눠 보여줄 수 있다
+    @Test
+    fun `없는 이벤트에 등록하면 404와 EVENT_NOT_FOUND를 반환한다`() {
+        every { queueCommandService.register(404L) } throws QueueEventNotFoundException(404L)
+
+        mockMvc
+            .perform(post("/api/events/{eventId}/queues", 404L))
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.code").value("EVENT_NOT_FOUND"))
+    }
+
+    @Test
+    fun `오픈 전 이벤트에 등록하면 409와 QUEUE_NOT_OPEN을 반환한다`() {
+        every { queueCommandService.register(10L) } throws QueueNotOpenException(10L, LocalDateTime.of(2026, 10, 11, 10, 0))
+
+        mockMvc
+            .perform(post("/api/events/{eventId}/queues", 10L))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("QUEUE_NOT_OPEN"))
     }
 
     @Test
