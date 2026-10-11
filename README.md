@@ -201,7 +201,7 @@ Grafana -> Prometheus
 | Persistence | Spring Data JPA, QueryDSL |
 | Migration | Flyway |
 | Reliability | Resilience4j, Outbox |
-| Test | JUnit 5, MockK, Testcontainers, WireMock (k6 부하 테스트는 계획만 있고 스크립트는 아직 없음) |
+| Test | JUnit 5, MockK, Testcontainers, WireMock (k6 스크립트는 좌석 지도 조회만 `k6/`에 있고 나머지 시나리오는 계획만 있음) |
 | Monitoring | Actuator, Micrometer, Prometheus, Grafana |
 | Infrastructure | Docker Compose, nginx |
 
@@ -235,7 +235,7 @@ Grafana -> Prometheus
 
 실측 결과와 병목 원인을 기록하고 필요하면 설정과 설계를 다시 조정한다.
 
-현재까지 수행한 검증: `@Tag("concurrency")` 동시성 테스트(좌석 홀드, 결제 확정, 예매 조회 레이트리미터, 홀드 만료 스위퍼, Outbox claim)와, 앱 1대 기준 curl 스모크 테스트(Redis 재시작 후 회복, 대기열 승격 예산, 레이트리밋 윈도우 포함). 위 "부하" 항목(k6)과 앱 2대 구성의 실측은 아직 수행하지 않았다. PG 장애는 WireMock 기반 자동 테스트(5xx, 서킷 OPEN 재현)로 검증했고, 3초 타임아웃 자체를 재현하는 테스트는 아직 없다. 실제 Toss 샌드박스(문서 공개 테스트 키)로는 승인, 환불, 거절 뒤 재시도, 환불 재시도를 수동으로 확인했다. 결제 회수 스케줄러의 실제 Toss 왕복과 실제 5xx, 타임아웃이 멱등키에 저장되는지는 확인하지 못했다.
+현재까지 수행한 검증: `@Tag("concurrency")` 동시성 테스트(좌석 홀드, 결제 확정, 예매 조회 레이트리미터, 홀드 만료 스위퍼, Outbox claim)와, 앱 1대 기준 curl 스모크 테스트(Redis 재시작 후 회복, 대기열 승격 예산, 레이트리밋 윈도우 포함). 위 "부하" 항목(k6)과 앱 2대 구성의 실측은 좌석 지도 조회(앱 1대, 한 대의 Mac, 이슈 #127)만 수행했고 나머지는 아직 수행하지 않았다. PG 장애는 WireMock 기반 자동 테스트(5xx, 서킷 OPEN 재현)로 검증했고, 3초 타임아웃 자체를 재현하는 테스트는 아직 없다. 실제 Toss 샌드박스(문서 공개 테스트 키)로는 승인, 환불, 거절 뒤 재시도, 환불 재시도를 수동으로 확인했다. 결제 회수 스케줄러의 실제 Toss 왕복과 실제 5xx, 타임아웃이 멱등키에 저장되는지는 확인하지 못했다.
 
 ### 검증하지 않는 것
 
