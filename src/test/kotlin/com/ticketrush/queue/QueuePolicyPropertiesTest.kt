@@ -14,12 +14,14 @@ class QueuePolicyPropertiesTest {
         far: Duration = Duration.ofSeconds(15),
         near: Duration = Duration.ofSeconds(2),
         nearRankThreshold: Long = 100,
+        scheduleCacheTtl: Duration = Duration.ofMinutes(10),
     ) = QueuePolicyProperties(
         tokenTtl = tokenTtl,
         activeTtl = activeTtl,
         promotionBudgetPerSecond = budget,
         pollInterval = QueuePolicyProperties.PollInterval(far = far, near = near),
         nearRankThreshold = nearRankThreshold,
+        scheduleCacheTtl = scheduleCacheTtl,
     )
 
     private fun assertRejected(
@@ -43,6 +45,14 @@ class QueuePolicyPropertiesTest {
     }
 
     @Test
+    fun `오픈 시각 캐시 TTL은 기본값이 10분이다`() {
+        val pollInterval = QueuePolicyProperties.PollInterval(far = Duration.ofSeconds(15), near = Duration.ofSeconds(2))
+        val defaulted = QueuePolicyProperties(Duration.ofMinutes(15), Duration.ofMinutes(2), 100, pollInterval)
+
+        assertThat(defaulted.scheduleCacheTtl).isEqualTo(Duration.ofMinutes(10))
+    }
+
+    @Test
     fun `토큰 TTL이 0이나 음수면 거부한다`() {
         assertRejected("tokenTtl") { properties(tokenTtl = Duration.ZERO) }
         assertRejected("tokenTtl") { properties(tokenTtl = Duration.ofSeconds(-1)) }
@@ -51,6 +61,23 @@ class QueuePolicyPropertiesTest {
     @Test
     fun `활성 TTL이 0이나 음수면 거부한다`() {
         assertRejected("activeTtl") { properties(activeTtl = Duration.ZERO) }
+    }
+
+    // 1초 미만은 초 단위로 바꿀 때 0이 되고, Redis가 EX 0을 거절해 첫 등록이나 첫 승격에서 터진다
+    @Test
+    fun `Redis에 유효시간으로 넘기는 값은 1초 미만이면 거부한다`() {
+        assertRejected("tokenTtl") { properties(tokenTtl = Duration.ofMillis(500)) }
+        assertRejected("activeTtl") { properties(activeTtl = Duration.ofMillis(500)) }
+        assertRejected("scheduleCacheTtl") { properties(scheduleCacheTtl = Duration.ofMillis(500)) }
+    }
+
+    @Test
+    fun `Redis에 유효시간으로 넘기는 값이 정확히 1초면 만들어진다`() {
+        val oneSecond = Duration.ofSeconds(1)
+
+        val created = properties(tokenTtl = oneSecond, activeTtl = oneSecond, scheduleCacheTtl = oneSecond)
+
+        assertThat(created.tokenTtl).isEqualTo(oneSecond)
     }
 
     @Test
@@ -74,5 +101,11 @@ class QueuePolicyPropertiesTest {
     @Test
     fun `가까운 순위 기준이 0이나 음수면 거부한다`() {
         assertRejected("nearRankThreshold") { properties(nearRankThreshold = 0) }
+    }
+
+    @Test
+    fun `오픈 시각 캐시 TTL이 0이나 음수면 거부한다`() {
+        assertRejected("scheduleCacheTtl") { properties(scheduleCacheTtl = Duration.ZERO) }
+        assertRejected("scheduleCacheTtl") { properties(scheduleCacheTtl = Duration.ofSeconds(-1)) }
     }
 }

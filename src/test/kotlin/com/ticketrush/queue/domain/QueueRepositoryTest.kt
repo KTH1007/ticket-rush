@@ -1,6 +1,7 @@
 package com.ticketrush.queue.domain
 
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.열린_공연에_등록
 import org.assertj.core.api.Assertions.assertThat
 import org.springframework.beans.factory.annotation.Autowired
 import java.util.UUID
@@ -16,8 +17,8 @@ class QueueRepositoryTest : IntegrationTest() {
         val eventId = System.nanoTime()
 
         // when
-        val first = queueRepository.register(eventId, UUID.randomUUID().toString())
-        val second = queueRepository.register(eventId, UUID.randomUUID().toString())
+        val first = queueRepository.열린_공연에_등록(eventId, UUID.randomUUID().toString())
+        val second = queueRepository.열린_공연에_등록(eventId, UUID.randomUUID().toString())
 
         // then
         assertThat(second).isEqualTo(first + 1)
@@ -30,9 +31,9 @@ class QueueRepositoryTest : IntegrationTest() {
         val eventB = System.nanoTime() + 1
 
         // when
-        val a1 = queueRepository.register(eventA, UUID.randomUUID().toString())
-        queueRepository.register(eventB, UUID.randomUUID().toString())
-        val a2 = queueRepository.register(eventA, UUID.randomUUID().toString())
+        val a1 = queueRepository.열린_공연에_등록(eventA, UUID.randomUUID().toString())
+        queueRepository.열린_공연에_등록(eventB, UUID.randomUUID().toString())
+        val a2 = queueRepository.열린_공연에_등록(eventA, UUID.randomUUID().toString())
 
         // then
         assertThat(a2).isEqualTo(a1 + 1)
@@ -45,9 +46,9 @@ class QueueRepositoryTest : IntegrationTest() {
         val token1 = UUID.randomUUID().toString()
         val token2 = UUID.randomUUID().toString()
         val token3 = UUID.randomUUID().toString()
-        queueRepository.register(eventId, token1)
-        queueRepository.register(eventId, token2)
-        queueRepository.register(eventId, token3)
+        queueRepository.열린_공연에_등록(eventId, token1)
+        queueRepository.열린_공연에_등록(eventId, token2)
+        queueRepository.열린_공연에_등록(eventId, token3)
 
         // when
         val promoted = queueRepository.promote(eventId, 2)
@@ -61,7 +62,7 @@ class QueueRepositoryTest : IntegrationTest() {
         // given
         val eventId = System.nanoTime()
         val token = UUID.randomUUID().toString()
-        queueRepository.register(eventId, token)
+        queueRepository.열린_공연에_등록(eventId, token)
 
         // when
         val promoted = queueRepository.promote(eventId, 10)
@@ -76,8 +77,8 @@ class QueueRepositoryTest : IntegrationTest() {
         val eventId = System.nanoTime()
         val token1 = UUID.randomUUID().toString()
         val token2 = UUID.randomUUID().toString()
-        queueRepository.register(eventId, token1)
-        queueRepository.register(eventId, token2)
+        queueRepository.열린_공연에_등록(eventId, token1)
+        queueRepository.열린_공연에_등록(eventId, token2)
         queueRepository.promote(eventId, 1)
 
         // when
@@ -94,7 +95,7 @@ class QueueRepositoryTest : IntegrationTest() {
         val token = UUID.randomUUID().toString()
 
         // when
-        val seq = queueRepository.register(eventId, token)
+        val seq = queueRepository.열린_공연에_등록(eventId, token)
 
         // then
         assertThat(queueRepository.findStatus(eventId, token)?.sequence).isEqualTo(seq)
@@ -114,7 +115,7 @@ class QueueRepositoryTest : IntegrationTest() {
         // given
         val eventId = System.nanoTime()
         val token = UUID.randomUUID().toString()
-        queueRepository.register(eventId, token)
+        queueRepository.열린_공연에_등록(eventId, token)
 
         // when & then
         assertThat(queueRepository.findStatus(eventId, token)?.active).isFalse()
@@ -125,7 +126,7 @@ class QueueRepositoryTest : IntegrationTest() {
         // given
         val eventId = System.nanoTime()
         val token = UUID.randomUUID().toString()
-        queueRepository.register(eventId, token)
+        queueRepository.열린_공연에_등록(eventId, token)
         queueRepository.promote(eventId, 1)
 
         // when & then
@@ -137,32 +138,19 @@ class QueueRepositoryTest : IntegrationTest() {
         // given
         val eventId = System.nanoTime()
         val token = UUID.randomUUID().toString()
-        queueRepository.register(eventId, token)
+        queueRepository.열린_공연에_등록(eventId, token)
 
         // when & then
         assertThat(queueRepository.findStatus(eventId, token)?.lastPromotedSequence).isEqualTo(0L)
-    }
-
-    // 등록이 통과해 대기열이 열린 이벤트만 열린 것으로 본다. 등록 때 DB를 안 보고 Redis만으로 판단하는 근거
-    @Test
-    fun `등록이 있는 이벤트만 대기열이 열린 것으로 본다`() {
-        // given
-        val opened = System.nanoTime()
-        val neverOpened = opened + 1
-        queueRepository.register(opened, UUID.randomUUID().toString())
-
-        // when & then
-        assertThat(queueRepository.isActive(opened)).isTrue()
-        assertThat(queueRepository.isActive(neverOpened)).isFalse()
     }
 
     @Test
     fun `승격하면 마지막 승격 순번이 갱신된다`() {
         // given
         val eventId = System.nanoTime()
-        queueRepository.register(eventId, UUID.randomUUID().toString())
+        queueRepository.열린_공연에_등록(eventId, UUID.randomUUID().toString())
         val token2 = UUID.randomUUID().toString()
-        val seq2 = queueRepository.register(eventId, token2)
+        val seq2 = queueRepository.열린_공연에_등록(eventId, token2)
 
         // when
         queueRepository.promote(eventId, 2)

@@ -12,6 +12,8 @@ data class QueuePolicyProperties(
     val pollInterval: PollInterval,
     // 이 순위 이내면 가까운 간격(near)으로 폴링한다
     val nearRankThreshold: Long = 100,
+    // 오픈 시각 변경이 반영되는 데 걸리는 최대 시간이자 DB 재조회 주기
+    val scheduleCacheTtl: Duration = Duration.ofMinutes(10),
 ) {
     data class PollInterval(
         val far: Duration,
@@ -19,8 +21,8 @@ data class QueuePolicyProperties(
     )
 
     init {
-        require(tokenTtl.isPositive()) { "tokenTtl은 양수여야 합니다: $tokenTtl" }
-        require(activeTtl.isPositive()) { "activeTtl은 양수여야 합니다: $activeTtl" }
+        require(tokenTtl.isAtLeastOneSecond()) { "tokenTtl은 1초 이상이어야 합니다: $tokenTtl" }
+        require(activeTtl.isAtLeastOneSecond()) { "activeTtl은 1초 이상이어야 합니다: $activeTtl" }
         require(promotionBudgetPerSecond > 0) { "promotionBudgetPerSecond는 양수여야 합니다: $promotionBudgetPerSecond" }
         require(pollInterval.far.isPositive()) { "pollInterval.far는 양수여야 합니다: ${pollInterval.far}" }
         require(pollInterval.near.isPositive()) { "pollInterval.near는 양수여야 합니다: ${pollInterval.near}" }
@@ -28,7 +30,11 @@ data class QueuePolicyProperties(
             "pollInterval.near는 far보다 길 수 없습니다: near=${pollInterval.near}, far=${pollInterval.far}"
         }
         require(nearRankThreshold > 0) { "nearRankThreshold는 양수여야 합니다: $nearRankThreshold" }
+        require(scheduleCacheTtl.isAtLeastOneSecond()) { "scheduleCacheTtl은 1초 이상이어야 합니다: $scheduleCacheTtl" }
     }
 }
 
 private fun Duration.isPositive(): Boolean = !isNegative && !isZero
+
+// Redis EX는 초 단위라 1초 미만은 0으로 잘려 SET이 거절된다
+private fun Duration.isAtLeastOneSecond(): Boolean = this >= Duration.ofSeconds(1)

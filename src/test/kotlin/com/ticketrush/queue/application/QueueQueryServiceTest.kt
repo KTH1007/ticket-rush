@@ -4,6 +4,7 @@ import com.ticketrush.queue.domain.InvalidQueueTokenException
 import com.ticketrush.queue.domain.QueueNotActiveException
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.열린_공연에_등록
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.beans.factory.annotation.Autowired
@@ -33,7 +34,7 @@ class QueueQueryServiceTest : IntegrationTest() {
         // given
         val eventId = System.nanoTime()
         val token = UUID.randomUUID().toString()
-        queueRepository.register(eventId, token)
+        queueRepository.열린_공연에_등록(eventId, token)
         queueRepository.promote(eventId, 1)
 
         // when
@@ -48,9 +49,9 @@ class QueueQueryServiceTest : IntegrationTest() {
     fun `순위가 가까우면 짧은 폴링 간격을 받는다`() {
         // given
         val eventId = System.nanoTime()
-        queueRepository.register(eventId, UUID.randomUUID().toString())
+        queueRepository.열린_공연에_등록(eventId, UUID.randomUUID().toString())
         val token = UUID.randomUUID().toString()
-        queueRepository.register(eventId, token)
+        queueRepository.열린_공연에_등록(eventId, token)
 
         // when
         val status = queueQueryService.checkStatus(eventId, token)
@@ -67,7 +68,7 @@ class QueueQueryServiceTest : IntegrationTest() {
         lateinit var lastToken: String
         repeat(101) {
             lastToken = UUID.randomUUID().toString()
-            queueRepository.register(eventId, lastToken)
+            queueRepository.열린_공연에_등록(eventId, lastToken)
         }
 
         // when
@@ -93,7 +94,7 @@ class QueueQueryServiceTest : IntegrationTest() {
         // given
         val eventId = System.nanoTime()
         val token = UUID.randomUUID().toString()
-        queueRepository.register(eventId, token)
+        queueRepository.열린_공연에_등록(eventId, token)
 
         // when & then
         assertThatThrownBy { queueQueryService.requireActive(eventId, token) }
@@ -105,7 +106,7 @@ class QueueQueryServiceTest : IntegrationTest() {
         // given
         val eventId = System.nanoTime()
         val token = UUID.randomUUID().toString()
-        queueRepository.register(eventId, token)
+        queueRepository.열린_공연에_등록(eventId, token)
         queueRepository.promote(eventId, 1)
 
         // when & then

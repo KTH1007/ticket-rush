@@ -9,6 +9,7 @@ import com.ticketrush.support.공연_하나_저장
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.data.redis.core.StringRedisTemplate
 import java.time.Clock
 import java.time.LocalDateTime
 import kotlin.test.Test
@@ -22,6 +23,9 @@ class QueueCommandServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var eventRepository: EventRepositoryPort
+
+    @Autowired
+    lateinit var redisTemplate: StringRedisTemplate
 
     @Autowired
     lateinit var clock: Clock
@@ -46,10 +50,11 @@ class QueueCommandServiceTest : IntegrationTest() {
 
         // when & then
         assertThatThrownBy { queueCommandService.register(missingEventId) }.isInstanceOf(QueueEventNotFoundException::class.java)
-        assertThat(queueRepository.isActive(missingEventId)).isFalse()
+        assertThat(queueRepository.activeEventIds()).doesNotContain(missingEventId)
+        assertThat(redisTemplate.hasKey("queue:$missingEventId:opensAt")).isFalse()
     }
 
-    // 티켓팅은 같은 시각에 함께 시작하므로 오픈 전에는 줄을 세우지 않는다. 막힌 등록은 Redis 키도 남기지 않아야 한다
+    // 티켓팅은 같은 시각에 함께 시작하므로 오픈 전에는 줄을 세우지 않는다. 막힌 등록은 대기열도 열지 않아야 한다
     @Test
     fun `오픈 전 이벤트에는 등록할 수 없고 대기열도 열리지 않는다`() {
         // given
@@ -57,7 +62,20 @@ class QueueCommandServiceTest : IntegrationTest() {
 
         // when & then
         assertThatThrownBy { queueCommandService.register(eventId) }.isInstanceOf(QueueNotOpenException::class.java)
-        assertThat(queueRepository.isActive(eventId)).isFalse()
+        assertThat(queueRepository.activeEventIds()).doesNotContain(eventId)
+    }
+
+    // 다음 등록부터는 DB를 보지 않고 Redis의 오픈 시각으로 판정한다
+    @Test
+    fun `첫 등록 뒤에는 오픈 시각이 Redis에 저장된다`() {
+        // given
+        val eventId = eventRepository.공연_하나_저장().id
+
+        // when
+        queueCommandService.register(eventId)
+
+        // then
+        assertThat(redisTemplate.hasKey("queue:$eventId:opensAt")).isTrue()
     }
 
     @Test
