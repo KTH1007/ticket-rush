@@ -63,6 +63,23 @@ class QueuePolicyPropertiesTest {
         assertRejected("activeTtl") { properties(activeTtl = Duration.ZERO) }
     }
 
+    // 1초 미만은 초 단위로 바꿀 때 0이 되고, Redis가 EX 0을 거절해 첫 등록이나 첫 승격에서 터진다
+    @Test
+    fun `Redis에 유효시간으로 넘기는 값은 1초 미만이면 거부한다`() {
+        assertRejected("tokenTtl") { properties(tokenTtl = Duration.ofMillis(500)) }
+        assertRejected("activeTtl") { properties(activeTtl = Duration.ofMillis(500)) }
+        assertRejected("scheduleCacheTtl") { properties(scheduleCacheTtl = Duration.ofMillis(500)) }
+    }
+
+    @Test
+    fun `Redis에 유효시간으로 넘기는 값이 정확히 1초면 만들어진다`() {
+        val oneSecond = Duration.ofSeconds(1)
+
+        val created = properties(tokenTtl = oneSecond, activeTtl = oneSecond, scheduleCacheTtl = oneSecond)
+
+        assertThat(created.tokenTtl).isEqualTo(oneSecond)
+    }
+
     @Test
     fun `초당 승격 예산이 0이나 음수면 거부한다`() {
         assertRejected("promotionBudgetPerSecond") { properties(budget = 0) }
