@@ -3,7 +3,6 @@ import dev.detekt.gradle.Detekt
 import org.asciidoctor.gradle.jvm.AsciidoctorTask
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.springframework.boot.gradle.tasks.bundling.BootJar
-import org.springframework.boot.gradle.tasks.run.BootRun
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -156,11 +155,6 @@ dependencies {
 }
 
 tasks.withType<Test> {
-    // Dockerfile은 -Duser.timezone=Asia/Seoul을 강제하지만 로컬 실행/CI는 호스트
-    // 기본 타임존을 그대로 쓴다. hibernate.jdbc.time_zone과 어긋나면 LocalDateTime.now()
-    // 비교가 오프셋만큼 어긋나므로 여기서도 동일하게 맞춘다.
-    systemProperty("user.timezone", "Asia/Seoul")
-
     testLogging {
         events("failed", "skipped")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
@@ -227,11 +221,6 @@ tasks.named<BootJar>("bootJar") {
         into("static")
         rename("openapi3.yaml", "openapi3.yml")
     }
-}
-
-// 로컬 bootRun도 Dockerfile과 같은 타임존을 쓰게 맞춘다.
-tasks.named<BootRun>("bootRun") {
-    systemProperty("user.timezone", "Asia/Seoul")
 }
 
 detekt {

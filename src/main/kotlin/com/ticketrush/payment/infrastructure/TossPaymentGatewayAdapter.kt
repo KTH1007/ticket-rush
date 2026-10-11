@@ -5,6 +5,7 @@ import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentInquiryResult
+import com.ticketrush.shared.AppTimeZone
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
 import org.springframework.context.annotation.Profile
@@ -15,7 +16,6 @@ import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.RestClient
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
-import java.time.ZoneId
 import java.time.format.DateTimeParseException
 import java.util.Base64
 import java.util.UUID
@@ -28,9 +28,6 @@ private const val ALREADY_PROCESSING_REQUEST = "ALREADY_PROCESSING_REQUEST"
 private const val ALREADY_CANCELED_PAYMENT = "ALREADY_CANCELED_PAYMENT"
 private const val NOT_CANCELABLE_AMOUNT = "NOT_CANCELABLE_AMOUNT"
 private val ALREADY_PROCESSED_CODES = setOf("ALREADY_PROCESSED_PAYMENT", "DUPLICATED_REQUEST")
-
-// application.yml의 jdbc.time_zone과 같은 존. LocalDateTime이 이 존 기준으로 저장된다
-private val SEOUL: ZoneId = ZoneId.of("Asia/Seoul")
 
 // 실제 Toss Payments confirm/cancel/조회 API를 호출하는 구현체. API별 응답 변환이 한 클래스에 모여 함수가 많다
 @Suppress("TooManyFunctions")
@@ -221,7 +218,7 @@ class TossPaymentGatewayAdapter(
     private fun parseApprovedAt(raw: String?): LocalDateTime? {
         if (raw == null) return null
         return try {
-            OffsetDateTime.parse(raw).atZoneSameInstant(SEOUL).toLocalDateTime()
+            OffsetDateTime.parse(raw).atZoneSameInstant(AppTimeZone.ID).toLocalDateTime()
         } catch (e: DateTimeParseException) {
             logger.warn(e) { "토스 approvedAt 파싱에 실패해 서버 시각으로 대체합니다: approvedAt=$raw" }
             null
