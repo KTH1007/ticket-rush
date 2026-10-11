@@ -15,11 +15,9 @@ class QueuePromotionScheduler(
         initialDelayString = "\${ticket-rush.queue.promotion-interval}",
     )
     fun promote() {
-        queueRepository.activeEventIds().forEach { eventId ->
-            val granted = queueRepository.reserveGlobalBudget(policy.promotionBudgetPerSecond)
-            if (granted > 0) {
-                queueRepository.promote(eventId, granted)
-            }
+        // 예산이 서비스 전체에 하나라, 순서가 고정이면 앞 공연이 예산을 다 가져가 뒤 공연이 굶는다
+        queueRepository.activeEventIds().shuffled().forEach { eventId ->
+            queueRepository.promote(eventId, policy.promotionBudgetPerSecond)
         }
     }
 }

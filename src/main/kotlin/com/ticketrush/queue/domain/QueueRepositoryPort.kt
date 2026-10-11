@@ -10,6 +10,7 @@ interface QueueRepositoryPort {
         opensAtHint: Instant? = null,
     ): RegisterResult
 
+    // count는 이번 호출의 최대치다. 서비스 전체의 초당 승격 예산을 넘지 않도록 스크립트가 줄인다
     fun promote(
         eventId: Long,
         count: Int,
@@ -19,8 +20,6 @@ interface QueueRepositoryPort {
         eventId: Long,
         token: String,
     ): QueueStatus?
-
-    fun reserveGlobalBudget(count: Int): Int
 
     fun activeEventIds(): Set<Long>
 }

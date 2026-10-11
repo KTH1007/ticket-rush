@@ -15,6 +15,8 @@ import java.time.Instant
 class QueueRedisAdapter(
     private val redisTemplate: StringRedisTemplate,
     private val policy: QueuePolicyProperties,
+    // 테스트가 다른 테스트의 승격과 섞이지 않게 예산 키를 격리하려고 바꿀 수 있다
+    private val budgetKeyPrefix: String = DEFAULT_BUDGET_KEY_PREFIX,
 ) : QueueRepositoryPort {
     override fun register(
         eventId: Long,
@@ -57,23 +59,27 @@ class QueueRedisAdapter(
         eventId: Long,
         count: Int,
     ): List<String> {
-        val keys =
-            listOf(
-                "queue:$eventId:waiting",
-                "queue:$eventId:lastPromotedSeq",
-                ACTIVE_EVENT_IDS_KEY,
-            )
         val result =
             redisTemplate.execute(
                 promoteScript,
-                keys,
+                promoteKeys(eventId),
                 count.toString(),
                 policy.activeTtl.toSeconds().toString(),
                 eventId.toString(),
+                policy.promotionBudgetPerSecond.toString(),
+                BUDGET_KEY_TTL_SECONDS,
+                budgetKeyPrefix,
             )
         @Suppress("UNCHECKED_CAST")
         return (result as? List<String>).orEmpty()
     }
+
+    private fun promoteKeys(eventId: Long) =
+        listOf(
+            "queue:$eventId:waiting",
+            "queue:$eventId:lastPromotedSeq",
+            ACTIVE_EVENT_IDS_KEY,
+        )
 
     override fun findStatus(
         eventId: Long,
@@ -104,24 +110,14 @@ class QueueRedisAdapter(
             .map { it.toLong() }
             .toSet()
 
-    override fun reserveGlobalBudget(count: Int): Int {
-        val currentSecond = System.currentTimeMillis() / 1000
-        val keys = listOf("queue:promotionBudget:$currentSecond")
-        val granted = redisTemplate.execute(budgetReserveScript, keys, count.toString(), policy.promotionBudgetPerSecond.toString(), "5")
-        return granted?.toInt() ?: 0
-    }
-
     companion object {
+        const val DEFAULT_BUDGET_KEY_PREFIX = "queue:promotionBudget:"
+        private const val BUDGET_KEY_TTL_SECONDS = "5"
+
         private val statusScript: RedisScript<List<*>> =
             DefaultRedisScript<List<*>>().apply {
                 setLocation(ClassPathResource("scripts/queue-status.lua"))
                 resultType = List::class.java
-            }
-
-        private val budgetReserveScript: RedisScript<Long> =
-            DefaultRedisScript<Long>().apply {
-                setLocation(ClassPathResource("scripts/queue-budget-reserve.lua"))
-                resultType = Long::class.java
             }
 
         private const val ACTIVE_EVENT_IDS_KEY = "queue:activeEventIds"
