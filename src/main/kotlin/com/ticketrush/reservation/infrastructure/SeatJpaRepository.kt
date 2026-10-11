@@ -1,11 +1,15 @@
 package com.ticketrush.reservation.infrastructure
 
 import com.ticketrush.reservation.domain.Seat
+import com.ticketrush.reservation.domain.SeatLayoutRow
 import com.ticketrush.reservation.domain.SeatStatus
+import com.ticketrush.reservation.domain.SeatStatusRow
 import com.ticketrush.shared.PhoneHash
+import jakarta.persistence.QueryHint
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
+import org.springframework.data.jpa.repository.QueryHints
 import org.springframework.data.repository.query.Param
 import java.time.LocalDateTime
 
@@ -13,6 +17,23 @@ interface SeatJpaRepository : JpaRepository<Seat, Long> {
     fun findAllByEventIdOrderBySectionAscRowLabelAscSeatNoAsc(eventId: Long): List<Seat>
 
     fun findAllByReservationId(reservationId: Long): List<Seat>
+
+    @Query(
+        """
+        SELECT new com.ticketrush.reservation.domain.SeatLayoutRow(s.id, s.ordinal, s.section, s.rowLabel, s.seatNo, s.gradeId)
+        FROM Seat s WHERE s.eventId = :eventId ORDER BY s.ordinal
+        """,
+    )
+    fun findLayoutRowsByEventId(
+        @Param("eventId") eventId: Long,
+    ): List<SeatLayoutRow>
+
+    // 갱신이 DB 지연으로 오래 커넥션을 쥐고 풀을 막지 않게 타임아웃을 둔다
+    @QueryHints(QueryHint(name = "jakarta.persistence.query.timeout", value = "3000"))
+    @Query("SELECT new com.ticketrush.reservation.domain.SeatStatusRow(s.ordinal, s.status) FROM Seat s WHERE s.eventId = :eventId")
+    fun findStatusRowsByEventId(
+        @Param("eventId") eventId: Long,
+    ): List<SeatStatusRow>
 
     fun findAllByEventIdAndPhoneHashAndStatusIn(
         eventId: Long,

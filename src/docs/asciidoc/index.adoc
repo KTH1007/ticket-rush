@@ -24,12 +24,26 @@ include::{snippets}/event-detail/http-request.adoc[]
 include::{snippets}/event-detail/http-response.adoc[]
 include::{snippets}/event-detail/response-fields.adoc[]
 
-=== 좌석 배치도 조회
+=== 좌석 배치 조회
+
+거의 바뀌지 않는 정보라 `ETag`와 `Cache-Control`로 캐시한다. `Accept-Encoding: gzip`이면 압축해서 준다.
 
 ==== 요청
-include::{snippets}/event-seats/path-parameters.adoc[]
-include::{snippets}/event-seats/http-request.adoc[]
+include::{snippets}/event-seat-layout/path-parameters.adoc[]
+include::{snippets}/event-seat-layout/http-request.adoc[]
 
 ==== 응답
-include::{snippets}/event-seats/http-response.adoc[]
-include::{snippets}/event-seats/response-fields.adoc[]
+include::{snippets}/event-seat-layout/http-response.adoc[]
+include::{snippets}/event-seat-layout/response-fields.adoc[]
+
+=== 좌석 상태 조회
+
+좌석 배치의 `ordinal` 순서로 상태를 담은 비트맵이다. 배치는 처음 한 번 받아 두고 이 상태만 반복해서 받는다.
+
+==== 요청
+include::{snippets}/event-seat-status/path-parameters.adoc[]
+include::{snippets}/event-seat-status/http-request.adoc[]
+
+==== 응답
+include::{snippets}/event-seat-status/http-response.adoc[]
+include::{snippets}/event-seat-status/response-fields.adoc[]

@@ -17,8 +17,10 @@ ticket-rush:
     promotion-interval: 1h
     promotion-budget-per-second: 100000   # 일반 테스트가 같은 초에 몰려 승격해도 예산에 걸리지 않게 한다. 예산 테스트는 따로 만든 어댑터를 쓴다
     broadcast-cache-ttl: 0s
-  seat:
-    bitmap-cache-ttl: 0s
+  seat-map:
+    # 캐시된 컨텍스트의 갱신이 테스트 중에 끼어들지 않게 한다. 갱신은 테스트가 직접 부르고, 허용 시간은 갱신 주기보다 짧을 수 없다
+    status-refresh-interval: 1h
+    status-max-stale: 1h
   outbox:
     poll-interval: 100ms
     chunk-size: 10

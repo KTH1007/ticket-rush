@@ -7,6 +7,8 @@ import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
 import com.ticketrush.support.예약_하나_저장
+import com.ticketrush.support.좌석_하나_저장
+import com.ticketrush.support.홀드된_좌석_하나_저장
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.Assertions.tuple
@@ -25,6 +27,9 @@ class SeatRepositoryTest : IntegrationTest() {
 
     @Autowired
     lateinit var seatRepository: SeatRepositoryPort
+
+    @Autowired
+    lateinit var seatMapQueryPort: SeatMapQueryPort
 
     @Autowired
     lateinit var reservationRepository: ReservationRepositoryPort
@@ -663,5 +668,49 @@ class SeatRepositoryTest : IntegrationTest() {
         private val FIXED_HOLD_EXPIRES_AT: LocalDateTime = LocalDateTime.of(2030, 1, 1, 0, 0)
         private val EXPIRED_HOLD_EXPIRES_AT: LocalDateTime = LocalDateTime.of(2020, 1, 1, 0, 0)
         private val SWEEP_NOW: LocalDateTime = LocalDateTime.of(2025, 1, 1, 0, 0)
+    }
+
+    @Test
+    fun `배치 조회는 ordinal 순서로 필요한 컬럼만 돌려주고 다른 공연의 좌석은 뺀다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val otherEvent = eventRepository.공연_하나_저장(title = "다른 공연")
+        val otherGrade = gradeRepository.등급_하나_저장(otherEvent)
+        val second = seatRepository.좌석_하나_저장(event, grade, section = "B", rowLabel = "2", seatNo = 5, ordinal = 2)
+        val first = seatRepository.좌석_하나_저장(event, grade, section = "A", rowLabel = "1", seatNo = 1, ordinal = 0)
+        val middle = seatRepository.좌석_하나_저장(event, grade, section = "A", rowLabel = "1", seatNo = 2, ordinal = 1)
+        seatRepository.좌석_하나_저장(otherEvent, otherGrade)
+
+        // when
+        val rows = seatMapQueryPort.findLayoutRowsByEventId(event.id)
+
+        // then
+        assertThat(rows).containsExactly(
+            SeatLayoutRow(first.id, 0, "A", "1", 1, grade.id),
+            SeatLayoutRow(middle.id, 1, "A", "1", 2, grade.id),
+            SeatLayoutRow(second.id, 2, "B", "2", 5, grade.id),
+        )
+    }
+
+    @Test
+    fun `상태 조회는 ordinal과 상태만 돌려주고 다른 공연의 좌석은 뺀다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val reservation = reservationRepository.예약_하나_저장(event)
+        seatRepository.좌석_하나_저장(event, grade, seatNo = 10, ordinal = 0)
+        seatRepository.홀드된_좌석_하나_저장(event, grade, reservation.id, reservation.phoneHash, slotNo = 1, seatNo = 1)
+        val otherEvent = eventRepository.공연_하나_저장(title = "다른 공연")
+        seatRepository.좌석_하나_저장(otherEvent, gradeRepository.등급_하나_저장(otherEvent), ordinal = 7)
+
+        // when
+        val rows = seatMapQueryPort.findStatusRowsByEventId(event.id)
+
+        // then
+        assertThat(rows).containsExactlyInAnyOrder(
+            SeatStatusRow(0, SeatStatus.AVAILABLE),
+            SeatStatusRow(1, SeatStatus.HELD),
+        )
     }
 }
