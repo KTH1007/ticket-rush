@@ -105,7 +105,7 @@ ticket-rush:
     payment-failed-hold-ttl: 1m
     max-per-phone: 2
   seat-map: ## 좌석 지도 상태 스냅샷
-    status-refresh-interval: 1s # 최근 읽힌 공연의 스냅샷을 다시 만드는 주기. 길면 지도가 그만큼 늦다
+    status-refresh-interval: 1s # 최근 읽힌 공연의 스냅샷을 다시 만드는 주기(실제로는 90~110% 무작위). 길면 지도가 그만큼 늦다
     status-active-window: 10s # 이 시간 안에 읽힌 공연만 갱신한다
     status-max-stale: 5s # 이보다 오래된 스냅샷은 읽는 쪽이 새로 만든다
     status-evict-after: 1m # 이 시간 동안 안 읽힌 공연은 메모리에서 지운다

@@ -16,6 +16,10 @@ class TestClock(
 
     override fun withZone(zone: ZoneId): Clock = TestClock(current, zone)
 
+    fun advanceMillis(millis: Long) {
+        current = current.plusMillis(millis)
+    }
+
     fun advanceSeconds(seconds: Long) {
         current = current.plusSeconds(seconds)
     }

@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component
 import java.time.Clock
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -28,7 +27,7 @@ class SeatStatusSnapshotCache(
     internal val cachedEventCount: Int get() = entries.size
 
     fun get(eventId: Long): SeatStatusSnapshot {
-        val entry = entries.computeIfAbsent(eventId) { Entry(jitterMillis()) }
+        val entry = entries.computeIfAbsent(eventId) { Entry() }
         entry.lastReadAtMillis = clock.millis()
         entry.snapshot?.takeIf(::isFresh)?.let { return it }
         // 캐시가 비었거나 오래됐을 때 몰린 요청이 모두 DB를 읽지 않도록 한 요청만 만들고 나머지는 기다린다
@@ -53,8 +52,8 @@ class SeatStatusSnapshotCache(
         entry: Entry,
     ) {
         val snapshot = entry.snapshot ?: return
-        val dueAfterMillis = props.statusRefreshInterval.toMillis() + entry.jitterMillis
-        if (clock.millis() - snapshot.builtAt.toEpochMilli() < dueAfterMillis) return
+        // 읽는 쪽이 방금 만든 스냅샷을 곧바로 다시 만들지 않으려는 하한이다. 틱 주기와 같은 값을 임계값으로 두면 한 틱씩 밀린다
+        if (clock.millis() - snapshot.builtAt.toEpochMilli() < props.statusRefreshInterval.toMillis() / 2) return
         // 읽는 쪽이 만들고 있으면 그 결과를 쓰면 되므로 기다리지 않는다
         if (!entry.lock.tryLock()) return
         try {
@@ -89,19 +88,10 @@ class SeatStatusSnapshotCache(
     private fun isFresh(snapshot: SeatStatusSnapshot): Boolean =
         clock.millis() - snapshot.builtAt.toEpochMilli() <= props.statusMaxStale.toMillis()
 
-    // 인스턴스들의 갱신 시각이 같은 순간에 몰리지 않게 항목마다 갱신 주기의 최대 20%를 더한다
-    private fun jitterMillis(): Long = ThreadLocalRandom.current().nextLong(props.statusRefreshInterval.toMillis() / JITTER_DIVISOR + 1)
-
-    private class Entry(
-        val jitterMillis: Long,
-    ) {
+    private class Entry {
         @Volatile var snapshot: SeatStatusSnapshot? = null
 
         @Volatile var lastReadAtMillis: Long = 0
         val lock = ReentrantLock()
-    }
-
-    private companion object {
-        const val JITTER_DIVISOR = 5
     }
 }

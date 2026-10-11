@@ -159,4 +159,31 @@ class SeatStatusSnapshotCacheTest {
 
         assertThatThrownBy { cache.get(1L) }.isInstanceOf(IllegalStateException::class.java)
     }
+
+    // 스케줄러가 갱신 주기마다 틱을 줄 때 항목이 한 틱씩 밀려 2배 늦게 갱신되지 않아야 한다
+    @Test
+    fun `틱이 갱신 주기마다 오면 매 틱마다 다시 만든다`() {
+        every { seatMapQuery.findStatusRowsByEventId(1L) } returns rows
+        cache.get(1L)
+
+        repeat(10) {
+            clock.advanceSeconds(1)
+            cache.get(1L)
+            cache.refreshRecentlyRead()
+        }
+
+        verify(exactly = 11) { seatMapQuery.findStatusRowsByEventId(1L) }
+    }
+
+    // 읽는 쪽이 방금 만든 스냅샷을 곧바로 다시 만들면 같은 쿼리가 연달아 나간다
+    @Test
+    fun `읽는 쪽이 방금 만든 스냅샷은 다음 틱이 다시 만들지 않는다`() {
+        every { seatMapQuery.findStatusRowsByEventId(1L) } returns rows
+        cache.get(1L)
+
+        clock.advanceMillis(400)
+        cache.refreshRecentlyRead()
+
+        verify(exactly = 1) { seatMapQuery.findStatusRowsByEventId(1L) }
+    }
 }
