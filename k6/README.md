@@ -23,6 +23,8 @@ k6 run -e BASE=... -e EVENT_ID=1 -e PATHNAME=seats/layout -e ENCODING=gzip -e VU
 | `DURATION` | 실행 시간 | 20s |
 | `ENCODING` | `Accept-Encoding` 값. 비우면 보내지 않는다 | |
 
+200이 아닌 응답이 하나라도 있으면 요약과 `--summary-export` 파일은 그대로 나오지만 종료 코드는 0이 아니다(과부하로 일부가 실패한 측정도 실패로 끝난다).
+
 ## 재현할 때 지킬 것
 
 - **공유 환경이 아니라 일회용 환경에서 돌린다.** 개발용 DB와 Redis, 이미 떠 있는 앱을 대상으로 삼지 않는다. 예: 앱 이미지를 빌드해 임시 Postgres, Redis와 같은 네트워크에 띄우고 `scripts/seed-event.sql`로 좌석 30,000석을 넣은 뒤 다른 포트(예: 18082)로 연다.

@@ -56,7 +56,7 @@ class EventController(
                 .eTag(layout.etag)
                 .cacheControl(CacheControl.maxAge(LAYOUT_MAX_AGE_SECONDS, TimeUnit.SECONDS).cachePublic())
                 .header(HttpHeaders.VARY, HttpHeaders.ACCEPT_ENCODING)
-        if (acceptEncoding?.contains("gzip") != true) return builder.body(layout.json())
+        if (!AcceptEncoding.acceptsGzip(acceptEncoding)) return builder.body(layout.json())
         return builder.header(HttpHeaders.CONTENT_ENCODING, "gzip").body(layout.gzipJson)
     }
 

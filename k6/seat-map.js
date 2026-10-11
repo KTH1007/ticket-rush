@@ -13,6 +13,8 @@ export const options = {
   vus: Number(__ENV.VUS || 10),
   duration: __ENV.DURATION || '20s',
   summaryTrendStats: ['avg', 'med', 'p(95)', 'p(99)', 'max'],
+  // 200이 아닌 응답이 하나라도 있으면 종료 코드를 실패로 해서, 대상을 잘못 지정한 측정을 성공으로 착각하지 않게 한다
+  thresholds: { checks: ['rate==1'] },
 };
 
 export default function () {

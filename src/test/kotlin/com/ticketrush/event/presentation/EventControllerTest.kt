@@ -147,6 +147,20 @@ class EventControllerTest {
         assertThat(GZIPInputStream(ByteArrayInputStream(response.contentAsByteArray)).readBytes()).isEqualTo(layout.json())
     }
 
+    // gzip;q=0은 gzip 거부다. 그래도 압축 본문을 주면 클라이언트가 해석하지 못한다
+    @Test
+    fun `좌석 배치를 gzip 거부로 요청하면 풀린 JSON을 반환한다`() {
+        // given
+        every { seatMapQueryService.findLayout(1L) } returns 배치_스냅샷()
+
+        // when & then
+        mockMvc
+            .perform(get("/api/events/{id}/seats/layout", 1L).header(ACCEPT_ENCODING, "gzip;q=0, deflate"))
+            .andExpect(status().isOk)
+            .andExpect(header().doesNotExist(CONTENT_ENCODING))
+            .andExpect(jsonPath("$.seatCount").value(1))
+    }
+
     @Test
     fun `좌석 배치를 gzip 없이 받으면 풀린 JSON을 반환한다`() {
         // given
