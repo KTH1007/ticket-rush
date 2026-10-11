@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service
 @Service
 class SeatMapQueryService(
     private val statusCache: SeatStatusSnapshotCache,
+    private val layoutCache: SeatLayoutCache,
 ) {
     fun findStatus(eventId: Long): SeatStatusResponse {
         val snapshot = statusCache.get(eventId)
@@ -18,4 +19,6 @@ class SeatMapQueryService(
             bitmap = snapshot.bitmapBase64,
         )
     }
+
+    fun findLayout(eventId: Long): SeatLayoutSnapshot = layoutCache.get(eventId)
 }

@@ -11,11 +11,13 @@ class SeatMapPropertiesTest {
         activeWindow: Duration = Duration.ofSeconds(10),
         maxStale: Duration = Duration.ofSeconds(5),
         evictAfter: Duration = Duration.ofMinutes(1),
+        layoutTtl: Duration = Duration.ofMinutes(10),
     ) = SeatMapProperties(
         statusRefreshInterval = refreshInterval,
         statusActiveWindow = activeWindow,
         statusMaxStale = maxStale,
         statusEvictAfter = evictAfter,
+        layoutTtl = layoutTtl,
     )
 
     private fun assertRejected(
@@ -33,6 +35,7 @@ class SeatMapPropertiesTest {
         assertThat(defaults.statusActiveWindow).isEqualTo(Duration.ofSeconds(10))
         assertThat(defaults.statusMaxStale).isEqualTo(Duration.ofSeconds(5))
         assertThat(defaults.statusEvictAfter).isEqualTo(Duration.ofMinutes(1))
+        assertThat(defaults.layoutTtl).isEqualTo(Duration.ofMinutes(10))
     }
 
     @Test
@@ -41,6 +44,7 @@ class SeatMapPropertiesTest {
         assertRejected("statusActiveWindow") { properties(activeWindow = Duration.ofSeconds(-1)) }
         assertRejected("statusMaxStale") { properties(maxStale = Duration.ZERO) }
         assertRejected("statusEvictAfter") { properties(evictAfter = Duration.ZERO) }
+        assertRejected("layoutTtl") { properties(layoutTtl = Duration.ofSeconds(-1)) }
     }
 
     // 허용 시간이 갱신 주기보다 짧으면 갱신을 기다리는 동안 읽는 요청이 매번 직접 만들게 된다

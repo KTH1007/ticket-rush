@@ -15,12 +15,16 @@ import com.ticketrush.support.홀드된_좌석_하나_저장
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.beans.factory.annotation.Autowired
+import tools.jackson.databind.ObjectMapper
 import java.util.Base64
 import kotlin.test.Test
 
 class SeatMapQueryServiceTest : IntegrationTest() {
     @Autowired
     lateinit var seatMapQueryService: SeatMapQueryService
+
+    @Autowired
+    lateinit var objectMapper: ObjectMapper
 
     @Autowired
     lateinit var eventRepository: EventRepositoryPort
@@ -91,5 +95,28 @@ class SeatMapQueryServiceTest : IntegrationTest() {
     @Test
     fun `존재하지 않는 공연이면 EventNotFoundException이 발생한다`() {
         assertThatThrownBy { seatMapQueryService.findStatus(Long.MAX_VALUE) }.isInstanceOf(EventNotFoundException::class.java)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    @Test
+    fun `배치를 조회하면 저장한 좌석이 ordinal 순서로 등급 표와 함께 담긴다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val vip = gradeRepository.등급_하나_저장(event, name = "VIP")
+        val second = seatRepository.좌석_하나_저장(event, vip, rowLabel = "2", seatNo = 1, ordinal = 1)
+        val first = seatRepository.좌석_하나_저장(event, vip, rowLabel = "1", seatNo = 1, ordinal = 0)
+
+        // when
+        val layout = seatMapQueryService.findLayout(event.id)
+
+        // then
+        val body = objectMapper.readValue(layout.json(), Map::class.java) as Map<String, Any>
+        assertThat(body["grades"] as List<*>).containsExactly(mapOf("id" to vip.id.toInt(), "name" to "VIP"))
+        assertThat((body["seats"] as List<Map<String, Any>>).map { it["id"] }).containsExactly(first.id.toInt(), second.id.toInt())
+    }
+
+    @Test
+    fun `존재하지 않는 공연의 배치를 조회하면 EventNotFoundException이 발생한다`() {
+        assertThatThrownBy { seatMapQueryService.findLayout(Long.MAX_VALUE) }.isInstanceOf(EventNotFoundException::class.java)
     }
 }

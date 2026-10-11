@@ -2,9 +2,9 @@ package com.ticketrush.event.presentation
 
 import com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper
 import com.ticketrush.event.application.EventQueryService
+import com.ticketrush.event.application.SeatLayoutSnapshot
 import com.ticketrush.event.application.SeatMapQueryService
 import com.ticketrush.event.domain.EventNotFoundException
-import com.ticketrush.reservation.domain.SeatStatus
 import com.ticketrush.shared.response.PageResponse
 import io.mockk.every
 import io.mockk.mockk
@@ -17,6 +17,12 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
 import org.springframework.context.annotation.Bean
 import org.springframework.data.domain.Pageable
+import org.springframework.http.HttpHeaders.ACCEPT_ENCODING
+import org.springframework.http.HttpHeaders.CACHE_CONTROL
+import org.springframework.http.HttpHeaders.CONTENT_ENCODING
+import org.springframework.http.HttpHeaders.ETAG
+import org.springframework.http.HttpHeaders.IF_NONE_MATCH
+import org.springframework.http.HttpHeaders.VARY
 import org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath
 import org.springframework.restdocs.payload.PayloadDocumentation.responseFields
 import org.springframework.restdocs.request.RequestDocumentation.parameterWithName
@@ -27,8 +33,10 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import java.io.ByteArrayInputStream
 import java.time.Instant
 import java.time.LocalDateTime
+import java.util.zip.GZIPInputStream
 import kotlin.test.Test
 
 @WebMvcTest(EventController::class)
@@ -120,34 +128,69 @@ class EventControllerTest {
     }
 
     @Test
-    fun `좌석 배치도를 조회하면 좌석 목록을 반환한다`() {
+    fun `좌석 배치를 gzip으로 받을 수 있으면 압축된 바이트와 ETag, 캐시 헤더를 반환한다`() {
         // given
-        every { eventQueryService.findSeats(1L) } returns 좌석_목록()
+        val layout = 배치_스냅샷()
+        every { seatMapQueryService.findLayout(1L) } returns layout
+
+        // when & then
+        val response =
+            mockMvc
+                .perform(get("/api/events/{id}/seats/layout", 1L).header(ACCEPT_ENCODING, "gzip"))
+                .andExpect(status().isOk)
+                .andExpect(header().string(CONTENT_ENCODING, "gzip"))
+                .andExpect(header().string(ETAG, "\"${layout.etag}\""))
+                .andExpect(header().string(CACHE_CONTROL, "max-age=60, public"))
+                .andExpect(header().string(VARY, ACCEPT_ENCODING))
+                .andReturn()
+                .response
+        assertThat(GZIPInputStream(ByteArrayInputStream(response.contentAsByteArray)).readBytes()).isEqualTo(layout.json())
+    }
+
+    @Test
+    fun `좌석 배치를 gzip 없이 받으면 풀린 JSON을 반환한다`() {
+        // given
+        every { seatMapQueryService.findLayout(1L) } returns 배치_스냅샷()
 
         // when & then
         mockMvc
-            .perform(get("/api/events/{id}/seats", 1L))
+            .perform(get("/api/events/{id}/seats/layout", 1L))
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$[0].section").value("A"))
-            .andExpect(jsonPath("$[0].status").value("AVAILABLE"))
+            .andExpect(header().doesNotExist(CONTENT_ENCODING))
+            .andExpect(jsonPath("$.seats[0].ordinal").value(0))
+            .andExpect(jsonPath("$.grades[0].name").value("VIP"))
             .andDo(
                 MockMvcRestDocumentationWrapper.document(
-                    "event-seats",
-                    summary = "좌석 배치도 조회",
-                    description = "공연의 좌석 목록을 위치 순서로 조회한다. 상태(AVAILABLE/HELD/SOLD)를 포함하되 예약자 정보는 노출하지 않는다.",
-                    snippets = arrayOf(eventSeatsPathParameters, eventSeatsResponseFields),
+                    "event-seat-layout",
+                    summary = "좌석 배치 조회",
+                    description =
+                        "공연의 좌석 배치(구역, 열, 번호, 등급, ordinal)를 조회한다. " +
+                            "거의 바뀌지 않아 ETag와 Cache-Control로 캐시하고, Accept-Encoding: gzip이면 압축해서 준다.",
+                    snippets = arrayOf(eventSeatLayoutPathParameters, eventSeatLayoutResponseFields),
                 ),
             )
     }
 
     @Test
-    fun `존재하지 않는 공연 id로 좌석을 조회하면 404를 반환한다`() {
+    fun `If-None-Match가 ETag와 같으면 304를 반환한다`() {
         // given
-        every { eventQueryService.findSeats(999L) } throws EventNotFoundException(999L)
+        val layout = 배치_스냅샷()
+        every { seatMapQueryService.findLayout(1L) } returns layout
 
         // when & then
         mockMvc
-            .perform(get("/api/events/{id}/seats", 999L))
+            .perform(get("/api/events/{id}/seats/layout", 1L).header(IF_NONE_MATCH, "\"${layout.etag}\""))
+            .andExpect(status().isNotModified)
+    }
+
+    @Test
+    fun `존재하지 않는 공연 id로 좌석 배치를 조회하면 404를 반환한다`() {
+        // given
+        every { seatMapQueryService.findLayout(999L) } throws EventNotFoundException(999L)
+
+        // when & then
+        mockMvc
+            .perform(get("/api/events/{id}/seats/layout", 999L))
             .andExpect(status().isNotFound)
     }
 
@@ -253,16 +296,33 @@ class EventControllerTest {
                 fieldWithPath("grades[].price").description("가격"),
             )
 
-        private fun 좌석_목록(): List<SeatResponse> =
-            listOf(
-                SeatResponse(
-                    id = 1L,
-                    section = "A",
-                    rowLabel = "1",
-                    seatNo = 1,
-                    gradeName = "VIP",
-                    status = SeatStatus.AVAILABLE,
-                ),
+        private fun 배치_스냅샷() =
+            SeatLayoutSnapshot.from(
+                eventId = 1L,
+                builtAt = Instant.parse("2026-10-11T11:15:03Z"),
+                json =
+                    """
+                    {"eventId":1,"seatCount":1,"grades":[{"id":7,"name":"VIP"}],
+                     "seats":[{"id":100,"ordinal":0,"section":"A","rowLabel":"1","seatNo":1,"gradeId":7}]}
+                    """.trimIndent().toByteArray(),
+            )
+
+        private val eventSeatLayoutPathParameters = pathParameters(parameterWithName("id").description("공연 id"))
+
+        private val eventSeatLayoutResponseFields =
+            responseFields(
+                fieldWithPath("eventId").description("공연 id"),
+                fieldWithPath("seatCount").description("좌석 수. 가장 큰 ordinal + 1"),
+                fieldWithPath("grades[]").description("등급 표"),
+                fieldWithPath("grades[].id").description("등급 id"),
+                fieldWithPath("grades[].name").description("등급명"),
+                fieldWithPath("seats[]").description("좌석 목록. ordinal 순서"),
+                fieldWithPath("seats[].id").description("좌석 id. 홀드 요청에 쓴다"),
+                fieldWithPath("seats[].ordinal").description("상태 비트맵에서 이 좌석의 위치"),
+                fieldWithPath("seats[].section").description("구역"),
+                fieldWithPath("seats[].rowLabel").description("열"),
+                fieldWithPath("seats[].seatNo").description("좌석 번호"),
+                fieldWithPath("seats[].gradeId").description("등급 id. 등급 표에서 이름을 찾는다"),
             )
 
         private fun 좌석_상태() =
@@ -285,18 +345,6 @@ class EventControllerTest {
                 fieldWithPath("bitmap").description(
                     "base64 비트맵. ordinal i의 상태는 바이트[i/4]의 상위 비트부터 (i%4)번째 2비트 (0 가능, 1 홀드, 2 판매)",
                 ),
-            )
-
-        private val eventSeatsPathParameters = pathParameters(parameterWithName("id").description("공연 id"))
-
-        private val eventSeatsResponseFields =
-            responseFields(
-                fieldWithPath("[].id").description("좌석 id"),
-                fieldWithPath("[].section").description("구역"),
-                fieldWithPath("[].rowLabel").description("열"),
-                fieldWithPath("[].seatNo").description("좌석 번호"),
-                fieldWithPath("[].gradeName").description("등급명"),
-                fieldWithPath("[].status").description("좌석 상태 (AVAILABLE, HELD, SOLD)"),
             )
     }
 }

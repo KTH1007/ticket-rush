@@ -12,12 +12,15 @@ data class SeatMapProperties(
     // 이보다 오래된 스냅샷은 읽는 쪽이 새로 만든다
     val statusMaxStale: Duration = Duration.ofSeconds(5),
     val statusEvictAfter: Duration = Duration.ofMinutes(1),
+    // 좌석 배치는 거의 안 바뀌어서 길게 둔다. 이 시간 동안 안 읽힌 배치는 메모리에서 지운다
+    val layoutTtl: Duration = Duration.ofMinutes(10),
 ) {
     init {
         require(statusRefreshInterval.isPositive()) { "statusRefreshInterval은 양수여야 합니다: $statusRefreshInterval" }
         require(statusActiveWindow.isPositive()) { "statusActiveWindow는 양수여야 합니다: $statusActiveWindow" }
         require(statusMaxStale.isPositive()) { "statusMaxStale은 양수여야 합니다: $statusMaxStale" }
         require(statusEvictAfter.isPositive()) { "statusEvictAfter는 양수여야 합니다: $statusEvictAfter" }
+        require(layoutTtl.isPositive()) { "layoutTtl은 양수여야 합니다: $layoutTtl" }
         // 허용 시간이 갱신 주기보다 짧으면 갱신을 기다리는 동안 읽는 요청이 매번 직접 만들게 된다
         require(statusMaxStale >= statusRefreshInterval) {
             "statusMaxStale은 statusRefreshInterval보다 짧을 수 없습니다: maxStale=$statusMaxStale, refreshInterval=$statusRefreshInterval"
