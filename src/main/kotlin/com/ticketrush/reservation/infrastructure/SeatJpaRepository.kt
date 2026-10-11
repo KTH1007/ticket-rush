@@ -1,7 +1,9 @@
 package com.ticketrush.reservation.infrastructure
 
 import com.ticketrush.reservation.domain.Seat
+import com.ticketrush.reservation.domain.SeatLayoutRow
 import com.ticketrush.reservation.domain.SeatStatus
+import com.ticketrush.reservation.domain.SeatStatusRow
 import com.ticketrush.shared.PhoneHash
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
@@ -13,6 +15,21 @@ interface SeatJpaRepository : JpaRepository<Seat, Long> {
     fun findAllByEventIdOrderBySectionAscRowLabelAscSeatNoAsc(eventId: Long): List<Seat>
 
     fun findAllByReservationId(reservationId: Long): List<Seat>
+
+    @Query(
+        """
+        SELECT new com.ticketrush.reservation.domain.SeatLayoutRow(s.id, s.ordinal, s.section, s.rowLabel, s.seatNo, s.gradeId)
+        FROM Seat s WHERE s.eventId = :eventId ORDER BY s.ordinal
+        """,
+    )
+    fun findLayoutRowsByEventId(
+        @Param("eventId") eventId: Long,
+    ): List<SeatLayoutRow>
+
+    @Query("SELECT new com.ticketrush.reservation.domain.SeatStatusRow(s.ordinal, s.status) FROM Seat s WHERE s.eventId = :eventId")
+    fun findStatusRowsByEventId(
+        @Param("eventId") eventId: Long,
+    ): List<SeatStatusRow>
 
     fun findAllByEventIdAndPhoneHashAndStatusIn(
         eventId: Long,
