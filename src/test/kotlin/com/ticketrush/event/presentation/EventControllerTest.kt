@@ -2,6 +2,7 @@ package com.ticketrush.event.presentation
 
 import com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper
 import com.ticketrush.event.application.EventQueryService
+import com.ticketrush.event.application.SeatMapQueryService
 import com.ticketrush.event.domain.EventNotFoundException
 import com.ticketrush.reservation.domain.SeatStatus
 import com.ticketrush.shared.response.PageResponse
@@ -23,8 +24,10 @@ import org.springframework.restdocs.request.RequestDocumentation.pathParameters
 import org.springframework.restdocs.request.RequestDocumentation.queryParameters
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import java.time.Instant
 import java.time.LocalDateTime
 import kotlin.test.Test
 
@@ -37,10 +40,16 @@ class EventControllerTest {
     @Autowired
     lateinit var eventQueryService: EventQueryService
 
+    @Autowired
+    lateinit var seatMapQueryService: SeatMapQueryService
+
     @TestConfiguration
     class MockConfig {
         @Bean
         fun eventQueryService(): EventQueryService = mockk()
+
+        @Bean
+        fun seatMapQueryService(): SeatMapQueryService = mockk()
     }
 
     @Test
@@ -142,6 +151,40 @@ class EventControllerTest {
             .andExpect(status().isNotFound)
     }
 
+    @Test
+    fun `좌석 상태를 조회하면 비트맵 스냅샷을 반환하고 1초 동안 캐시할 수 있다`() {
+        // given
+        every { seatMapQueryService.findStatus(1L) } returns 좌석_상태()
+
+        // when & then
+        mockMvc
+            .perform(get("/api/events/{id}/seats/status", 1L))
+            .andExpect(status().isOk)
+            .andExpect(header().string("Cache-Control", "max-age=1, public"))
+            .andExpect(jsonPath("$.seatCount").value(2))
+            .andExpect(jsonPath("$.bitsPerSeat").value(2))
+            .andExpect(jsonPath("$.bitmap").value("QA=="))
+            .andDo(
+                MockMvcRestDocumentationWrapper.document(
+                    "event-seat-status",
+                    summary = "좌석 상태 조회",
+                    description = "공연의 좌석 상태를 ordinal 순서의 비트맵으로 조회한다. 좌석 배치는 따로 받아 ordinal로 맞춘다.",
+                    snippets = arrayOf(eventSeatStatusPathParameters, eventSeatStatusResponseFields),
+                ),
+            )
+    }
+
+    @Test
+    fun `존재하지 않는 공연 id로 좌석 상태를 조회하면 404를 반환한다`() {
+        // given
+        every { seatMapQueryService.findStatus(999L) } throws EventNotFoundException(999L)
+
+        // when & then
+        mockMvc
+            .perform(get("/api/events/{id}/seats/status", 999L))
+            .andExpect(status().isNotFound)
+    }
+
     // 필드 설명과 픽스처가 길어 테스트 메서드 본문과 분리했다.
     companion object {
         private fun 공연_목록(): PageResponse<EventSummaryResponse> =
@@ -219,6 +262,28 @@ class EventControllerTest {
                     seatNo = 1,
                     gradeName = "VIP",
                     status = SeatStatus.AVAILABLE,
+                ),
+            )
+
+        private fun 좌석_상태() =
+            SeatStatusResponse(
+                eventId = 1L,
+                seatCount = 2,
+                bitsPerSeat = 2,
+                builtAt = Instant.parse("2026-10-11T11:15:03Z"),
+                bitmap = "QA==",
+            )
+
+        private val eventSeatStatusPathParameters = pathParameters(parameterWithName("id").description("공연 id"))
+
+        private val eventSeatStatusResponseFields =
+            responseFields(
+                fieldWithPath("eventId").description("공연 id"),
+                fieldWithPath("seatCount").description("좌석 수. 가장 큰 ordinal + 1"),
+                fieldWithPath("bitsPerSeat").description("좌석당 비트 수"),
+                fieldWithPath("builtAt").description("이 상태를 만든 시각. 지금과의 차이가 지도의 나이"),
+                fieldWithPath("bitmap").description(
+                    "base64 비트맵. ordinal i의 상태는 바이트[i/4]의 상위 비트부터 (i%4)번째 2비트 (0 가능, 1 홀드, 2 판매)",
                 ),
             )
 
