@@ -10,7 +10,10 @@ class QueuePromotionScheduler(
     private val queueRepository: QueueRepositoryPort,
     private val policy: QueuePolicyProperties,
 ) {
-    @Scheduled(fixedRate = 1000)
+    @Scheduled(
+        fixedRateString = "\${ticket-rush.queue.promotion-interval}",
+        initialDelayString = "\${ticket-rush.queue.promotion-interval}",
+    )
     fun promote() {
         queueRepository.activeEventIds().forEach { eventId ->
             val granted = queueRepository.reserveGlobalBudget(policy.promotionBudgetPerSecond)
