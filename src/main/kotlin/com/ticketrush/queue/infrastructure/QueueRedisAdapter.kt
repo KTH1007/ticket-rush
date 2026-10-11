@@ -1,21 +1,18 @@
 package com.ticketrush.queue.infrastructure
 
+import com.ticketrush.queue.QueuePolicyProperties
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.domain.QueueStatus
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.io.ClassPathResource
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.data.redis.core.script.RedisScript
 import org.springframework.stereotype.Repository
-import java.time.Duration
 
 @Repository
 class QueueRedisAdapter(
     private val redisTemplate: StringRedisTemplate,
-    @Value("\${ticket-rush.queue.active-ttl}") private val activeTtl: Duration,
-    @Value("\${ticket-rush.queue.token-ttl}") private val tokenTtl: Duration,
-    @Value("\${ticket-rush.queue.promotion-budget-per-second}") private val budgetPerSecond: Int,
+    private val policy: QueuePolicyProperties,
 ) : QueueRepositoryPort {
     override fun register(
         eventId: Long,
@@ -28,7 +25,7 @@ class QueueRedisAdapter(
                 "queue:$eventId:token:$token",
                 ACTIVE_EVENT_IDS_KEY,
             )
-        return redisTemplate.execute(registerScript, keys, token, tokenTtl.toSeconds().toString(), eventId.toString())
+        return redisTemplate.execute(registerScript, keys, token, policy.tokenTtl.toSeconds().toString(), eventId.toString())
             ?: error("대기열 등록 실패 : seq 반환값 없음")
     }
 
@@ -47,7 +44,7 @@ class QueueRedisAdapter(
                 promoteScript,
                 keys,
                 count.toString(),
-                activeTtl.toSeconds().toString(),
+                policy.activeTtl.toSeconds().toString(),
                 eventId.toString(),
             )
         @Suppress("UNCHECKED_CAST")
@@ -83,10 +80,12 @@ class QueueRedisAdapter(
             .map { it.toLong() }
             .toSet()
 
+    override fun isActive(eventId: Long): Boolean = redisTemplate.opsForSet().isMember(ACTIVE_EVENT_IDS_KEY, eventId.toString()) == true
+
     override fun reserveGlobalBudget(count: Int): Int {
         val currentSecond = System.currentTimeMillis() / 1000
         val keys = listOf("queue:promotionBudget:$currentSecond")
-        val granted = redisTemplate.execute(budgetReserveScript, keys, count.toString(), budgetPerSecond.toString(), "5")
+        val granted = redisTemplate.execute(budgetReserveScript, keys, count.toString(), policy.promotionBudgetPerSecond.toString(), "5")
         return granted?.toInt() ?: 0
     }
 
