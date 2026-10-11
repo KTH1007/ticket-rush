@@ -14,12 +14,14 @@ class QueuePolicyPropertiesTest {
         far: Duration = Duration.ofSeconds(15),
         near: Duration = Duration.ofSeconds(2),
         nearRankThreshold: Long = 100,
+        scheduleCacheTtl: Duration = Duration.ofMinutes(10),
     ) = QueuePolicyProperties(
         tokenTtl = tokenTtl,
         activeTtl = activeTtl,
         promotionBudgetPerSecond = budget,
         pollInterval = QueuePolicyProperties.PollInterval(far = far, near = near),
         nearRankThreshold = nearRankThreshold,
+        scheduleCacheTtl = scheduleCacheTtl,
     )
 
     private fun assertRejected(
@@ -40,6 +42,14 @@ class QueuePolicyPropertiesTest {
         val defaulted = QueuePolicyProperties(Duration.ofMinutes(15), Duration.ofMinutes(2), 100, pollInterval)
 
         assertThat(defaulted.nearRankThreshold).isEqualTo(100)
+    }
+
+    @Test
+    fun `오픈 시각 캐시 TTL은 기본값이 10분이다`() {
+        val pollInterval = QueuePolicyProperties.PollInterval(far = Duration.ofSeconds(15), near = Duration.ofSeconds(2))
+        val defaulted = QueuePolicyProperties(Duration.ofMinutes(15), Duration.ofMinutes(2), 100, pollInterval)
+
+        assertThat(defaulted.scheduleCacheTtl).isEqualTo(Duration.ofMinutes(10))
     }
 
     @Test
@@ -74,5 +84,11 @@ class QueuePolicyPropertiesTest {
     @Test
     fun `가까운 순위 기준이 0이나 음수면 거부한다`() {
         assertRejected("nearRankThreshold") { properties(nearRankThreshold = 0) }
+    }
+
+    @Test
+    fun `오픈 시각 캐시 TTL이 0이나 음수면 거부한다`() {
+        assertRejected("scheduleCacheTtl") { properties(scheduleCacheTtl = Duration.ZERO) }
+        assertRejected("scheduleCacheTtl") { properties(scheduleCacheTtl = Duration.ofSeconds(-1)) }
     }
 }

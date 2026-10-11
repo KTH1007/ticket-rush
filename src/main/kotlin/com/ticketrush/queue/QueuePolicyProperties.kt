@@ -12,6 +12,8 @@ data class QueuePolicyProperties(
     val pollInterval: PollInterval,
     // 이 순위 이내면 가까운 간격(near)으로 폴링한다
     val nearRankThreshold: Long = 100,
+    // 오픈 시각 변경이 반영되는 데 걸리는 최대 시간이자 DB 재조회 주기
+    val scheduleCacheTtl: Duration = Duration.ofMinutes(10),
 ) {
     data class PollInterval(
         val far: Duration,
@@ -28,6 +30,7 @@ data class QueuePolicyProperties(
             "pollInterval.near는 far보다 길 수 없습니다: near=${pollInterval.near}, far=${pollInterval.far}"
         }
         require(nearRankThreshold > 0) { "nearRankThreshold는 양수여야 합니다: $nearRankThreshold" }
+        require(scheduleCacheTtl.isPositive()) { "scheduleCacheTtl은 양수여야 합니다: $scheduleCacheTtl" }
     }
 }
 

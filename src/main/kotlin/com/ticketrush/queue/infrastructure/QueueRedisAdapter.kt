@@ -3,11 +3,13 @@ package com.ticketrush.queue.infrastructure
 import com.ticketrush.queue.QueuePolicyProperties
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.domain.QueueStatus
+import com.ticketrush.queue.domain.RegisterResult
 import org.springframework.core.io.ClassPathResource
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.data.redis.core.script.RedisScript
 import org.springframework.stereotype.Repository
+import java.time.Instant
 
 @Repository
 class QueueRedisAdapter(
@@ -17,17 +19,39 @@ class QueueRedisAdapter(
     override fun register(
         eventId: Long,
         token: String,
-    ): Long {
-        val keys =
-            listOf(
-                "queue:$eventId:seq",
-                "queue:$eventId:waiting",
-                "queue:$eventId:token:$token",
-                ACTIVE_EVENT_IDS_KEY,
-            )
-        return redisTemplate.execute(registerScript, keys, token, policy.tokenTtl.toSeconds().toString(), eventId.toString())
-            ?: error("대기열 등록 실패 : seq 반환값 없음")
+        opensAtHint: Instant?,
+    ): RegisterResult {
+        @Suppress("UNCHECKED_CAST")
+        val result =
+            redisTemplate.execute(
+                registerScript,
+                registerKeys(eventId, token),
+                token,
+                policy.tokenTtl.toSeconds().toString(),
+                eventId.toString(),
+                policy.scheduleCacheTtl.toSeconds().toString(),
+                opensAtHint?.toEpochMilli()?.toString().orEmpty(),
+            ) as? List<Long> ?: error("대기열 등록 실패 : 반환값 없음")
+        return toRegisterResult(result)
     }
+
+    private fun registerKeys(
+        eventId: Long,
+        token: String,
+    ) = listOf(
+        "queue:$eventId:seq",
+        "queue:$eventId:waiting",
+        "queue:$eventId:token:$token",
+        ACTIVE_EVENT_IDS_KEY,
+        "queue:$eventId:opensAt",
+    )
+
+    private fun toRegisterResult(result: List<Long>): RegisterResult =
+        when (result[0]) {
+            REGISTERED -> RegisterResult.Registered(result[1])
+            NOT_OPEN -> RegisterResult.NotOpen(Instant.ofEpochMilli(result[1]))
+            else -> RegisterResult.ScheduleUnknown
+        }
 
     override fun promote(
         eventId: Long,
@@ -80,8 +104,6 @@ class QueueRedisAdapter(
             .map { it.toLong() }
             .toSet()
 
-    override fun isActive(eventId: Long): Boolean = redisTemplate.opsForSet().isMember(ACTIVE_EVENT_IDS_KEY, eventId.toString()) == true
-
     override fun reserveGlobalBudget(count: Int): Int {
         val currentSecond = System.currentTimeMillis() / 1000
         val keys = listOf("queue:promotionBudget:$currentSecond")
@@ -104,10 +126,14 @@ class QueueRedisAdapter(
 
         private const val ACTIVE_EVENT_IDS_KEY = "queue:activeEventIds"
 
-        private val registerScript: RedisScript<Long> =
-            DefaultRedisScript<Long>().apply {
+        // queue-register.lua의 반환 코드
+        private const val REGISTERED = 1L
+        private const val NOT_OPEN = 0L
+
+        private val registerScript: RedisScript<List<*>> =
+            DefaultRedisScript<List<*>>().apply {
                 setLocation(ClassPathResource("scripts/queue-register.lua"))
-                resultType = Long::class.java
+                resultType = List::class.java
             }
 
         private val promoteScript: RedisScript<List<*>> =

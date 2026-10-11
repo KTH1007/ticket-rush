@@ -94,6 +94,7 @@ ticket-rush:
     heartbeat-timeout: 60s # 클라이언트측 생존신호
     promotion-budget-per-second: 100 # 1초당 100명씩 통과
     promotion-interval: 1s # 예산이 초당 기준이라 주기가 길면 실제 승격 속도가 그만큼 낮아진다
+    schedule-cache-ttl: 10m # 오픈 시각 변경이 반영되는 데 걸리는 최대 시간이자 DB 재조회 주기
     poll-interval: # 순번 확인
       far: 15s          # near-rank-threshold(기본 100위) 밖
       near: 2s          # near-rank-threshold 이내

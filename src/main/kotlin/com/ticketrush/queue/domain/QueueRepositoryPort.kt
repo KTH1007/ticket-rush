@@ -1,10 +1,14 @@
 package com.ticketrush.queue.domain
 
+import java.time.Instant
+
 interface QueueRepositoryPort {
+    // 오픈 판정과 순번 부여를 한 번에 한다. opensAtHint는 Redis에 오픈 시각이 없을 때만 저장된다
     fun register(
         eventId: Long,
         token: String,
-    ): Long
+        opensAtHint: Instant? = null,
+    ): RegisterResult
 
     fun promote(
         eventId: Long,
@@ -15,9 +19,6 @@ interface QueueRepositoryPort {
         eventId: Long,
         token: String,
     ): QueueStatus?
-
-    // 등록이 통과해 대기열이 열려 있는 이벤트인지. DB를 보지 않고 Redis만으로 판단한다
-    fun isActive(eventId: Long): Boolean
 
     fun reserveGlobalBudget(count: Int): Int
 
