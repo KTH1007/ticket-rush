@@ -89,7 +89,7 @@ resilience4j:
 # 운영 중 조정 대상은 전부 여기로. k6 결과로 재배포 없이 바꾼다
 ticket-rush:
   queue: ## 대기열
-    token-ttl: 15m
+    token-ttl: 15m # 마지막 순번 조회로부터 이 시간 동안 조회가 없으면 대기 토큰이 만료된다(조회할 때마다 다시 늘어남)
     active-ttl: 2m
     heartbeat-timeout: 60s # 클라이언트측 생존신호
     promotion-budget-per-second: 100 # 1초당 100명씩 통과
