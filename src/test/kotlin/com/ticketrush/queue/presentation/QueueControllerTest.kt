@@ -140,6 +140,7 @@ class QueueControllerTest {
             responseFields(
                 fieldWithPath("rank").description("대기 순번 (0이면 Active)"),
                 fieldWithPath("nextPollIntervalMs").description("다음 폴링까지 대기할 시간(ms). 순번이 멀수록 길어진다"),
+                fieldWithPath("soldOut").description("true면 공연이 매진돼 승격이 멈춘 상태"),
             )
     }
 }

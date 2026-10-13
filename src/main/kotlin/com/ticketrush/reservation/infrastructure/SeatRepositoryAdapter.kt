@@ -11,6 +11,7 @@ import java.time.LocalDateTime
 @Repository
 class SeatRepositoryAdapter(
     private val jpaRepository: SeatJpaRepository,
+    private val soldOutJpaRepository: SeatSoldOutJpaRepository,
 ) : SeatRepositoryPort {
     override fun save(seat: Seat): Seat = jpaRepository.saveAndFlush(seat)
 
@@ -37,6 +38,9 @@ class SeatRepositoryAdapter(
     ): Boolean = jpaRepository.holdIfAvailable(seatId, eventId, reservationId, phoneHash, slotNo, holdExpiresAt) > 0
 
     override fun findAllByIds(seatIds: List<Long>): List<Seat> = jpaRepository.findAllById(seatIds)
+
+    override fun isFullySold(eventId: Long): Boolean =
+        soldOutJpaRepository.existsByEventId(eventId) && !soldOutJpaRepository.existsByEventIdAndStatusNot(eventId, SeatStatus.SOLD)
 
     @Transactional
     override fun releaseExpiredHolds(now: LocalDateTime): Int = jpaRepository.releaseExpiredHolds(now)

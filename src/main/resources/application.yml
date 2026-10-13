@@ -99,7 +99,7 @@ ticket-rush:
       far-max: 5m       # 순번이 아주 먼 사람의 상한. 지터를 더해도 token-ttl보다 짧아야 한다
       near: 2s          # near-rank-threshold 이내
       jitter-ratio: 0.2 # 간격에 더하는 무작위 비율(±20%)
-    broadcast-cache-ttl: 1s # 남은 좌석수 등 캐싱해서 보여줌
+    broadcast-cache-ttl: 1s # 매진 여부 캐시 시간
   seat:
     hold-ttl: 5m
     payment-failed-hold-ttl: 1m

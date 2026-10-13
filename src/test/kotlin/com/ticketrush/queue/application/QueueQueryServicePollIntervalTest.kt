@@ -3,6 +3,7 @@ package com.ticketrush.queue.application
 import com.ticketrush.queue.QueuePolicyProperties
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.domain.QueueStatus
+import com.ticketrush.queue.domain.SoldOutPort
 import io.mockk.every
 import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
@@ -11,6 +12,7 @@ import kotlin.test.Test
 
 class QueueQueryServicePollIntervalTest {
     private val queueRepository = mockk<QueueRepositoryPort>()
+    private val soldOutPort = mockk<SoldOutPort> { every { isSoldOut(any()) } returns false }
 
     private fun service(jitterRatio: Double = 0.0) =
         QueueQueryService(
@@ -27,6 +29,7 @@ class QueueQueryServicePollIntervalTest {
                         jitterRatio = jitterRatio,
                     ),
             ),
+            soldOutPort,
         )
 
     private fun 대기_중(rank: Long) {
@@ -71,6 +74,17 @@ class QueueQueryServicePollIntervalTest {
     }
 
     @Test
+    fun `매진이면 승격이 멈췄으니 가장 긴 간격으로 안내하고 soldOut을 알린다`() {
+        대기_중(3_000)
+        every { soldOutPort.isSoldOut(1L) } returns true
+
+        val response = service().checkStatus(1L, "token")
+
+        assertThat(response.soldOut).isTrue()
+        assertThat(response.nextPollIntervalMs).isEqualTo(300_000)
+    }
+
+    @Test
     fun `활성이 되면 순번 0과 간격 0을 돌려준다`() {
         every { queueRepository.findStatus(1L, "token") } returns QueueStatus(sequence = 10, active = true, lastPromotedSequence = 10)
 
@@ -78,5 +92,6 @@ class QueueQueryServicePollIntervalTest {
 
         assertThat(response.rank).isEqualTo(0)
         assertThat(response.nextPollIntervalMs).isEqualTo(0)
+        assertThat(response.soldOut).isFalse()
     }
 }

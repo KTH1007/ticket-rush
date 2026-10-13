@@ -14,6 +14,8 @@ data class QueuePolicyProperties(
     val nearRankThreshold: Long = 100,
     // 오픈 시각 변경이 반영되는 데 걸리는 최대 시간이자 DB 재조회 주기
     val scheduleCacheTtl: Duration = Duration.ofMinutes(10),
+    // 매진 여부를 캐시하는 시간. 취소로 좌석이 풀리면 이 시간 안에 승격이 다시 시작된다
+    val broadcastCacheTtl: Duration = Duration.ofSeconds(1),
 ) {
     data class PollInterval(
         val far: Duration,
@@ -43,6 +45,7 @@ data class QueuePolicyProperties(
         }
         require(nearRankThreshold > 0) { "nearRankThreshold는 양수여야 합니다: $nearRankThreshold" }
         require(scheduleCacheTtl.isAtLeastOneSecond()) { "scheduleCacheTtl은 1초 이상이어야 합니다: $scheduleCacheTtl" }
+        require(!broadcastCacheTtl.isNegative) { "broadcastCacheTtl은 음수일 수 없습니다: $broadcastCacheTtl" }
     }
 }
 

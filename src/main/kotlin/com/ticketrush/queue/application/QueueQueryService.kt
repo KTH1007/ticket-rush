@@ -4,6 +4,7 @@ import com.ticketrush.queue.QueuePolicyProperties
 import com.ticketrush.queue.domain.InvalidQueueTokenException
 import com.ticketrush.queue.domain.QueueNotActiveException
 import com.ticketrush.queue.domain.QueueRepositoryPort
+import com.ticketrush.queue.domain.SoldOutPort
 import com.ticketrush.queue.presentation.QueueStatusResponse
 import org.springframework.stereotype.Service
 import java.time.Duration
@@ -13,20 +14,22 @@ import java.util.concurrent.ThreadLocalRandom
 class QueueQueryService(
     private val queueRepository: QueueRepositoryPort,
     private val policy: QueuePolicyProperties,
+    private val soldOutPort: SoldOutPort,
 ) {
     fun checkStatus(
         eventId: Long,
         token: String,
     ): QueueStatusResponse {
         val status = queueRepository.findStatus(eventId, token) ?: throw InvalidQueueTokenException()
+        val soldOut = soldOutPort.isSoldOut(eventId)
 
         if (status.active) {
-            return QueueStatusResponse(rank = 0, nextPollIntervalMs = 0)
+            return QueueStatusResponse(rank = 0, nextPollIntervalMs = 0, soldOut = soldOut)
         }
 
         val rank = status.sequence - status.lastPromotedSequence
-        val interval = nextPollInterval(rank)
-        return QueueStatusResponse(rank = rank, nextPollIntervalMs = interval.toMillis())
+        val interval = if (soldOut) withJitter(policy.pollInterval.farMax) else nextPollInterval(rank)
+        return QueueStatusResponse(rank = rank, nextPollIntervalMs = interval.toMillis(), soldOut = soldOut)
     }
 
     fun requireActive(
