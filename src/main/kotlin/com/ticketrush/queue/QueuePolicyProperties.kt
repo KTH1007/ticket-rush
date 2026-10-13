@@ -18,6 +18,10 @@ data class QueuePolicyProperties(
     data class PollInterval(
         val far: Duration,
         val near: Duration,
+        // 순번이 아주 먼 사람의 간격 상한. far는 하한이다
+        val farMax: Duration = Duration.ofMinutes(5),
+        // 간격에 더하는 무작위 비율(0.2면 ±20%). 같은 순간에 줄 선 사람들이 같은 순간에 다시 조회하는 것을 흩뜨린다
+        val jitterRatio: Double = 0.2,
     )
 
     init {
@@ -28,6 +32,14 @@ data class QueuePolicyProperties(
         require(pollInterval.near.isPositive()) { "pollInterval.near는 양수여야 합니다: ${pollInterval.near}" }
         require(pollInterval.near <= pollInterval.far) {
             "pollInterval.near는 far보다 길 수 없습니다: near=${pollInterval.near}, far=${pollInterval.far}"
+        }
+        require(pollInterval.far <= pollInterval.farMax) {
+            "pollInterval.farMax는 far보다 짧을 수 없습니다: farMax=${pollInterval.farMax}, far=${pollInterval.far}"
+        }
+        require(pollInterval.jitterRatio in 0.0..1.0) { "pollInterval.jitterRatio는 0 이상 1 이하여야 합니다: ${pollInterval.jitterRatio}" }
+        // 조회 간격이 토큰 수명을 넘으면 다음 조회 전에 토큰이 만료된다
+        require(pollInterval.farMax.toMillis() * (1 + pollInterval.jitterRatio) < tokenTtl.toMillis()) {
+            "pollInterval.farMax는 지터를 더해도 tokenTtl보다 짧아야 합니다: farMax=${pollInterval.farMax}, tokenTtl=$tokenTtl"
         }
         require(nearRankThreshold > 0) { "nearRankThreshold는 양수여야 합니다: $nearRankThreshold" }
         require(scheduleCacheTtl.isAtLeastOneSecond()) { "scheduleCacheTtl은 1초 이상이어야 합니다: $scheduleCacheTtl" }

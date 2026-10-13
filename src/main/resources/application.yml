@@ -91,14 +91,14 @@ ticket-rush:
   queue: ## 대기열
     token-ttl: 15m # 마지막 순번 조회로부터 이 시간 동안 조회가 없으면 대기 토큰이 만료된다(조회할 때마다 다시 늘어남)
     active-ttl: 2m
-    heartbeat-timeout: 60s # 클라이언트측 생존신호
     promotion-budget-per-second: 100 # 1초당 100명씩 통과
     promotion-interval: 1s # 예산이 초당 기준이라 주기가 길면 실제 승격 속도가 그만큼 낮아진다
     schedule-cache-ttl: 10m # 오픈 시각 변경이 반영되는 데 걸리는 최대 시간이자 DB 재조회 주기
     poll-interval: # 순번 확인
-      far: 15s          # near-rank-threshold(기본 100위) 밖
+      far: 15s          # near-rank-threshold(기본 100위) 밖의 하한. 순번이 멀수록 앞까지 걸리는 시간의 1/4로 늘어난다
+      far-max: 5m       # 순번이 아주 먼 사람의 상한. 지터를 더해도 token-ttl보다 짧아야 한다
       near: 2s          # near-rank-threshold 이내
-      jitter-ratio: 0.2 # 지터로 무작위
+      jitter-ratio: 0.2 # 간격에 더하는 무작위 비율(±20%)
     broadcast-cache-ttl: 1s # 남은 좌석수 등 캐싱해서 보여줌
   seat:
     hold-ttl: 5m

@@ -139,7 +139,7 @@ class QueueControllerTest {
         private val queueStatusResponseFields =
             responseFields(
                 fieldWithPath("rank").description("대기 순번 (0이면 Active)"),
-                fieldWithPath("nextPollIntervalMs").description("다음 폴링까지 대기할 시간(ms)"),
+                fieldWithPath("nextPollIntervalMs").description("다음 폴링까지 대기할 시간(ms). 순번이 멀수록 길어진다"),
             )
     }
 }
