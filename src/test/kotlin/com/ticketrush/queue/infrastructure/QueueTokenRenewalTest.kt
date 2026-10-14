@@ -71,6 +71,22 @@ class QueueTokenRenewalTest : IntegrationTest() {
     }
 
     @Test
+    fun `승격된 뒤 token 키가 먼저 만료돼도 활성 구간 안에서는 활성으로 조회된다`() {
+        // given
+        val token = UUID.randomUUID().toString()
+        repository.열린_공연에_등록(eventId, token)
+        repository.promote(eventId, 1)
+        redisTemplate.delete(tokenKey(token))
+
+        // when
+        val status = repository.findStatus(eventId, token)
+
+        // then
+        assertThat(status!!.active).isTrue()
+        assertThat(redisTemplate.hasKey(tokenKey(token))).isFalse()
+    }
+
+    @Test
     fun `만료된 토큰은 조회해도 되살아나지 않는다`() {
         // given
         val token = UUID.randomUUID().toString()
