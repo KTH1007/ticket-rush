@@ -93,7 +93,7 @@ class QueueRedisAdapter(
             )
 
         @Suppress("UNCHECKED_CAST")
-        val result = redisTemplate.execute(statusScript, keys) as? List<Long> ?: return null
+        val result = redisTemplate.execute(statusScript, keys, policy.tokenTtl.toSeconds().toString()) as? List<Long> ?: return null
         if (result[0] != 1L) return null
         return QueueStatus(
             sequence = result[1],

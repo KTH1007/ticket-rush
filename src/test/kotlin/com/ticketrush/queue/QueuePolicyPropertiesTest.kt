@@ -13,13 +13,15 @@ class QueuePolicyPropertiesTest {
         budget: Int = 100,
         far: Duration = Duration.ofSeconds(15),
         near: Duration = Duration.ofSeconds(2),
+        farMax: Duration = Duration.ofMinutes(5),
+        jitterRatio: Double = 0.2,
         nearRankThreshold: Long = 100,
         scheduleCacheTtl: Duration = Duration.ofMinutes(10),
     ) = QueuePolicyProperties(
         tokenTtl = tokenTtl,
         activeTtl = activeTtl,
         promotionBudgetPerSecond = budget,
-        pollInterval = QueuePolicyProperties.PollInterval(far = far, near = near),
+        pollInterval = QueuePolicyProperties.PollInterval(far = far, near = near, farMax = farMax, jitterRatio = jitterRatio),
         nearRankThreshold = nearRankThreshold,
         scheduleCacheTtl = scheduleCacheTtl,
     )
@@ -75,7 +77,15 @@ class QueuePolicyPropertiesTest {
     fun `Redis에 유효시간으로 넘기는 값이 정확히 1초면 만들어진다`() {
         val oneSecond = Duration.ofSeconds(1)
 
-        val created = properties(tokenTtl = oneSecond, activeTtl = oneSecond, scheduleCacheTtl = oneSecond)
+        val created =
+            properties(
+                tokenTtl = oneSecond,
+                activeTtl = oneSecond,
+                scheduleCacheTtl = oneSecond,
+                near = Duration.ofMillis(50),
+                far = Duration.ofMillis(100),
+                farMax = Duration.ofMillis(200),
+            )
 
         assertThat(created.tokenTtl).isEqualTo(oneSecond)
     }
@@ -101,6 +111,46 @@ class QueuePolicyPropertiesTest {
     @Test
     fun `가까운 순위 기준이 0이나 음수면 거부한다`() {
         assertRejected("nearRankThreshold") { properties(nearRankThreshold = 0) }
+    }
+
+    @Test
+    fun `조회 간격 상한과 지터의 기본값은 5분과 0점2다`() {
+        val pollInterval = QueuePolicyProperties.PollInterval(far = Duration.ofSeconds(15), near = Duration.ofSeconds(2))
+
+        assertThat(pollInterval.farMax).isEqualTo(Duration.ofMinutes(5))
+        assertThat(pollInterval.jitterRatio).isEqualTo(0.2)
+    }
+
+    @Test
+    fun `조회 간격 상한이 하한보다 짧으면 거부한다`() {
+        assertRejected("pollInterval.farMax") { properties(far = Duration.ofSeconds(15), farMax = Duration.ofSeconds(10)) }
+    }
+
+    // 조회 간격이 토큰 수명을 넘으면 다음 조회 전에 대기 토큰이 만료된다
+    @Test
+    fun `조회 간격 상한이 지터를 더해 토큰 수명 이상이면 거부한다`() {
+        assertRejected("pollInterval.farMax") { properties(tokenTtl = Duration.ofMinutes(5), farMax = Duration.ofMinutes(5)) }
+        assertRejected("pollInterval.farMax") { properties(tokenTtl = Duration.ofMinutes(5), farMax = Duration.ofSeconds(290)) }
+    }
+
+    // Redis에는 초 단위로 잘려 전달돼 1100ms는 1초 뒤에 만료된다
+    @Test
+    fun `조회 간격 상한이 초 단위로 자른 토큰 수명보다 길면 거부한다`() {
+        assertRejected("pollInterval.farMax") {
+            properties(
+                tokenTtl = Duration.ofMillis(1_100),
+                near = Duration.ofMillis(50),
+                far = Duration.ofMillis(100),
+                farMax = Duration.ofMillis(1_050),
+                jitterRatio = 0.0,
+            )
+        }
+    }
+
+    @Test
+    fun `지터 비율이 0과 1 사이를 벗어나면 거부한다`() {
+        assertRejected("jitterRatio") { properties(jitterRatio = -0.1) }
+        assertRejected("jitterRatio") { properties(jitterRatio = 1.1) }
     }
 
     @Test

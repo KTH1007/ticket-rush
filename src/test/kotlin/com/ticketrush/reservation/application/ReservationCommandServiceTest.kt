@@ -115,6 +115,26 @@ class ReservationCommandServiceTest : IntegrationTest() {
     }
 
     @Test
+    fun `DB 단계에서 실패하면 Redis 선점이 풀려 같은 좌석을 다른 전화번호가 홀드할 수 있다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+        val full = PhoneHash(ByteArray(32) { 1 })
+        일인분_홀드_완료(event, grade, full, slotNo = 1)
+        일인분_홀드_완료(event, grade, full, slotNo = 2)
+        val seat = seatRepository.save(좌석(event, grade, seatNo = 3))
+        assertThatThrownBy { 홀드(event.id, listOf(seat.id), full) }
+            .isInstanceOf(ReservationLimitExceededException::class.java)
+
+        // when
+        val reservation = 홀드(event.id, listOf(seat.id), PhoneHash(ByteArray(32) { 2 }))
+
+        // then
+        assertThat(reservation.quantity).isEqualTo(1)
+        assertThat(좌석_다시_조회(event.id, seat.id).status).isEqualTo(SeatStatus.HELD)
+    }
+
+    @Test
     fun `slot이 1개만 남았는데 2석을 요청하면 예약 한도 초과로 실패한다`() {
         // given
         val event = eventRepository.공연_하나_저장()

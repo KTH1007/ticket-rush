@@ -15,15 +15,15 @@ import com.ticketrush.shared.PhoneHash
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
-import org.springframework.transaction.support.TransactionSynchronization
-import org.springframework.transaction.support.TransactionSynchronizationManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.time.LocalDateTime
 import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
 
+// 협력 객체 7개가 모두 필요하다. 억지로 묶으면 책임이 흐려져 그대로 둔다
+@Suppress("LongParameterList")
 @Service
 class ReservationCommandService(
     private val seatRepository: SeatRepositoryPort,
@@ -32,8 +32,10 @@ class ReservationCommandService(
     private val seatHoldFilter: SeatHoldFilterPort,
     private val clock: Clock,
     private val seatPolicy: SeatPolicyProperties,
+    private val transactionTemplate: TransactionTemplate,
 ) {
-    @Transactional
+    // Redis 선점을 트랜잭션 밖에서 해야 선점에 실패할 요청이 DB 연결을 잡지 않는다
+    @Suppress("TooGenericExceptionCaught")
     fun holdSeats(
         eventId: Long,
         seatSelection: SeatSelection,
@@ -44,28 +46,15 @@ class ReservationCommandService(
         if (!seatHoldFilter.tryClaim(eventId, seatSelection.seatIds, holdToken.toString())) {
             throw SeatAlreadyHeldException()
         }
-        releaseOnRollback(eventId, seatSelection.seatIds, holdToken)
-        return holdSeatsInDb(eventId, seatSelection, phoneHash, encryptedPhone, holdToken)
-    }
-
-    // @Transactional은 AOP 프록시라 실제 커밋은 이 메서드가 리턴한 "다음"에 일어난다. 그래서
-    // try/finally로는 메서드 본문 실패만 잡을 수 있고, 커밋 자체의 실패(seat.reservation_id가
-    // DEFERRABLE INITIALLY DEFERRED FK라 참조 무결성 검증이 커밋 시점으로 미뤄짐)는 못 잡는다.
-    // afterCompletion은 커밋/롤백이 실제로 끝난 뒤 호출되므로 두 실패 경로를 전부 덮는다.
-    private fun releaseOnRollback(
-        eventId: Long,
-        seatIds: List<Long>,
-        holdToken: UUID,
-    ) {
-        TransactionSynchronizationManager.registerSynchronization(
-            object : TransactionSynchronization {
-                override fun afterCompletion(status: Int) {
-                    if (status != TransactionSynchronization.STATUS_COMMITTED) {
-                        releaseQuietly(eventId, seatIds, holdToken)
-                    }
-                }
-            },
-        )
+        // FK 검증이 커밋 시점으로 미뤄져 커밋 실패도 execute에서 예외로 올라오므로 같이 해제된다
+        return try {
+            checkNotNull(
+                transactionTemplate.execute { holdSeatsInDb(eventId, seatSelection, phoneHash, encryptedPhone, holdToken) },
+            )
+        } catch (e: Exception) {
+            releaseQuietly(eventId, seatSelection.seatIds, holdToken)
+            throw e
+        }
     }
 
     // 실패 종류를 가리지 않고 전부 여기로 온다. release 자체가 실패해도 원래 예외를 삼키지 않도록 별도로 감싸고, 그 실패는 로그로만 남긴다.

@@ -2,6 +2,7 @@ package com.ticketrush.queue.application
 
 import com.ticketrush.queue.QueuePolicyProperties
 import com.ticketrush.queue.domain.QueueRepositoryPort
+import com.ticketrush.queue.domain.SoldOutPort
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -11,6 +12,7 @@ import kotlin.test.Test
 
 class QueuePromotionSchedulerTest {
     private val queueRepository = mockk<QueueRepositoryPort>()
+    private val soldOutPort = mockk<SoldOutPort> { every { isSoldOut(any()) } returns false }
     private val policy =
         QueuePolicyProperties(
             tokenTtl = Duration.ofMinutes(15),
@@ -18,7 +20,7 @@ class QueuePromotionSchedulerTest {
             promotionBudgetPerSecond = 100,
             pollInterval = QueuePolicyProperties.PollInterval(far = Duration.ofSeconds(15), near = Duration.ofSeconds(2)),
         )
-    private val scheduler = QueuePromotionScheduler(queueRepository, policy)
+    private val scheduler = QueuePromotionScheduler(queueRepository, policy, soldOutPort)
 
     @Test
     fun `활성 공연마다 한 번씩 초당 예산을 최대치로 승격을 요청한다`() {
@@ -45,6 +47,18 @@ class QueuePromotionSchedulerTest {
 
         val firstOfEachTick = (0 until ticks).map { calls[it * 3] }.toSet()
         assertThat(firstOfEachTick.size).isGreaterThan(1)
+    }
+
+    @Test
+    fun `매진된 공연은 승격하지 않고 나머지만 승격한다`() {
+        every { queueRepository.activeEventIds() } returns setOf(1L, 2L)
+        every { soldOutPort.isSoldOut(1L) } returns true
+        every { queueRepository.promote(any(), any()) } returns emptyList()
+
+        scheduler.promote()
+
+        verify(exactly = 0) { queueRepository.promote(1L, any()) }
+        verify(exactly = 1) { queueRepository.promote(2L, 100) }
     }
 
     @Test

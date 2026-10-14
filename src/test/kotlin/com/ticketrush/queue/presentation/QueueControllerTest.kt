@@ -64,7 +64,9 @@ class QueueControllerTest {
                 MockMvcRestDocumentationWrapper.document(
                     "queue-register",
                     summary = "대기열 등록",
-                    description = "공연 대기열에 등록하고 토큰을 발급받는다.",
+                    description =
+                        "공연 대기열에 등록하고 토큰을 발급받는다. " +
+                            "입구가 혼잡하면 503과 Retry-After(3 ~ 10초)가 오며, 그 시간 뒤에 다시 등록한다(처음 누른 순서는 보장되지 않는다).",
                     snippets = arrayOf(queueRegisterPathParameters, queueRegisterResponseHeaders),
                 ),
             )
@@ -107,7 +109,9 @@ class QueueControllerTest {
                 MockMvcRestDocumentationWrapper.document(
                     "queue-status",
                     summary = "대기열 순번 조회",
-                    description = "현재 대기 순번과 다음 폴링 주기를 조회한다.",
+                    description =
+                        "현재 대기 순번과 다음 폴링 주기를 조회한다. " +
+                            "입구가 혼잡해 503이 오면 Retry-After와 nextPollIntervalMs 중 큰 값만큼 기다린 뒤 다시 조회한다(순번은 유지된다).",
                     snippets = arrayOf(queueStatusPathParameters, queueStatusRequestHeaders, queueStatusResponseFields),
                 ),
             )
@@ -135,7 +139,8 @@ class QueueControllerTest {
         private val queueStatusResponseFields =
             responseFields(
                 fieldWithPath("rank").description("대기 순번 (0이면 Active)"),
-                fieldWithPath("nextPollIntervalMs").description("다음 폴링까지 대기할 시간(ms)"),
+                fieldWithPath("nextPollIntervalMs").description("다음 폴링까지 대기할 시간(ms). 순번이 멀수록 길어진다"),
+                fieldWithPath("soldOut").description("true면 공연이 매진돼 승격이 멈춘 상태"),
             )
     }
 }
