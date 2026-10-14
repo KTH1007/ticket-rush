@@ -1,15 +1,18 @@
 package com.ticketrush.queue.infrastructure
 
 import com.ticketrush.queue.QueuePolicyProperties
+import com.ticketrush.queue.domain.BindResult
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.domain.QueueStatus
 import com.ticketrush.queue.domain.RegisterResult
+import com.ticketrush.shared.PhoneHash
 import org.springframework.core.io.ClassPathResource
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.data.redis.core.script.RedisScript
 import org.springframework.stereotype.Repository
 import java.time.Instant
+import java.util.HexFormat
 
 @Repository
 class QueueRedisAdapter(
@@ -88,7 +91,7 @@ class QueueRedisAdapter(
         val keys =
             listOf(
                 "queue:$eventId:token:$token",
-                "queue:$eventId:active:$token",
+                activeKey(eventId, token),
                 "queue:$eventId:lastPromotedSeq",
             )
 
@@ -101,6 +104,22 @@ class QueueRedisAdapter(
             lastPromotedSequence = result[3],
         )
     }
+
+    override fun bindPhone(
+        eventId: Long,
+        token: String,
+        phoneHash: PhoneHash,
+    ): BindResult =
+        when (redisTemplate.execute(bindScript, listOf(activeKey(eventId, token)), HexFormat.of().formatHex(phoneHash.value))) {
+            BOUND -> BindResult.BOUND
+            MISMATCH -> BindResult.MISMATCH
+            else -> BindResult.NOT_ACTIVE
+        }
+
+    private fun activeKey(
+        eventId: Long,
+        token: String,
+    ) = "queue:$eventId:active:$token"
 
     override fun activeEventIds(): Set<Long> =
         redisTemplate
@@ -136,6 +155,16 @@ class QueueRedisAdapter(
             DefaultRedisScript<List<*>>().apply {
                 setLocation(ClassPathResource("scripts/queue-promote.lua"))
                 resultType = List::class.java
+            }
+
+        // queue-bind.lua의 반환 코드
+        private const val BOUND = 1L
+        private const val MISMATCH = 0L
+
+        private val bindScript: RedisScript<Long> =
+            DefaultRedisScript<Long>().apply {
+                setLocation(ClassPathResource("scripts/queue-bind.lua"))
+                resultType = Long::class.java
             }
     }
 }

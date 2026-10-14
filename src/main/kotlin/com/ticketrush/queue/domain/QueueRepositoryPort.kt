@@ -1,5 +1,6 @@
 package com.ticketrush.queue.domain
 
+import com.ticketrush.shared.PhoneHash
 import java.time.Instant
 
 interface QueueRepositoryPort {
@@ -20,6 +21,13 @@ interface QueueRepositoryPort {
         eventId: Long,
         token: String,
     ): QueueStatus?
+
+    // 활성 토큰을 처음 쓰는 전화번호에 묶는다. 이미 묶여 있으면 같은 번호인지만 본다
+    fun bindPhone(
+        eventId: Long,
+        token: String,
+        phoneHash: PhoneHash,
+    ): BindResult
 
     fun activeEventIds(): Set<Long>
 }

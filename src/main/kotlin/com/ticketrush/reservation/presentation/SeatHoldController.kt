@@ -1,6 +1,6 @@
 package com.ticketrush.reservation.presentation
 
-import com.ticketrush.queue.application.QueueQueryService
+import com.ticketrush.queue.application.QueueCommandService
 import com.ticketrush.reservation.application.ReservationCommandService
 import com.ticketrush.reservation.domain.SeatSelection
 import com.ticketrush.shared.PhoneEncryptor
@@ -21,7 +21,7 @@ class SeatHoldController(
     private val reservationCommandService: ReservationCommandService,
     private val phoneHasher: PhoneHasher,
     private val phoneEncryptor: PhoneEncryptor,
-    private val queueQueryService: QueueQueryService,
+    private val queueCommandService: QueueCommandService,
 ) {
     @PostMapping("/hold")
     fun hold(
@@ -29,8 +29,8 @@ class SeatHoldController(
         @RequestHeader("X-Queue-Token", required = false) queueToken: String?,
         @Valid @RequestBody request: SeatHoldRequest,
     ): ResponseEntity<SeatHoldResponse> {
-        queueQueryService.requireActive(eventId, queueToken)
         val phoneHash = phoneHasher.hash(request.phoneNumber)
+        queueCommandService.admit(eventId, queueToken, phoneHash)
         val encryptedPhone = phoneEncryptor.encrypt(request.phoneNumber)
         val reservation =
             reservationCommandService.holdSeats(

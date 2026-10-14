@@ -1,11 +1,17 @@
 package com.ticketrush.queue.application
 
+import com.ticketrush.queue.domain.BindResult
 import com.ticketrush.queue.domain.EventSchedulePort
+import com.ticketrush.queue.domain.InvalidQueueTokenException
 import com.ticketrush.queue.domain.QueueEventNotFoundException
+import com.ticketrush.queue.domain.QueueNotActiveException
 import com.ticketrush.queue.domain.QueueNotOpenException
+import com.ticketrush.queue.domain.QueuePhoneMismatchException
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.domain.RegisterResult
 import com.ticketrush.shared.AppTimeZone
+import com.ticketrush.shared.PhoneHash
+import com.ticketrush.shared.exception.BusinessException
 import org.springframework.stereotype.Service
 import java.time.Instant
 import java.time.LocalDateTime
@@ -27,6 +33,29 @@ class QueueCommandService(
             RegisterResult.ScheduleUnknown -> error("오픈 시각을 저장했는데도 찾지 못했습니다: eventId=$eventId")
         }
     }
+
+    // 활성 토큰은 처음 쓴 전화번호에만 쓸 수 있다. 번호를 바꿔 가며 번호당 좌석 제한을 우회하는 것을 막는다
+    fun admit(
+        eventId: Long,
+        token: String?,
+        phoneHash: PhoneHash,
+    ) {
+        if (token == null) throw InvalidQueueTokenException()
+        val rejection =
+            when (queueRepository.bindPhone(eventId, token, phoneHash)) {
+                BindResult.BOUND -> return
+                BindResult.MISMATCH -> QueuePhoneMismatchException()
+                BindResult.NOT_ACTIVE -> notActiveReason(eventId, token)
+            }
+        throw rejection
+    }
+
+    // 활성이 아닐 때만 한 번 더 읽어 이유를 가른다
+    private fun notActiveReason(
+        eventId: Long,
+        token: String,
+    ): BusinessException =
+        if (queueRepository.findStatus(eventId, token) == null) InvalidQueueTokenException() else QueueNotActiveException()
 
     // 등록은 로그인 같은 확인이 없어서 없는 이벤트 번호로 Redis 키가 남지 않게 여기서 막는다. Redis에 오픈 시각이 없을 때만 DB를 본다
     private fun loadOpensAt(eventId: Long): Instant = eventSchedule.opensAt(eventId) ?: throw QueueEventNotFoundException(eventId)
