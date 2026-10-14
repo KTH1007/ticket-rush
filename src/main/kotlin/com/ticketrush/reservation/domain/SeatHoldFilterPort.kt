@@ -14,4 +14,18 @@ interface SeatHoldFilterPort {
         seatIds: List<Long>,
         holdToken: String,
     )
+
+    // 결제 실패로 DB 홀드가 짧아졌을 때. 내 마크의 남은 시간이 더 길면 줄이고, 늘리지는 않는다
+    fun shortenAfterPaymentFailure(
+        eventId: Long,
+        seatIds: List<Long>,
+        holdToken: String,
+    )
+
+    // 판매된 좌석의 마크를 오래 둬서 이후 시도를 DB 전에 거른다
+    fun extendForSold(
+        eventId: Long,
+        seatIds: List<Long>,
+        holdToken: String,
+    )
 }

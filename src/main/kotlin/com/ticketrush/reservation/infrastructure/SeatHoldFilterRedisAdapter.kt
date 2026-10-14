@@ -17,8 +17,7 @@ class SeatHoldFilterRedisAdapter(
         seatIds: List<Long>,
         holdToken: String,
     ): Boolean {
-        val keys = seatIds.map { seatKey(eventId, it) }
-        val result = redisTemplate.execute(claimScript, keys, holdToken, seatPolicy.holdTtl.toMillis().toString())
+        val result = redisTemplate.execute(claimScript, seatKeys(eventId, seatIds), holdToken, seatPolicy.holdTtl.toMillis().toString())
         return result == 1L
     }
 
@@ -27,9 +26,31 @@ class SeatHoldFilterRedisAdapter(
         seatIds: List<Long>,
         holdToken: String,
     ) {
-        val keys = seatIds.map { seatKey(eventId, it) }
-        redisTemplate.execute(releaseScript, keys, holdToken)
+        redisTemplate.execute(releaseScript, seatKeys(eventId, seatIds), holdToken)
     }
+
+    override fun shortenAfterPaymentFailure(
+        eventId: Long,
+        seatIds: List<Long>,
+        holdToken: String,
+    ) {
+        val ttlMillis = seatPolicy.paymentFailedHoldTtl.toMillis().toString()
+        redisTemplate.execute(shortenScript, seatKeys(eventId, seatIds), holdToken, ttlMillis)
+    }
+
+    override fun extendForSold(
+        eventId: Long,
+        seatIds: List<Long>,
+        holdToken: String,
+    ) {
+        val ttlMillis = seatPolicy.soldMarkTtl.toMillis().toString()
+        redisTemplate.execute(extendScript, seatKeys(eventId, seatIds), holdToken, ttlMillis)
+    }
+
+    private fun seatKeys(
+        eventId: Long,
+        seatIds: List<Long>,
+    ): List<String> = seatIds.map { seatKey(eventId, it) }
 
     private fun seatKey(
         eventId: Long,
@@ -45,6 +66,16 @@ class SeatHoldFilterRedisAdapter(
         private val releaseScript =
             DefaultRedisScript<Long>().apply {
                 setLocation(ClassPathResource("scripts/seat-release.lua"))
+                resultType = Long::class.java
+            }
+        private val shortenScript =
+            DefaultRedisScript<Long>().apply {
+                setLocation(ClassPathResource("scripts/seat-shorten.lua"))
+                resultType = Long::class.java
+            }
+        private val extendScript =
+            DefaultRedisScript<Long>().apply {
+                setLocation(ClassPathResource("scripts/seat-extend.lua"))
                 resultType = Long::class.java
             }
     }

@@ -103,6 +103,7 @@ ticket-rush:
   seat:
     hold-ttl: 5m
     payment-failed-hold-ttl: 1m
+    sold-mark-ttl: 1h # 판매된 좌석의 Redis 마크 유지 시간. 취소 때 못 지워도 이 시간 뒤엔 사라진다
     max-per-phone: 2
   seat-map: ## 좌석 지도 상태 스냅샷
     status-refresh-interval: 1s # 최근 읽힌 공연의 스냅샷을 다시 만드는 주기(실제로는 90~110% 무작위). 길면 지도가 그만큼 늦다

@@ -1,6 +1,7 @@
 package com.ticketrush.reservation.infrastructure
 
 import com.ticketrush.reservation.ReservationLookupPolicyProperties
+import com.ticketrush.reservation.SeatPolicyProperties
 import com.ticketrush.reservation.domain.ReservationLookupRateLimiterPort
 import com.ticketrush.reservation.domain.SeatHoldFilterPort
 import com.ticketrush.support.IntegrationTest
@@ -9,6 +10,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.redis.core.StringRedisTemplate
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 
 // 스크립트 캐시가 비어도 선점과 조회 제한이 값까지 맞게 동작하는지 본다. 해제는 오류를 삼키는 쪽이라 예외가 아니라 결과 값으로 확인한다
@@ -24,6 +26,9 @@ class ReservationScriptCacheTest : IntegrationTest() {
 
     @Autowired
     lateinit var lookupPolicy: ReservationLookupPolicyProperties
+
+    @Autowired
+    lateinit var seatPolicy: SeatPolicyProperties
 
     private val eventId = System.nanoTime()
 
@@ -55,6 +60,32 @@ class ReservationScriptCacheTest : IntegrationTest() {
     }
 
     @Test
+    fun `스크립트 캐시가 비어 있어도 결제 실패 단축이 적용된다`() {
+        // given
+        seatHoldFilter.tryClaim(eventId, listOf(1L), "token-a")
+        redisTemplate.스크립트_캐시_비우기()
+
+        // when
+        seatHoldFilter.shortenAfterPaymentFailure(eventId, listOf(1L), "token-a")
+
+        // then
+        assertThat(마크_남은_시간(1L)).isLessThanOrEqualTo(seatPolicy.paymentFailedHoldTtl.toMillis())
+    }
+
+    @Test
+    fun `스크립트 캐시가 비어 있어도 판매 연장이 적용된다`() {
+        // given
+        seatHoldFilter.tryClaim(eventId, listOf(1L), "token-a")
+        redisTemplate.스크립트_캐시_비우기()
+
+        // when
+        seatHoldFilter.extendForSold(eventId, listOf(1L), "token-a")
+
+        // then
+        assertThat(마크_남은_시간(1L)).isGreaterThan(seatPolicy.holdTtl.toMillis())
+    }
+
+    @Test
     fun `스크립트 캐시가 비어 있어도 조회 시도 제한이 센다`() {
         // given
         val reservationNo = UUID.randomUUID().toString()
@@ -83,4 +114,6 @@ class ReservationScriptCacheTest : IntegrationTest() {
         // then
         assertThat(rateLimiter.tryReserveAttempt(reservationNo)).isTrue()
     }
+
+    private fun 마크_남은_시간(seatId: Long): Long = redisTemplate.getExpire("seat:hold:$eventId:$seatId", TimeUnit.MILLISECONDS)
 }
