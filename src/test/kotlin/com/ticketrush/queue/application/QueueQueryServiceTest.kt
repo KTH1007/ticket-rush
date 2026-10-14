@@ -1,13 +1,14 @@
 package com.ticketrush.queue.application
 
 import com.ticketrush.queue.domain.InvalidQueueTokenException
-import com.ticketrush.queue.domain.QueueNotActiveException
+import com.ticketrush.queue.domain.QueueActiveExpiredException
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.열린_공연에_등록
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.data.redis.core.StringRedisTemplate
 import java.time.Duration
 import java.util.UUID
 import kotlin.test.Test
@@ -18,6 +19,9 @@ class QueueQueryServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var queueQueryService: QueueQueryService
+
+    @Autowired
+    lateinit var redisTemplate: StringRedisTemplate
 
     @Test
     fun `등록하지 않은 토큰으로 조회하면 InvalidQueueTokenException이 발생한다`() {
@@ -80,46 +84,16 @@ class QueueQueryServiceTest : IntegrationTest() {
     }
 
     @Test
-    fun `존재하지 않는 토큰으로 requireActive를 호출하면 InvalidQueueTokenException이 발생한다`() {
-        // given
-        val eventId = System.nanoTime()
-
-        // when & then
-        assertThatThrownBy { queueQueryService.requireActive(eventId, UUID.randomUUID().toString()) }
-            .isInstanceOf(InvalidQueueTokenException::class.java)
-    }
-
-    @Test
-    fun `등록됐지만 아직 승격되지 않은 토큰으로 requireActive를 호출하면 QueueNotActiveException이 발생한다`() {
-        // given
-        val eventId = System.nanoTime()
-        val token = UUID.randomUUID().toString()
-        queueRepository.열린_공연에_등록(eventId, token)
-
-        // when & then
-        assertThatThrownBy { queueQueryService.requireActive(eventId, token) }
-            .isInstanceOf(QueueNotActiveException::class.java)
-    }
-
-    @Test
-    fun `승격된 토큰으로 requireActive를 호출하면 예외 없이 통과한다`() {
+    fun `활성 구간이 끝난 토큰으로 조회하면 QueueActiveExpiredException이 발생한다`() {
         // given
         val eventId = System.nanoTime()
         val token = UUID.randomUUID().toString()
         queueRepository.열린_공연에_등록(eventId, token)
         queueRepository.promote(eventId, 1)
+        redisTemplate.delete("queue:$eventId:active:$token")
 
         // when & then
-        queueQueryService.requireActive(eventId, token)
-    }
-
-    @Test
-    fun `토큰이 null이면 requireActive를 호출했을 때 InvalidQueueTokenException이 발생한다`() {
-        // given
-        val eventId = System.nanoTime()
-
-        // when & then
-        assertThatThrownBy { queueQueryService.requireActive(eventId, null) }
-            .isInstanceOf(InvalidQueueTokenException::class.java)
+        assertThatThrownBy { queueQueryService.checkStatus(eventId, token) }
+            .isInstanceOf(QueueActiveExpiredException::class.java)
     }
 }

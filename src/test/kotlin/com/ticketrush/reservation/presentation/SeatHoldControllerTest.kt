@@ -1,9 +1,11 @@
 package com.ticketrush.reservation.presentation
 
 import com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper
-import com.ticketrush.queue.application.QueueQueryService
+import com.ticketrush.queue.application.QueueCommandService
 import com.ticketrush.queue.domain.InvalidQueueTokenException
+import com.ticketrush.queue.domain.QueueActiveExpiredException
 import com.ticketrush.queue.domain.QueueNotActiveException
+import com.ticketrush.queue.domain.QueuePhoneMismatchException
 import com.ticketrush.reservation.application.ReservationCommandService
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.SeatAlreadyHeldException
@@ -57,7 +59,7 @@ class SeatHoldControllerTest {
     lateinit var phoneEncryptor: PhoneEncryptor
 
     @Autowired
-    lateinit var queueQueryService: QueueQueryService
+    lateinit var queueCommandService: QueueCommandService
 
     @TestConfiguration
     class MockConfig {
@@ -71,7 +73,7 @@ class SeatHoldControllerTest {
         fun phoneEncryptor(): PhoneEncryptor = mockk()
 
         @Bean
-        fun queueQueryService(): QueueQueryService = mockk()
+        fun queueCommandService(): QueueCommandService = mockk()
     }
 
     @Test
@@ -136,7 +138,8 @@ class SeatHoldControllerTest {
     @Test
     fun `대기열 토큰이 없으면 401을 반환한다`() {
         // given
-        every { queueQueryService.requireActive(1L, null) } throws InvalidQueueTokenException()
+        전화번호_해싱_스텁()
+        every { queueCommandService.admit(1L, null, any()) } throws InvalidQueueTokenException()
 
         // when & then
         mockMvc.perform(홀드_요청(seatIds = listOf(10L), queueToken = null)).andExpect(status().isUnauthorized)
@@ -145,7 +148,8 @@ class SeatHoldControllerTest {
     @Test
     fun `대기열 토큰이 유효하지 않으면 401을 반환한다`() {
         // given
-        every { queueQueryService.requireActive(1L, "invalid-token") } throws InvalidQueueTokenException()
+        전화번호_해싱_스텁()
+        every { queueCommandService.admit(1L, "invalid-token", any()) } throws InvalidQueueTokenException()
 
         // when & then
         mockMvc.perform(홀드_요청(seatIds = listOf(10L), queueToken = "invalid-token")).andExpect(status().isUnauthorized)
@@ -154,14 +158,41 @@ class SeatHoldControllerTest {
     @Test
     fun `아직 대기열 순서가 아니면 403을 반환한다`() {
         // given
-        every { queueQueryService.requireActive(1L, "waiting-token") } throws QueueNotActiveException()
+        전화번호_해싱_스텁()
+        every { queueCommandService.admit(1L, "waiting-token", any()) } throws QueueNotActiveException()
 
         // when & then
         mockMvc.perform(홀드_요청(seatIds = listOf(10L), queueToken = "waiting-token")).andExpect(status().isForbidden)
     }
 
+    @Test
+    fun `활성 구간이 끝난 토큰이면 403과 QUEUE_ACTIVE_EXPIRED를 반환한다`() {
+        // given
+        전화번호_해싱_스텁()
+        every { queueCommandService.admit(1L, "ended-token", any()) } throws QueueActiveExpiredException()
+
+        // when & then
+        mockMvc
+            .perform(홀드_요청(seatIds = listOf(10L), queueToken = "ended-token"))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value("QUEUE_ACTIVE_EXPIRED"))
+    }
+
+    @Test
+    fun `토큰이 다른 전화번호에 묶여 있으면 403과 QUEUE_PHONE_MISMATCH를 반환한다`() {
+        // given
+        전화번호_해싱_스텁()
+        every { queueCommandService.admit(1L, "bound-token", any()) } throws QueuePhoneMismatchException()
+
+        // when & then
+        mockMvc
+            .perform(홀드_요청(seatIds = listOf(10L), queueToken = "bound-token"))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value("QUEUE_PHONE_MISMATCH"))
+    }
+
     private fun 대기열_통과_처리(token: String = "test-queue-token") {
-        every { queueQueryService.requireActive(1L, token) } just Runs
+        every { queueCommandService.admit(1L, token, any()) } just Runs
     }
 
     private fun 전화번호_해싱_스텁(): Pair<PhoneHash, EncryptedPhone> {
@@ -208,7 +239,7 @@ class SeatHoldControllerTest {
     companion object {
         private val seatHoldPathParameters = pathParameters(parameterWithName("eventId").description("공연 id"))
         private val seatHoldRequestHeaders =
-            requestHeaders(headerWithName("X-Queue-Token").description("대기열 등록 시 발급받은 토큰 (Active 상태여야 함)"))
+            requestHeaders(headerWithName("X-Queue-Token").description("대기열 등록 시 발급받은 토큰 (Active 상태여야 하며, 처음 쓴 전화번호에만 쓸 수 있음)"))
         private val seatHoldRequestFields =
             requestFields(
                 fieldWithPath("seatIds").description("선택한 좌석 id 목록 (1~2개)"),

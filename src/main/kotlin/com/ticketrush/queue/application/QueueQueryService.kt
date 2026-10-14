@@ -2,7 +2,7 @@ package com.ticketrush.queue.application
 
 import com.ticketrush.queue.QueuePolicyProperties
 import com.ticketrush.queue.domain.InvalidQueueTokenException
-import com.ticketrush.queue.domain.QueueNotActiveException
+import com.ticketrush.queue.domain.QueueActiveExpiredException
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.domain.SoldOutPort
 import com.ticketrush.queue.presentation.QueueStatusResponse
@@ -21,6 +21,7 @@ class QueueQueryService(
         token: String,
     ): QueueStatusResponse {
         val status = queueRepository.findStatus(eventId, token) ?: throw InvalidQueueTokenException()
+        if (status.ended) throw QueueActiveExpiredException()
         val soldOut = soldOutPort.isSoldOut(eventId)
 
         if (status.active) {
@@ -30,14 +31,6 @@ class QueueQueryService(
         val rank = status.sequence - status.lastPromotedSequence
         val interval = if (soldOut) withJitter(policy.pollInterval.farMax) else nextPollInterval(rank)
         return QueueStatusResponse(rank = rank, nextPollIntervalMs = interval.toMillis(), soldOut = soldOut)
-    }
-
-    fun requireActive(
-        eventId: Long,
-        token: String?,
-    ) {
-        val status = token?.let { queueRepository.findStatus(eventId, it) } ?: throw InvalidQueueTokenException()
-        if (!status.active) throw QueueNotActiveException()
     }
 
     private fun nextPollInterval(rank: Long): Duration {
