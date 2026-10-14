@@ -43,25 +43,32 @@ class QueueRegisterScriptTest : IntegrationTest() {
     fun `동시에 등록해도 순번이 겹치지 않고 빠짐이 없다`() {
         // given
         val count = 200
-        val ready = CountDownLatch(count)
-        val start = CountDownLatch(1)
-        val pool = Executors.newFixedThreadPool(count)
 
         // when
-        val futures =
-            (1..count).map {
-                pool.submit<Long> {
-                    ready.countDown()
-                    start.await()
-                    repository.열린_공연에_등록(eventId, UUID.randomUUID().toString())
-                }
-            }
-        ready.await()
-        start.countDown()
-        val sequences = futures.map { it.get(10, TimeUnit.SECONDS) }
-        pool.shutdown()
+        val sequences = 동시에_등록(count)
 
         // then
         assertThat(sequences).containsExactlyInAnyOrderElementsOf((1L..count).toList())
+    }
+
+    private fun 동시에_등록(count: Int): List<Long> {
+        val ready = CountDownLatch(count)
+        val start = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(count)
+        return try {
+            val futures =
+                (1..count).map {
+                    pool.submit<Long> {
+                        ready.countDown()
+                        start.await()
+                        repository.열린_공연에_등록(eventId, UUID.randomUUID().toString())
+                    }
+                }
+            ready.await()
+            start.countDown()
+            futures.map { it.get(10, TimeUnit.SECONDS) }
+        } finally {
+            pool.shutdownNow()
+        }
     }
 }
