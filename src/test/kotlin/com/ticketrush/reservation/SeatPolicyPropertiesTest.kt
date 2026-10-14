@@ -57,10 +57,33 @@ class SeatPolicyPropertiesTest {
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 
+    @Test
+    fun `soldMarkTtl이 holdTtl과 같으면 만들 수 있다`() {
+        // when
+        val policy = 정책(holdTtl = Duration.ofMinutes(5), soldMarkTtl = Duration.ofMinutes(5))
+
+        // then
+        assertThat(policy.soldMarkTtl).isEqualTo(Duration.ofMinutes(5))
+    }
+
+    @Test
+    fun `soldMarkTtl이 holdTtl보다 짧으면 만들 수 없다`() {
+        // when & then
+        assertThatThrownBy { 정책(holdTtl = Duration.ofMinutes(5), soldMarkTtl = Duration.ofMinutes(4)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("soldMarkTtl")
+    }
+
     private fun 정책(
         holdTtl: Duration = Duration.ofMinutes(5),
         maxPerPhone: Int = 2,
         paymentFailedHoldTtl: Duration = Duration.ofMinutes(1),
+        soldMarkTtl: Duration = Duration.ofHours(1),
     ): SeatPolicyProperties =
-        SeatPolicyProperties(holdTtl = holdTtl, maxPerPhone = maxPerPhone, paymentFailedHoldTtl = paymentFailedHoldTtl)
+        SeatPolicyProperties(
+            holdTtl = holdTtl,
+            maxPerPhone = maxPerPhone,
+            paymentFailedHoldTtl = paymentFailedHoldTtl,
+            soldMarkTtl = soldMarkTtl,
+        )
 }

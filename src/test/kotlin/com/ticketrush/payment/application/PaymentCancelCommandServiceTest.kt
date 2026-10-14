@@ -20,6 +20,7 @@ import com.ticketrush.reservation.domain.ReservationLookupFailedException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
 import com.ticketrush.reservation.domain.Seat
+import com.ticketrush.reservation.domain.SeatHoldFilterPort
 import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.reservation.domain.SeatStatus
 import com.ticketrush.shared.PhoneHash
@@ -56,6 +57,9 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var seatRepository: SeatRepositoryPort
+
+    @Autowired
+    lateinit var seatHoldFilter: SeatHoldFilterPort
 
     @Autowired
     lateinit var reservationRepository: ReservationRepositoryPort
@@ -152,6 +156,21 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         assertThat(updated.status).isEqualTo(ReservationStatus.CANCELED)
         val available = seatRepository.findAllByEventId(reservation.eventId).single { it.status == SeatStatus.AVAILABLE }
         assertThat(available.reservationId).isNull()
+    }
+
+    @Test
+    fun `취소하면 좌석의 Redis 마크가 지워져 바로 다른 토큰이 선점할 수 있다`() {
+        // given
+        val reservation = 결제완료_예약_준비()
+        val seatIds = seatRepository.findAllByReservationId(reservation.id).map { it.id }
+        seatHoldFilter.tryClaim(reservation.eventId, seatIds, reservation.holdToken.toString())
+        every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-MARK")
+
+        // when
+        cancelService.cancel(reservation.reservationNo!!, PHONE)
+
+        // then
+        assertThat(seatHoldFilter.tryClaim(reservation.eventId, seatIds, UUID.randomUUID().toString())).isTrue()
     }
 
     @Test

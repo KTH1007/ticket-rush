@@ -43,9 +43,7 @@ class ReservationCommandService(
         encryptedPhone: EncryptedPhone,
     ): Reservation {
         val holdToken = UUID.randomUUID()
-        if (!seatHoldFilter.tryClaim(eventId, seatSelection.seatIds, holdToken.toString())) {
-            throw SeatAlreadyHeldException()
-        }
+        claimOrThrow(eventId, seatSelection.seatIds, holdToken)
         // FK 검증이 커밋 시점으로 미뤄져 커밋 실패도 execute에서 예외로 올라오므로 같이 해제된다
         return try {
             checkNotNull(
@@ -55,6 +53,23 @@ class ReservationCommandService(
             releaseQuietly(eventId, seatSelection.seatIds, holdToken)
             throw e
         }
+    }
+
+    // 응답이 유실돼도 Redis에는 키가 남았을 수 있어 예외 때도 해제를 시도한다. 충돌(false)은 스크립트가 이미 되돌렸으므로 부르지 않는다
+    @Suppress("TooGenericExceptionCaught")
+    private fun claimOrThrow(
+        eventId: Long,
+        seatIds: List<Long>,
+        holdToken: UUID,
+    ) {
+        val claimed =
+            try {
+                seatHoldFilter.tryClaim(eventId, seatIds, holdToken.toString())
+            } catch (e: Exception) {
+                releaseQuietly(eventId, seatIds, holdToken)
+                throw e
+            }
+        if (!claimed) throw SeatAlreadyHeldException()
     }
 
     // 실패 종류를 가리지 않고 전부 여기로 온다. release 자체가 실패해도 원래 예외를 삼키지 않도록 별도로 감싸고, 그 실패는 로그로만 남긴다.

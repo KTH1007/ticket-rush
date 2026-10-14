@@ -18,7 +18,12 @@ class PaymentHoldPolicyGuardTest {
             reclaimInterval = Duration.ofSeconds(5),
             minHoldRemaining = minHoldRemaining,
         ),
-        SeatPolicyProperties(holdTtl = holdTtl, maxPerPhone = 2, paymentFailedHoldTtl = paymentFailedHoldTtl),
+        SeatPolicyProperties(
+            holdTtl = holdTtl,
+            maxPerPhone = 2,
+            paymentFailedHoldTtl = paymentFailedHoldTtl,
+            soldMarkTtl = Duration.ofHours(1),
+        ),
     )
 
     @Test
