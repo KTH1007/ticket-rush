@@ -5,6 +5,7 @@ import com.ticketrush.queue.application.QueueCommandService
 import com.ticketrush.queue.application.QueueQueryService
 import com.ticketrush.queue.domain.InvalidQueueTokenException
 import com.ticketrush.queue.domain.QueueActiveExpiredException
+import com.ticketrush.queue.domain.QueueClosedException
 import com.ticketrush.queue.domain.QueueEventNotFoundException
 import com.ticketrush.queue.domain.QueueNotOpenException
 import io.mockk.every
@@ -92,6 +93,16 @@ class QueueControllerTest {
             .perform(post("/api/events/{eventId}/queues", 10L))
             .andExpect(status().isConflict)
             .andExpect(jsonPath("$.code").value("QUEUE_NOT_OPEN"))
+    }
+
+    @Test
+    fun `이미 시작한 공연에 등록하면 409와 QUEUE_CLOSED를 반환한다`() {
+        every { queueCommandService.register(20L) } throws QueueClosedException(20L, LocalDateTime.of(2026, 10, 11, 19, 0))
+
+        mockMvc
+            .perform(post("/api/events/{eventId}/queues", 20L))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("QUEUE_CLOSED"))
     }
 
     @Test

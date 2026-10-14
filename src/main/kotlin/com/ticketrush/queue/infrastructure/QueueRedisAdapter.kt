@@ -2,6 +2,7 @@ package com.ticketrush.queue.infrastructure
 
 import com.ticketrush.queue.QueuePolicyProperties
 import com.ticketrush.queue.domain.BindResult
+import com.ticketrush.queue.domain.EventSchedule
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.domain.QueueStatus
 import com.ticketrush.queue.domain.RegisterResult
@@ -24,7 +25,7 @@ class QueueRedisAdapter(
     override fun register(
         eventId: Long,
         token: String,
-        opensAtHint: Instant?,
+        scheduleHint: EventSchedule?,
     ): RegisterResult {
         @Suppress("UNCHECKED_CAST")
         val result =
@@ -35,10 +36,14 @@ class QueueRedisAdapter(
                 policy.tokenTtl.toSeconds().toString(),
                 eventId.toString(),
                 policy.scheduleCacheTtl.toSeconds().toString(),
-                opensAtHint?.toEpochMilli()?.toString().orEmpty(),
+                scheduleHint?.opensAt.toArg(),
+                scheduleHint?.startsAt.toArg(),
             ) as? List<Long> ?: error("대기열 등록 실패 : 반환값 없음")
         return toRegisterResult(result)
     }
+
+    // 일정을 모르는 호출은 빈 문자열을 넘겨 스크립트가 힌트 없음으로 보게 한다
+    private fun Instant?.toArg(): String = this?.toEpochMilli()?.toString().orEmpty()
 
     private fun registerKeys(
         eventId: Long,
@@ -49,12 +54,14 @@ class QueueRedisAdapter(
         "queue:$eventId:token:$token",
         ACTIVE_EVENT_IDS_KEY,
         "queue:$eventId:opensAt",
+        "queue:$eventId:startsAt",
     )
 
     private fun toRegisterResult(result: List<Long>): RegisterResult =
         when (result[0]) {
             REGISTERED -> RegisterResult.Registered(result[1])
             NOT_OPEN -> RegisterResult.NotOpen(Instant.ofEpochMilli(result[1]))
+            CLOSED -> RegisterResult.Closed(Instant.ofEpochMilli(result[1]))
             else -> RegisterResult.ScheduleUnknown
         }
 
@@ -144,6 +151,7 @@ class QueueRedisAdapter(
         // queue-register.lua의 반환 코드
         private const val REGISTERED = 1L
         private const val NOT_OPEN = 0L
+        private const val CLOSED = -2L
 
         private val registerScript: RedisScript<List<*>> =
             DefaultRedisScript<List<*>>().apply {
