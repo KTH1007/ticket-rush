@@ -133,6 +133,20 @@ class QueuePolicyPropertiesTest {
         assertRejected("pollInterval.farMax") { properties(tokenTtl = Duration.ofMinutes(5), farMax = Duration.ofSeconds(290)) }
     }
 
+    // Redis에는 초 단위로 잘려 전달돼 1100ms는 1초 뒤에 만료된다
+    @Test
+    fun `조회 간격 상한이 초 단위로 자른 토큰 수명보다 길면 거부한다`() {
+        assertRejected("pollInterval.farMax") {
+            properties(
+                tokenTtl = Duration.ofMillis(1_100),
+                near = Duration.ofMillis(50),
+                far = Duration.ofMillis(100),
+                farMax = Duration.ofMillis(1_050),
+                jitterRatio = 0.0,
+            )
+        }
+    }
+
     @Test
     fun `지터 비율이 0과 1 사이를 벗어나면 거부한다`() {
         assertRejected("jitterRatio") { properties(jitterRatio = -0.1) }

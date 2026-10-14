@@ -39,8 +39,8 @@ data class QueuePolicyProperties(
             "pollInterval.farMax는 far보다 짧을 수 없습니다: farMax=${pollInterval.farMax}, far=${pollInterval.far}"
         }
         require(pollInterval.jitterRatio in 0.0..1.0) { "pollInterval.jitterRatio는 0 이상 1 이하여야 합니다: ${pollInterval.jitterRatio}" }
-        // 조회 간격이 토큰 수명을 넘으면 다음 조회 전에 토큰이 만료된다
-        require(pollInterval.farMax.toMillis() * (1 + pollInterval.jitterRatio) < tokenTtl.toMillis()) {
+        // 조회 간격이 토큰 수명을 넘으면 다음 조회 전에 토큰이 만료된다. Redis에는 초 단위로 잘려 전달되므로 그 값과 비교한다
+        require(pollInterval.farMax.toMillis() * (1 + pollInterval.jitterRatio) < tokenTtl.toSeconds() * MILLIS_PER_SECOND) {
             "pollInterval.farMax는 지터를 더해도 tokenTtl보다 짧아야 합니다: farMax=${pollInterval.farMax}, tokenTtl=$tokenTtl"
         }
         require(nearRankThreshold > 0) { "nearRankThreshold는 양수여야 합니다: $nearRankThreshold" }
@@ -48,6 +48,8 @@ data class QueuePolicyProperties(
         require(!broadcastCacheTtl.isNegative) { "broadcastCacheTtl은 음수일 수 없습니다: $broadcastCacheTtl" }
     }
 }
+
+private const val MILLIS_PER_SECOND = 1_000L
 
 private fun Duration.isPositive(): Boolean = !isNegative && !isZero
 
