@@ -6,6 +6,7 @@ import com.ticketrush.reservation.domain.SeatSelection
 import com.ticketrush.shared.PhoneHash
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.data.redis.RedisConnectionFailureException
@@ -28,11 +29,12 @@ class ReservationCommandServiceClaimFailureTest {
     @Test
     fun `선점 중 예외가 나면 같은 토큰으로 해제를 시도하고 원래 예외를 던진다`() {
         // given
-        every { seatHoldFilter.tryClaim(any(), any(), any()) } throws RedisConnectionFailureException("타임아웃")
+        val claimedToken = slot<String>()
+        every { seatHoldFilter.tryClaim(any(), any(), capture(claimedToken)) } throws RedisConnectionFailureException("타임아웃")
 
         // when & then
         assertThatThrownBy { 홀드() }.isInstanceOf(RedisConnectionFailureException::class.java)
-        verify(exactly = 1) { seatHoldFilter.release(EVENT_ID, SEAT_IDS, any()) }
+        verify(exactly = 1) { seatHoldFilter.release(EVENT_ID, SEAT_IDS, claimedToken.captured) }
     }
 
     @Test
