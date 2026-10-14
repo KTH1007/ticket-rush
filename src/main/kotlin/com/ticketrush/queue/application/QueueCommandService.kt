@@ -3,6 +3,7 @@ package com.ticketrush.queue.application
 import com.ticketrush.queue.domain.BindResult
 import com.ticketrush.queue.domain.EventSchedulePort
 import com.ticketrush.queue.domain.InvalidQueueTokenException
+import com.ticketrush.queue.domain.QueueActiveExpiredException
 import com.ticketrush.queue.domain.QueueEventNotFoundException
 import com.ticketrush.queue.domain.QueueNotActiveException
 import com.ticketrush.queue.domain.QueueNotOpenException
@@ -54,8 +55,10 @@ class QueueCommandService(
     private fun notActiveReason(
         eventId: Long,
         token: String,
-    ): BusinessException =
-        if (queueRepository.findStatus(eventId, token) == null) InvalidQueueTokenException() else QueueNotActiveException()
+    ): BusinessException {
+        val status = queueRepository.findStatus(eventId, token) ?: return InvalidQueueTokenException()
+        return if (status.ended) QueueActiveExpiredException() else QueueNotActiveException()
+    }
 
     // 등록은 로그인 같은 확인이 없어서 없는 이벤트 번호로 Redis 키가 남지 않게 여기서 막는다. Redis에 오픈 시각이 없을 때만 DB를 본다
     private fun loadOpensAt(eventId: Long): Instant = eventSchedule.opensAt(eventId) ?: throw QueueEventNotFoundException(eventId)

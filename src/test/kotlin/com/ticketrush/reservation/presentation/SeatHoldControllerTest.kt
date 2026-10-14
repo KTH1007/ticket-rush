@@ -3,6 +3,7 @@ package com.ticketrush.reservation.presentation
 import com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper
 import com.ticketrush.queue.application.QueueCommandService
 import com.ticketrush.queue.domain.InvalidQueueTokenException
+import com.ticketrush.queue.domain.QueueActiveExpiredException
 import com.ticketrush.queue.domain.QueueNotActiveException
 import com.ticketrush.queue.domain.QueuePhoneMismatchException
 import com.ticketrush.reservation.application.ReservationCommandService
@@ -162,6 +163,19 @@ class SeatHoldControllerTest {
 
         // when & then
         mockMvc.perform(홀드_요청(seatIds = listOf(10L), queueToken = "waiting-token")).andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `활성 구간이 끝난 토큰이면 403과 QUEUE_ACTIVE_EXPIRED를 반환한다`() {
+        // given
+        전화번호_해싱_스텁()
+        every { queueCommandService.admit(1L, "ended-token", any()) } throws QueueActiveExpiredException()
+
+        // when & then
+        mockMvc
+            .perform(홀드_요청(seatIds = listOf(10L), queueToken = "ended-token"))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value("QUEUE_ACTIVE_EXPIRED"))
     }
 
     @Test

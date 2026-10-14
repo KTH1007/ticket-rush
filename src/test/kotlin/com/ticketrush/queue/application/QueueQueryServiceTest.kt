@@ -1,12 +1,14 @@
 package com.ticketrush.queue.application
 
 import com.ticketrush.queue.domain.InvalidQueueTokenException
+import com.ticketrush.queue.domain.QueueActiveExpiredException
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.열린_공연에_등록
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.data.redis.core.StringRedisTemplate
 import java.time.Duration
 import java.util.UUID
 import kotlin.test.Test
@@ -17,6 +19,9 @@ class QueueQueryServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var queueQueryService: QueueQueryService
+
+    @Autowired
+    lateinit var redisTemplate: StringRedisTemplate
 
     @Test
     fun `등록하지 않은 토큰으로 조회하면 InvalidQueueTokenException이 발생한다`() {
@@ -76,5 +81,19 @@ class QueueQueryServiceTest : IntegrationTest() {
         // then
         assertThat(status.rank).isEqualTo(101)
         assertThat(status.nextPollIntervalMs).isEqualTo(Duration.ofSeconds(15).toMillis())
+    }
+
+    @Test
+    fun `활성 구간이 끝난 토큰으로 조회하면 QueueActiveExpiredException이 발생한다`() {
+        // given
+        val eventId = System.nanoTime()
+        val token = UUID.randomUUID().toString()
+        queueRepository.열린_공연에_등록(eventId, token)
+        queueRepository.promote(eventId, 1)
+        redisTemplate.delete("queue:$eventId:active:$token")
+
+        // when & then
+        assertThatThrownBy { queueQueryService.checkStatus(eventId, token) }
+            .isInstanceOf(QueueActiveExpiredException::class.java)
     }
 }
