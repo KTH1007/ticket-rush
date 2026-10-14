@@ -55,6 +55,22 @@ class QueueTokenRenewalTest : IntegrationTest() {
     }
 
     @Test
+    fun `승격된 뒤 활성이 만료된 토큰은 조회해도 수명이 늘지 않는다`() {
+        // given
+        val token = UUID.randomUUID().toString()
+        repository.열린_공연에_등록(eventId, token)
+        repository.promote(eventId, 1)
+        redisTemplate.delete("queue:$eventId:active:$token")
+        redisTemplate.expire(tokenKey(token), Duration.ofSeconds(5))
+
+        // when
+        repository.findStatus(eventId, token)
+
+        // then
+        assertThat(redisTemplate.getExpire(tokenKey(token))).isLessThanOrEqualTo(5)
+    }
+
+    @Test
     fun `만료된 토큰은 조회해도 되살아나지 않는다`() {
         // given
         val token = UUID.randomUUID().toString()
