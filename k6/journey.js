@@ -100,6 +100,7 @@ function pickSeats() {
 // 서버가 알려준 간격을 그대로 따른다. 지터는 서버가 안 주므로 클라이언트가 조금 더한다
 function waitUntilActive(token) {
   const started = Date.now();
+  let lastIntervalMs = 0;
   while ((Date.now() - started) / 1000 < WAIT_LIMIT_SECONDS) {
     const res = http.get(`${BASE}/api/events/${EVENT_ID}/queues/me`, {
       headers: { 'X-Queue-Token': token },
@@ -109,10 +110,11 @@ function waitUntilActive(token) {
     if (res.status === 200) {
       const body = res.json();
       if (body.rank === 0) return (Date.now() - started) / 1000;
+      lastIntervalMs = body.nextPollIntervalMs;
       sleep(Math.max(body.nextPollIntervalMs, 1000) / 1000 * (0.9 + Math.random() * 0.2));
     } else {
       if (res.status === 503) pollBusy.add(1);
-      sleep(retryAfterSeconds(res) + Math.random() * 2);
+      sleep(Math.max(retryAfterSeconds(res), lastIntervalMs / 1000) + Math.random() * 2);
     }
   }
   return null;

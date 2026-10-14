@@ -798,7 +798,8 @@ stage_A2() {
 # limit_conn은 같은 순간의 동시 처리 수만 막아서 앱 CPU를 얼마나 쓰는지는 못 막는다(M1). 속도로 막아 홀드와 결제의 몫을 남기는지 보려는 것
 nginx_variant() { # 줄서기 초당 제한, 순번 조회 초당 제한
   local reg=$1 poll=$2
-  python3 - "$reg" "$poll" docker/nginx/nginx.conf "$ABS_OUT/nginx-variant.conf" <<'PY'
+  python3 - "$reg" "$poll" docker/nginx/nginx.conf "$ABS_OUT/nginx-variant.conf" <<'PY' || { log "nginx 변형 파일을 만들지 못해 측정을 멈춤"; exit 1; }
+import re
 import sys
 reg, poll, src, dst = sys.argv[1:5]
 s = open(src).read()
@@ -807,8 +808,10 @@ for name, key, rate in (("queue_register_rate", "$register_key", int(reg)), ("qu
     if rate > 0:
         zones += f"    limit_req_zone {key} zone={name}:1m rate={rate}r/s;\n"
         locs += f"            limit_req zone={name} burst={max(rate // 5, 1)} nodelay;\n"
-s = s.replace("    limit_conn_status 503;\n", zones + "    limit_req_status 503;\n    limit_req_log_level info;\n    limit_conn_status 503;\n", 1)
-s = s.replace("            limit_conn queue_poll 250;\n", "            limit_conn queue_poll 250;\n" + locs, 1)
+s, n1 = re.subn(r"( *limit_conn_status 503;\n)", lambda m: zones + "    limit_req_status 503;\n    limit_req_log_level info;\n" + m.group(1), s, count=1)
+s, n2 = re.subn(r"( *limit_conn queue_poll \d+;\n)", lambda m: m.group(1) + locs, s, count=1)
+if n1 != 1 or n2 != 1:
+    sys.exit("nginx.conf에서 치환 지점을 찾지 못함")
 open(dst, "w").write(s)
 PY
   export NGINX_CONF="$ABS_OUT/nginx-variant.conf"

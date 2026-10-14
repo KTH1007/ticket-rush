@@ -226,6 +226,8 @@ def intervals(responses_path, users, rate_path):
             except (ValueError, KeyError):
                 continue
     rows = [r for r in rows if r[1] > 0]
+    if not rows:
+        raise SystemExit("유효한 순번 조회 응답이 없음")
     weight = users / len(rows)
     buckets = [(0, 100, "100위 이내"), (101, 6000, "101 ~ 6,000위"), (6001, 20000, "6,001 ~ 20,000위"),
                (20001, 100000, "20,001 ~ 100,000위"), (100001, 200000, "100,001 ~ 200,000위"), (200001, 10**12, "200,001위 이후")]
