@@ -12,7 +12,6 @@ import com.ticketrush.reservation.domain.ReservationLookupRateLimitedException
 import com.ticketrush.reservation.domain.ReservationLookupRateLimiterPort
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
-import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.shared.PhoneHasher
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.OptimisticLockingFailureException
@@ -31,7 +30,7 @@ data class CanceledPayment(
 @Component
 class PaymentCancelRecorder(
     private val reservationRepository: ReservationRepositoryPort,
-    private val seatRepository: SeatRepositoryPort,
+    private val seatUpdater: PaymentSeatUpdater,
     private val paymentRepository: PaymentRepositoryPort,
     private val rateLimiter: ReservationLookupRateLimiterPort,
     private val phoneHasher: PhoneHasher,
@@ -82,7 +81,7 @@ class PaymentCancelRecorder(
         try {
             reservation.cancel()
             reservationRepository.save(reservation)
-            seatRepository.returnToAvailable(reservation.id)
+            seatUpdater.returnToAvailable(reservation)
 
             val payment =
                 requireNotNull(paymentRepository.findByReservationId(reservation.id)) {

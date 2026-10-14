@@ -10,7 +10,6 @@ import com.ticketrush.payment.domain.ReservationPaidEvent
 import com.ticketrush.reservation.SeatPolicyProperties
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
-import com.ticketrush.reservation.domain.SeatRepositoryPort
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
@@ -26,7 +25,7 @@ private val logger = KotlinLogging.logger {}
 class PaymentClaimService(
     private val paymentRepository: PaymentRepositoryPort,
     private val reservationRepository: ReservationRepositoryPort,
-    private val seatRepository: SeatRepositoryPort,
+    private val seatUpdater: PaymentSeatUpdater,
     private val reservationNoGenerator: ReservationNoGenerator,
     private val seatPolicy: SeatPolicyProperties,
     private val historyRecorder: PaymentHistoryRecorder,
@@ -109,7 +108,7 @@ class PaymentClaimService(
         reservation.confirmPayment()
         reservation.assignReservationNo(reservationNo)
         reservationRepository.save(reservation)
-        seatRepository.markSold(reservation.id)
+        seatUpdater.markSold(reservation)
 
         val fromStatus = payment.status
         payment.markSuccess(pgTransactionId, paidAt)
@@ -129,7 +128,7 @@ class PaymentClaimService(
         val shortened = now.plus(seatPolicy.paymentFailedHoldTtl)
         reservation.shortenHoldOnPaymentFailure(shortened)
         reservationRepository.save(reservation)
-        seatRepository.shortenHoldExpiry(reservation.id, shortened)
+        seatUpdater.shortenHold(reservation, shortened)
 
         val fromStatus = payment.status
         payment.markFailed()
