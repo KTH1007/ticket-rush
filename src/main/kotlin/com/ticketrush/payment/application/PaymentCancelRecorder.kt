@@ -8,10 +8,10 @@ import com.ticketrush.payment.domain.ReservationCanceledEvent
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationAlreadyCanceledException
 import com.ticketrush.reservation.domain.ReservationLookupFailedException
-import com.ticketrush.reservation.domain.ReservationLookupRateLimitedException
 import com.ticketrush.reservation.domain.ReservationLookupRateLimiterPort
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
+import com.ticketrush.shared.ClientIp
 import com.ticketrush.shared.PhoneHasher
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.OptimisticLockingFailureException
@@ -41,8 +41,9 @@ class PaymentCancelRecorder(
     fun confirmCancel(
         reservationNo: String,
         phone: String,
+        clientIp: ClientIp,
     ): CanceledPayment {
-        val reservation = verifyOwnership(reservationNo, phone)
+        val reservation = verifyOwnership(reservationNo, phone, clientIp)
         requireCancelable(reservation)
         return CanceledPayment(markCanceled(reservation), reservation.idempotencyKey)
     }
@@ -52,15 +53,16 @@ class PaymentCancelRecorder(
     private fun verifyOwnership(
         reservationNo: String,
         phone: String,
+        clientIp: ClientIp,
     ): Reservation {
-        if (!rateLimiter.tryReserveAttempt(reservationNo)) throw ReservationLookupRateLimitedException()
+        rateLimiter.reserveOrThrow(reservationNo, clientIp)
 
         val reservation = reservationRepository.findByReservationNo(reservationNo)
         if (reservation == null || reservation.phoneHash != phoneHasher.hash(phone)) {
             throw ReservationLookupFailedException()
         }
 
-        rateLimiter.releaseAttempt(reservationNo)
+        rateLimiter.releaseAttempt(reservationNo, clientIp)
         return reservation
     }
 

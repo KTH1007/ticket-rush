@@ -2,6 +2,8 @@ package com.ticketrush.queue.presentation
 
 import com.ticketrush.queue.application.QueueCommandService
 import com.ticketrush.queue.application.QueueQueryService
+import com.ticketrush.shared.ClientIp
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -21,8 +23,9 @@ class QueueController(
     @PostMapping
     fun register(
         @PathVariable eventId: Long,
+        request: HttpServletRequest,
     ): ResponseEntity<Unit> {
-        val token = queueCommandService.register(eventId)
+        val token = queueCommandService.register(eventId, ClientIp.from(request))
         val headers = HttpHeaders()
         headers.add("X-Queue-Token", token)
         return ResponseEntity(headers, HttpStatus.CREATED)

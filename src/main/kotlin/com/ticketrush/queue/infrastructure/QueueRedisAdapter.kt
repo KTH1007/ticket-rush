@@ -6,12 +6,14 @@ import com.ticketrush.queue.domain.EventSchedule
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.domain.QueueStatus
 import com.ticketrush.queue.domain.RegisterResult
+import com.ticketrush.shared.ClientIp
 import com.ticketrush.shared.PhoneHash
 import org.springframework.core.io.ClassPathResource
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.data.redis.core.script.RedisScript
 import org.springframework.stereotype.Repository
+import java.time.Duration
 import java.time.Instant
 import java.util.HexFormat
 
@@ -25,19 +27,24 @@ class QueueRedisAdapter(
     override fun register(
         eventId: Long,
         token: String,
+        clientIp: ClientIp,
         scheduleHint: EventSchedule?,
     ): RegisterResult {
         @Suppress("UNCHECKED_CAST")
         val result =
             redisTemplate.execute(
                 registerScript,
-                registerKeys(eventId, token),
+                registerKeys(eventId, token, clientIp),
                 token,
                 policy.tokenTtl.toSeconds().toString(),
                 eventId.toString(),
                 policy.scheduleCacheTtl.toSeconds().toString(),
                 scheduleHint?.opensAt.toArg(),
                 scheduleHint?.startsAt.toArg(),
+                policy.registerLimit.maxPerIp.toString(),
+                policy.registerLimit.window
+                    .toSeconds()
+                    .toString(),
             ) as? List<Long> ?: error("대기열 등록 실패 : 반환값 없음")
         return toRegisterResult(result)
     }
@@ -48,6 +55,7 @@ class QueueRedisAdapter(
     private fun registerKeys(
         eventId: Long,
         token: String,
+        clientIp: ClientIp,
     ) = listOf(
         "queue:$eventId:seq",
         "queue:$eventId:waiting",
@@ -55,6 +63,7 @@ class QueueRedisAdapter(
         ACTIVE_EVENT_IDS_KEY,
         "queue:$eventId:opensAt",
         "queue:$eventId:startsAt",
+        "queue:$eventId:register-ip:${clientIp.value}",
     )
 
     private fun toRegisterResult(result: List<Long>): RegisterResult =
@@ -62,8 +71,13 @@ class QueueRedisAdapter(
             REGISTERED -> RegisterResult.Registered(result[1])
             NOT_OPEN -> RegisterResult.NotOpen(Instant.ofEpochMilli(result[1]))
             CLOSED -> RegisterResult.Closed(Instant.ofEpochMilli(result[1]))
+            RATE_LIMITED -> RegisterResult.RateLimited(retryAfterOf(result[1]))
             else -> RegisterResult.ScheduleUnknown
         }
+
+    // 읽는 사이 윈도우가 끝났거나 만료 시간이 없으면 윈도우 전체를 준다
+    private fun retryAfterOf(remainingMillis: Long): Duration =
+        if (remainingMillis > 0) Duration.ofMillis(remainingMillis) else policy.registerLimit.window
 
     override fun promote(
         eventId: Long,
@@ -152,6 +166,7 @@ class QueueRedisAdapter(
         private const val REGISTERED = 1L
         private const val NOT_OPEN = 0L
         private const val CLOSED = -2L
+        private const val RATE_LIMITED = -3L
 
         private val registerScript: RedisScript<List<*>> =
             DefaultRedisScript<List<*>>().apply {

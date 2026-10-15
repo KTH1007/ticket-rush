@@ -2,6 +2,7 @@ package com.ticketrush.queue.domain
 
 import com.ticketrush.queue.QueuePolicyProperties
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.testClientIp
 import org.assertj.core.api.Assertions.assertThat
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.redis.core.StringRedisTemplate
@@ -37,8 +38,8 @@ class QueueRegisterGateTest : IntegrationTest() {
     fun `공연 일정을 모르고 힌트도 없으면 ScheduleUnknown이고 순번을 쓰지 않는다`() {
         val eventId = System.nanoTime()
 
-        val unknown = queueRepository.register(eventId, token())
-        val first = queueRepository.register(eventId, token(), schedule(Instant.EPOCH))
+        val unknown = queueRepository.register(eventId, token(), testClientIp)
+        val first = queueRepository.register(eventId, token(), testClientIp, schedule(Instant.EPOCH))
 
         assertThat(unknown).isEqualTo(RegisterResult.ScheduleUnknown)
         assertThat(first).isEqualTo(RegisterResult.Registered(1L))
@@ -48,7 +49,7 @@ class QueueRegisterGateTest : IntegrationTest() {
     fun `오픈 시각이 과거면 등록된다`() {
         val eventId = System.nanoTime()
 
-        val result = queueRepository.register(eventId, token(), schedule(hoursFromNow(-1)))
+        val result = queueRepository.register(eventId, token(), testClientIp, schedule(hoursFromNow(-1)))
 
         assertThat(result).isEqualTo(RegisterResult.Registered(1L))
     }
@@ -59,7 +60,7 @@ class QueueRegisterGateTest : IntegrationTest() {
         val token = token()
         val opensAt = hoursFromNow(1)
 
-        val result = queueRepository.register(eventId, token, schedule(opensAt))
+        val result = queueRepository.register(eventId, token, testClientIp, schedule(opensAt))
 
         assertThat(result).isEqualTo(RegisterResult.NotOpen(opensAt))
         assertThat(queueRepository.findStatus(eventId, token)).isNull()
@@ -70,9 +71,9 @@ class QueueRegisterGateTest : IntegrationTest() {
     fun `힌트는 캐시에 저장되어 다음 호출은 힌트 없이도 판정된다`() {
         val eventId = System.nanoTime()
         val opensAt = hoursFromNow(1)
-        queueRepository.register(eventId, token(), schedule(opensAt))
+        queueRepository.register(eventId, token(), testClientIp, schedule(opensAt))
 
-        val result = queueRepository.register(eventId, token())
+        val result = queueRepository.register(eventId, token(), testClientIp)
 
         assertThat(result).isEqualTo(RegisterResult.NotOpen(opensAt))
     }
@@ -81,9 +82,9 @@ class QueueRegisterGateTest : IntegrationTest() {
     fun `캐시가 있으면 새 힌트를 무시한다`() {
         val eventId = System.nanoTime()
         val opensAt = hoursFromNow(1)
-        queueRepository.register(eventId, token(), schedule(opensAt))
+        queueRepository.register(eventId, token(), testClientIp, schedule(opensAt))
 
-        val result = queueRepository.register(eventId, token(), schedule(hoursFromNow(-1)))
+        val result = queueRepository.register(eventId, token(), testClientIp, schedule(hoursFromNow(-1)))
 
         assertThat(result).isEqualTo(RegisterResult.NotOpen(opensAt))
     }
@@ -91,7 +92,7 @@ class QueueRegisterGateTest : IntegrationTest() {
     @Test
     fun `공연 일정 캐시에는 TTL이 걸린다`() {
         val eventId = System.nanoTime()
-        queueRepository.register(eventId, token(), schedule(hoursFromNow(1)))
+        queueRepository.register(eventId, token(), testClientIp, schedule(hoursFromNow(1)))
 
         val opensAtTtl = redisTemplate.getExpire("queue:$eventId:opensAt")
         val startsAtTtl = redisTemplate.getExpire("queue:$eventId:startsAt")
@@ -106,7 +107,13 @@ class QueueRegisterGateTest : IntegrationTest() {
         val token = token()
         val startsAt = hoursFromNow(-1)
 
-        val result = queueRepository.register(eventId, token, schedule(opensAt = hoursFromNow(-DAY_HOURS), startsAt = startsAt))
+        val result =
+            queueRepository.register(
+                eventId,
+                token,
+                testClientIp,
+                schedule(opensAt = hoursFromNow(-DAY_HOURS), startsAt = startsAt),
+            )
 
         assertThat(result).isEqualTo(RegisterResult.Closed(startsAt))
         assertThat(queueRepository.findStatus(eventId, token)).isNull()
@@ -117,9 +124,9 @@ class QueueRegisterGateTest : IntegrationTest() {
     fun `캐시된 시작 시각으로 힌트 없이도 Closed로 판정된다`() {
         val eventId = System.nanoTime()
         val startsAt = hoursFromNow(-1)
-        queueRepository.register(eventId, token(), schedule(opensAt = hoursFromNow(-DAY_HOURS), startsAt = startsAt))
+        queueRepository.register(eventId, token(), testClientIp, schedule(opensAt = hoursFromNow(-DAY_HOURS), startsAt = startsAt))
 
-        val result = queueRepository.register(eventId, token())
+        val result = queueRepository.register(eventId, token(), testClientIp)
 
         assertThat(result).isEqualTo(RegisterResult.Closed(startsAt))
     }

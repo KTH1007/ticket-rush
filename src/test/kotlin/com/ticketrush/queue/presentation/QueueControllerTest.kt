@@ -8,6 +8,8 @@ import com.ticketrush.queue.domain.QueueActiveExpiredException
 import com.ticketrush.queue.domain.QueueClosedException
 import com.ticketrush.queue.domain.QueueEventNotFoundException
 import com.ticketrush.queue.domain.QueueNotOpenException
+import com.ticketrush.queue.domain.QueueRegisterRateLimitedException
+import com.ticketrush.shared.ClientIp
 import io.mockk.every
 import io.mockk.mockk
 import org.springframework.beans.factory.annotation.Autowired
@@ -28,6 +30,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import java.time.Duration
 import java.time.LocalDateTime
 import kotlin.test.Test
 
@@ -55,7 +58,7 @@ class QueueControllerTest {
     @Test
     fun `대기열에 등록하면 201과 함께 토큰 헤더를 반환한다`() {
         // given
-        every { queueCommandService.register(1L) } returns "test-token"
+        every { queueCommandService.register(1L, any()) } returns "test-token"
 
         // when & then
         mockMvc
@@ -68,7 +71,8 @@ class QueueControllerTest {
                     summary = "대기열 등록",
                     description =
                         "공연 대기열에 등록하고 토큰을 발급받는다. " +
-                            "입구가 혼잡하면 503과 Retry-After(3 ~ 10초)가 오며, 그 시간 뒤에 다시 등록한다(처음 누른 순서는 보장되지 않는다).",
+                            "입구가 혼잡하면 503과 Retry-After(3 ~ 10초)가 오며, 그 시간 뒤에 다시 등록한다(처음 누른 순서는 보장되지 않는다). " +
+                            "한 IP가 윈도우 안에 받을 수 있는 토큰을 다 받으면 429와 Retry-After가 온다.",
                     snippets = arrayOf(queueRegisterPathParameters, queueRegisterResponseHeaders),
                 ),
             )
@@ -77,7 +81,7 @@ class QueueControllerTest {
     // 없는 이벤트는 404, 있는데 아직 오픈 전이면 409로 구분해야 클라이언트가 "공연 없음"과 "오픈 전 안내"를 나눠 보여줄 수 있다
     @Test
     fun `없는 이벤트에 등록하면 404와 EVENT_NOT_FOUND를 반환한다`() {
-        every { queueCommandService.register(404L) } throws QueueEventNotFoundException(404L)
+        every { queueCommandService.register(404L, any()) } throws QueueEventNotFoundException(404L)
 
         mockMvc
             .perform(post("/api/events/{eventId}/queues", 404L))
@@ -87,7 +91,7 @@ class QueueControllerTest {
 
     @Test
     fun `오픈 전 이벤트에 등록하면 409와 QUEUE_NOT_OPEN을 반환한다`() {
-        every { queueCommandService.register(10L) } throws QueueNotOpenException(10L, LocalDateTime.of(2026, 10, 11, 10, 0))
+        every { queueCommandService.register(10L, any()) } throws QueueNotOpenException(10L, LocalDateTime.of(2026, 10, 11, 10, 0))
 
         mockMvc
             .perform(post("/api/events/{eventId}/queues", 10L))
@@ -97,12 +101,41 @@ class QueueControllerTest {
 
     @Test
     fun `이미 시작한 공연에 등록하면 409와 QUEUE_CLOSED를 반환한다`() {
-        every { queueCommandService.register(20L) } throws QueueClosedException(20L, LocalDateTime.of(2026, 10, 11, 19, 0))
+        every { queueCommandService.register(20L, any()) } throws QueueClosedException(20L, LocalDateTime.of(2026, 10, 11, 19, 0))
 
         mockMvc
             .perform(post("/api/events/{eventId}/queues", 20L))
             .andExpect(status().isConflict)
             .andExpect(jsonPath("$.code").value("QUEUE_CLOSED"))
+    }
+
+    @Test
+    fun `한 IP가 발급 상한을 넘으면 429와 Retry-After와 QUEUE_REGISTER_RATE_LIMITED를 반환한다`() {
+        every { queueCommandService.register(30L, any()) } throws QueueRegisterRateLimitedException(Duration.ofMillis(41_200))
+
+        mockMvc
+            .perform(post("/api/events/{eventId}/queues", 30L))
+            .andExpect(status().isTooManyRequests)
+            .andExpect(header().string("Retry-After", "42"))
+            .andExpect(jsonPath("$.code").value("QUEUE_REGISTER_RATE_LIMITED"))
+    }
+
+    @Test
+    fun `요청의 접속 IP를 서비스에 넘긴다`() {
+        every { queueCommandService.register(1L, ClientIp("198.51.100.9")) } returns "test-token"
+
+        mockMvc
+            .perform(post("/api/events/{eventId}/queues", 1L).with { it.apply { remoteAddr = "198.51.100.9" } })
+            .andExpect(status().isCreated)
+    }
+
+    @Test
+    fun `같은 64비트 앞부분의 IPv6 주소는 같은 IP로 서비스에 넘긴다`() {
+        every { queueCommandService.register(1L, ClientIp("2001:db8:1:2::/64")) } returns "test-token"
+
+        mockMvc
+            .perform(post("/api/events/{eventId}/queues", 1L).with { it.apply { remoteAddr = "2001:db8:1:2:aaaa:bbbb:cccc:dddd" } })
+            .andExpect(status().isCreated)
     }
 
     @Test

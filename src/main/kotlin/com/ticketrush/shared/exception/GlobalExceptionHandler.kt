@@ -17,6 +17,8 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 private val appLogger = KotlinLogging.logger {}
 
+private const val MILLIS_ROUNDING = 999L
+
 // 에러 응답은 RFC 9457(Problem Details for HTTP APIs) 표준을 따른다. 성공 응답은
 // 감싸지 않고 DTO를 그대로 반환한다.
 //
@@ -86,7 +88,19 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
     @ExceptionHandler(TooManyRequestsException::class)
     fun handleTooManyRequests(e: TooManyRequestsException): ResponseEntity<ProblemDetail> {
         val problem = problemDetail(HttpStatus.TOO_MANY_REQUESTS, e.code, e.message ?: e.code)
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(problem)
+        val response = ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+        // 초 단위로 올리고 최소 1초를 준다. 0초를 주면 클라이언트가 바로 다시 보낸다
+        e.retryAfter?.let {
+            response.header(
+                HttpHeaders.RETRY_AFTER,
+                it
+                    .plusMillis(MILLIS_ROUNDING)
+                    .toSeconds()
+                    .coerceAtLeast(1)
+                    .toString(),
+            )
+        }
+        return response.body(problem)
     }
 
     // title은 RFC 9457 의미대로 사람이 읽는 문구(상태 코드의 reasonPhrase)로 둔다. code는

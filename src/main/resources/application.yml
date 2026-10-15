@@ -100,6 +100,9 @@ ticket-rush:
       near: 2s          # near-rank-threshold 이내
       jitter-ratio: 0.2 # 간격에 더하는 무작위 비율(±20%)
     broadcast-cache-ttl: 1s # 매진 여부 캐시 시간
+    register-limit: # IP 기준 줄서기 제한. 공유 IP 사용자가 막히지 않게 넉넉히 둔 잠정값
+      max-per-ip: 100 # 한 IP가 한 공연의 대기열에 윈도우 동안 받을 수 있는 토큰 수
+      window: 1m
   seat:
     hold-ttl: 5m
     payment-failed-hold-ttl: 1m
@@ -121,6 +124,8 @@ ticket-rush:
   reservation-lookup:
     max-attempts: 5
     block-window: 10m
+    ip-max-attempts: 50 # IP 기준 실패 한도. 예약번호를 바꿔 가며 찍는 시도를 막는다(성공은 세지 않는다)
+    ip-block-window: 10m
   payment:
     stale-claim-timeout: 10s # PG 호출 한 번의 최악(connect 3s + read 3s)보다 길게. 승인 뒤 조회까지 하면 12s라 넘길 수 있지만 멱등키와 409로 안전하다
     reclaim-interval: 5s

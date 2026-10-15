@@ -11,4 +11,12 @@ private val farFuture: Instant = Instant.parse("9999-01-01T00:00:00Z")
 fun QueueRepositoryPort.열린_공연에_등록(
     eventId: Long,
     token: String,
-): Long = (register(eventId, token, EventSchedule(opensAt = Instant.EPOCH, startsAt = farFuture)) as RegisterResult.Registered).sequence
+): Long =
+    (
+        register(
+            eventId,
+            token,
+            testClientIp,
+            EventSchedule(opensAt = Instant.EPOCH, startsAt = farFuture),
+        ) as RegisterResult.Registered
+    ).sequence

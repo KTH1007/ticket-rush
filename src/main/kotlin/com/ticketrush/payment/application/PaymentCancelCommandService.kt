@@ -6,6 +6,7 @@ import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.RefundIdempotencyKey
+import com.ticketrush.shared.ClientIp
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 
@@ -22,8 +23,9 @@ class PaymentCancelCommandService(
     fun cancel(
         reservationNo: String,
         phone: String,
+        clientIp: ClientIp,
     ): PaymentCancelResult {
-        val canceled = cancelRecorder.confirmCancel(reservationNo, phone)
+        val canceled = cancelRecorder.confirmCancel(reservationNo, phone, clientIp)
         return PaymentCancelResult(applyRefund(canceled), reservationNo)
     }
 

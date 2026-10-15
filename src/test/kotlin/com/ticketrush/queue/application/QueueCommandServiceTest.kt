@@ -7,6 +7,7 @@ import com.ticketrush.queue.domain.QueueEventNotFoundException
 import com.ticketrush.queue.domain.QueueNotOpenException
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.testClientIp
 import com.ticketrush.support.공연_하나_저장
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -44,7 +45,7 @@ class QueueCommandServiceTest : IntegrationTest() {
         val eventId = 판매_중인_공연_저장().id
 
         // when
-        val token = queueCommandService.register(eventId)
+        val token = queueCommandService.register(eventId, testClientIp)
 
         // then
         assertThat(queueRepository.findStatus(eventId, token)).isNotNull()
@@ -57,7 +58,12 @@ class QueueCommandServiceTest : IntegrationTest() {
         val missingEventId = Long.MAX_VALUE - System.nanoTime() % 1_000_000
 
         // when & then
-        assertThatThrownBy { queueCommandService.register(missingEventId) }.isInstanceOf(QueueEventNotFoundException::class.java)
+        assertThatThrownBy {
+            queueCommandService.register(
+                missingEventId,
+                testClientIp,
+            )
+        }.isInstanceOf(QueueEventNotFoundException::class.java)
         assertThat(queueRepository.activeEventIds()).doesNotContain(missingEventId)
         assertThat(redisTemplate.hasKey("queue:$missingEventId:opensAt")).isFalse()
     }
@@ -70,7 +76,7 @@ class QueueCommandServiceTest : IntegrationTest() {
         val eventId = eventRepository.공연_하나_저장(opensAt = now.plusDays(1), startsAt = now.plusDays(30)).id
 
         // when & then
-        assertThatThrownBy { queueCommandService.register(eventId) }.isInstanceOf(QueueNotOpenException::class.java)
+        assertThatThrownBy { queueCommandService.register(eventId, testClientIp) }.isInstanceOf(QueueNotOpenException::class.java)
         assertThat(queueRepository.activeEventIds()).doesNotContain(eventId)
     }
 
@@ -82,7 +88,7 @@ class QueueCommandServiceTest : IntegrationTest() {
         val eventId = eventRepository.공연_하나_저장(opensAt = now.minusDays(2), startsAt = now.minusHours(1)).id
 
         // when & then
-        assertThatThrownBy { queueCommandService.register(eventId) }.isInstanceOf(QueueClosedException::class.java)
+        assertThatThrownBy { queueCommandService.register(eventId, testClientIp) }.isInstanceOf(QueueClosedException::class.java)
         assertThat(queueRepository.activeEventIds()).doesNotContain(eventId)
     }
 
@@ -93,7 +99,7 @@ class QueueCommandServiceTest : IntegrationTest() {
         val eventId = 판매_중인_공연_저장().id
 
         // when
-        queueCommandService.register(eventId)
+        queueCommandService.register(eventId, testClientIp)
 
         // then
         assertThat(redisTemplate.hasKey("queue:$eventId:opensAt")).isTrue()
@@ -106,8 +112,8 @@ class QueueCommandServiceTest : IntegrationTest() {
         val eventId = 판매_중인_공연_저장().id
 
         // when
-        val token1 = queueCommandService.register(eventId)
-        val token2 = queueCommandService.register(eventId)
+        val token1 = queueCommandService.register(eventId, testClientIp)
+        val token2 = queueCommandService.register(eventId, testClientIp)
 
         // then
         assertThat(token1).isNotEqualTo(token2)

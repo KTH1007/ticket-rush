@@ -26,6 +26,7 @@ import com.ticketrush.reservation.domain.SeatStatus
 import com.ticketrush.shared.PhoneHash
 import com.ticketrush.shared.PhoneHasher
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.testClientIp
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
 import io.mockk.every
@@ -114,7 +115,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-6")
 
         // when
-        cancelService.cancel(reservation.reservationNo!!, PHONE)
+        cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then
         val recorded = outboxRepository.findByAggregateId(reservation.id).singleOrNull()
@@ -136,7 +137,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         }
 
         // when
-        cancelService.cancel(reservation.reservationNo!!, PHONE)
+        cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then
         assertThat(statusesAtRefund).isEqualTo("CANCELED" to "CANCELED")
@@ -149,7 +150,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-1")
 
         // when
-        cancelService.cancel(reservation.reservationNo!!, PHONE)
+        cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then
         val updated = requireNotNull(reservationRepository.findById(reservation.id))
@@ -167,7 +168,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-MARK")
 
         // when
-        cancelService.cancel(reservation.reservationNo!!, PHONE)
+        cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then
         assertThat(seatHoldFilter.tryClaim(reservation.eventId, seatIds, UUID.randomUUID().toString())).isTrue()
@@ -180,7 +181,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-2")
 
         // when
-        val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
+        val result = cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then
         assertThat(result.payment.status).isEqualTo(PaymentStatus.REFUNDED)
@@ -193,7 +194,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-7")
 
         // when
-        cancelService.cancel(reservation.reservationNo!!, PHONE)
+        cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then
         verify(exactly = 1) {
@@ -208,7 +209,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Declined("환불 한도 초과")
 
         // when
-        val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
+        val result = cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then: 예외 없이 끝나고, 결제는 CANCELED에 머무름(REFUNDED 아님). 거절 사유는 WARN으로 남는다
         assertThat(result.payment.status).isEqualTo(PaymentStatus.CANCELED)
@@ -229,7 +230,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         every { paymentGateway.refund(any(), any(), any()) } throws RuntimeException("네트워크 오류")
 
         // when
-        val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
+        val result = cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then: 예외가 밖으로 안 새고, 취소/결제 상태는 그대로 확정됨. 원인은 ERROR와 스택트레이스로 남는다
         assertThat(result.payment.status).isEqualTo(PaymentStatus.CANCELED)
@@ -246,7 +247,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         every { paymentGateway.refund(any(), any(), any()) } throws PaymentConflictException()
 
         // when
-        val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
+        val result = cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then: 환불 재시도 대상으로 CANCELED를 유지하고 예약 취소는 확정됨. 정상 경합이라 WARN 한 줄만 남는다
         assertThat(result.payment.status).isEqualTo(PaymentStatus.CANCELED)
@@ -263,17 +264,17 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         // given
         val reservation = 결제완료_예약_준비()
         every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-3")
-        cancelService.cancel(reservation.reservationNo!!, PHONE)
+        cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // when & then
-        assertThatThrownBy { cancelService.cancel(reservation.reservationNo!!, PHONE) }
+        assertThatThrownBy { cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp) }
             .isInstanceOf(ReservationAlreadyCanceledException::class.java)
     }
 
     @Test
     fun `reservationNo가 없으면 실패한다`() {
         // when & then
-        assertThatThrownBy { cancelService.cancel("NOTEXIST0001", PHONE) }
+        assertThatThrownBy { cancelService.cancel("NOTEXIST0001", PHONE, testClientIp) }
             .isInstanceOf(ReservationLookupFailedException::class.java)
     }
 
@@ -283,7 +284,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         val reservation = 결제완료_예약_준비()
 
         // when & then
-        assertThatThrownBy { cancelService.cancel(reservation.reservationNo!!, "01099998888") }
+        assertThatThrownBy { cancelService.cancel(reservation.reservationNo!!, "01099998888", testClientIp) }
             .isInstanceOf(ReservationLookupFailedException::class.java)
     }
 
@@ -294,7 +295,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Declined("환불 한도 초과")
 
         // when
-        val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
+        val result = cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then
         val history = paymentHistoryRepository.findAllByPaymentId(result.payment.id)
@@ -308,7 +309,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         every { paymentGateway.refund(any(), any(), any()) } returns PaymentGatewayResult.Approved("FAKE-REFUND-5")
 
         // when
-        val result = cancelService.cancel(reservation.reservationNo!!, PHONE)
+        val result = cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
 
         // then
         val history = paymentHistoryRepository.findAllByPaymentId(result.payment.id)

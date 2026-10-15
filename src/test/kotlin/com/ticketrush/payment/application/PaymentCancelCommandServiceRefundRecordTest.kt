@@ -8,6 +8,7 @@ import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentStatus
+import com.ticketrush.support.testClientIp
 import io.mockk.every
 import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
@@ -31,7 +32,7 @@ class PaymentCancelCommandServiceRefundRecordTest {
     fun captureLogs() {
         logs.start()
         serviceLogger.addAppender(logs)
-        every { cancelRecorder.confirmCancel(RESERVATION_NO, PHONE) } returns CanceledPayment(취소된_결제(), UUID.randomUUID())
+        every { cancelRecorder.confirmCancel(RESERVATION_NO, PHONE, testClientIp) } returns CanceledPayment(취소된_결제(), UUID.randomUUID())
     }
 
     @AfterEach
@@ -45,7 +46,7 @@ class PaymentCancelCommandServiceRefundRecordTest {
         every { paymentGateway.refund("PG-TXN", 200_000, any()) } returns PaymentGatewayResult.Approved("PG-TXN")
         every { refundRecorder.recordCancelSuccess(any(), any()) } throws IllegalStateException("DB 오류")
 
-        val result = service.cancel(RESERVATION_NO, PHONE)
+        val result = service.cancel(RESERVATION_NO, PHONE, testClientIp)
 
         assertThat(result.payment.status).isEqualTo(PaymentStatus.CANCELED)
         assertThat(logs.list.single { it.level == Level.ERROR }.formattedMessage).contains("환불 결과를 반영하지 못했습니다")
@@ -56,7 +57,7 @@ class PaymentCancelCommandServiceRefundRecordTest {
         every { paymentGateway.refund("PG-TXN", 200_000, any()) } returns PaymentGatewayResult.Declined("한도 초과")
         every { refundRecorder.recordFailure(any(), any()) } throws IllegalStateException("DB 오류")
 
-        val result = service.cancel(RESERVATION_NO, PHONE)
+        val result = service.cancel(RESERVATION_NO, PHONE, testClientIp)
 
         assertThat(result.payment.status).isEqualTo(PaymentStatus.CANCELED)
         assertThat(logs.list.filter { it.level == Level.ERROR }).hasSize(1)

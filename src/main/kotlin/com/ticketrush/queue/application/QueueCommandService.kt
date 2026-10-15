@@ -10,9 +10,11 @@ import com.ticketrush.queue.domain.QueueEventNotFoundException
 import com.ticketrush.queue.domain.QueueNotActiveException
 import com.ticketrush.queue.domain.QueueNotOpenException
 import com.ticketrush.queue.domain.QueuePhoneMismatchException
+import com.ticketrush.queue.domain.QueueRegisterRateLimitedException
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.domain.RegisterResult
 import com.ticketrush.shared.AppTimeZone
+import com.ticketrush.shared.ClientIp
 import com.ticketrush.shared.PhoneHash
 import com.ticketrush.shared.exception.BusinessException
 import org.springframework.stereotype.Service
@@ -24,17 +26,31 @@ class QueueCommandService(
     private val queueRepository: QueueRepositoryPort,
     private val eventSchedule: EventSchedulePort,
 ) {
-    fun register(eventId: Long): String {
+    fun register(
+        eventId: Long,
+        clientIp: ClientIp,
+    ): String {
         val token = UUID.randomUUID().toString()
-        val first = queueRepository.register(eventId, token)
-        // 첫 호출이 ScheduleUnknown이면 스크립트가 아무것도 쓰지 않아서 같은 토큰으로 다시 불러도 된다
-        val result = if (first is RegisterResult.ScheduleUnknown) queueRepository.register(eventId, token, loadSchedule(eventId)) else first
-        return when (result) {
-            is RegisterResult.Registered -> token
-            is RegisterResult.NotOpen -> throw QueueNotOpenException(eventId, LocalDateTime.ofInstant(result.opensAt, AppTimeZone.ID))
-            is RegisterResult.Closed -> throw QueueClosedException(eventId, LocalDateTime.ofInstant(result.startsAt, AppTimeZone.ID))
-            RegisterResult.ScheduleUnknown -> error("공연 일정을 저장했는데도 찾지 못했습니다: eventId=$eventId")
-        }
+        val rejection =
+            when (val result = registerWithSchedule(eventId, token, clientIp)) {
+                is RegisterResult.Registered -> return token
+                is RegisterResult.NotOpen -> QueueNotOpenException(eventId, LocalDateTime.ofInstant(result.opensAt, AppTimeZone.ID))
+                is RegisterResult.Closed -> QueueClosedException(eventId, LocalDateTime.ofInstant(result.startsAt, AppTimeZone.ID))
+                is RegisterResult.RateLimited -> QueueRegisterRateLimitedException(result.retryAfter)
+                RegisterResult.ScheduleUnknown -> IllegalStateException("공연 일정을 저장했는데도 찾지 못했습니다: eventId=$eventId")
+            }
+        throw rejection
+    }
+
+    // 첫 호출이 ScheduleUnknown이면 스크립트가 아무것도 쓰지 않아서 같은 토큰으로 다시 불러도 된다
+    private fun registerWithSchedule(
+        eventId: Long,
+        token: String,
+        clientIp: ClientIp,
+    ): RegisterResult {
+        val first = queueRepository.register(eventId, token, clientIp)
+        if (first !is RegisterResult.ScheduleUnknown) return first
+        return queueRepository.register(eventId, token, clientIp, loadSchedule(eventId))
     }
 
     // 활성 토큰은 처음 쓴 전화번호에만 쓸 수 있다. 번호를 바꿔 가며 번호당 좌석 제한을 우회하는 것을 막는다

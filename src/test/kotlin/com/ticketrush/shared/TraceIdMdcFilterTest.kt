@@ -44,6 +44,20 @@ class TraceIdMdcFilterTest {
     }
 
     @Test
+    fun `필터를 통과하는 동안 MDC에 clientIp가 채워진다`() {
+        val filter = TraceIdMdcFilter(instanceId = "test-instance")
+        val request = MockHttpServletRequest().apply { remoteAddr = "203.0.113.7" }
+        val response = MockHttpServletResponse()
+        var clientIpDuringChain: String? = null
+
+        val chain = FilterChain { _, _ -> clientIpDuringChain = MDC.get("clientIp") }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(clientIpDuringChain).isEqualTo("203.0.113.7")
+    }
+
+    @Test
     fun `요청이 끝나면 MDC가 정리된다`() {
         val filter = TraceIdMdcFilter(instanceId = "test-instance")
         val request = MockHttpServletRequest()
@@ -55,5 +69,6 @@ class TraceIdMdcFilterTest {
 
         assertThat(MDC.get("traceId")).isNull()
         assertThat(MDC.get("instanceId")).isNull()
+        assertThat(MDC.get("clientIp")).isNull()
     }
 }

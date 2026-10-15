@@ -1,6 +1,8 @@
 package com.ticketrush.payment.presentation
 
 import com.ticketrush.payment.application.PaymentCancelCommandService
+import com.ticketrush.shared.ClientIp
+import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -13,8 +15,9 @@ class PaymentCancelController(
     @PostMapping("/api/reservations/cancel")
     fun cancel(
         @Valid @RequestBody request: PaymentCancelRequest,
+        servletRequest: HttpServletRequest,
     ): PaymentCancelResponse {
-        val result = paymentCancelCommandService.cancel(request.reservationNo, request.phone)
+        val result = paymentCancelCommandService.cancel(request.reservationNo, request.phone, ClientIp.from(servletRequest))
         return PaymentCancelResponse.from(result)
     }
 }

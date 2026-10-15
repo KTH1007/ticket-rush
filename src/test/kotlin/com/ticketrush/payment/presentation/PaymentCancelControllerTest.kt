@@ -9,6 +9,7 @@ import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.ReservationAlreadyCanceledException
 import com.ticketrush.reservation.domain.ReservationLookupFailedException
 import com.ticketrush.reservation.domain.ReservationLookupRateLimitedException
+import com.ticketrush.shared.ClientIp
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -23,9 +24,11 @@ import org.springframework.restdocs.payload.PayloadDocumentation.requestFields
 import org.springframework.restdocs.payload.PayloadDocumentation.responseFields
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import tools.jackson.databind.ObjectMapper
+import java.time.Duration
 import kotlin.test.Test
 
 @WebMvcTest(PaymentCancelController::class)
@@ -49,7 +52,7 @@ class PaymentCancelControllerTest {
     @Test
     fun `취소에 성공하면 200과 취소 결과를 반환한다`() {
         // given
-        every { cancelService.cancel("RESVA2345678", "01012345678") } returns 취소_결과()
+        every { cancelService.cancel("RESVA2345678", "01012345678", any()) } returns 취소_결과()
 
         // when & then
         mockMvc
@@ -69,7 +72,7 @@ class PaymentCancelControllerTest {
     @Test
     fun `reservationNo 또는 phone이 일치하지 않으면 404를 반환한다`() {
         // given
-        every { cancelService.cancel("WRNGA2345678", "01012345678") } throws ReservationLookupFailedException()
+        every { cancelService.cancel("WRNGA2345678", "01012345678", any()) } throws ReservationLookupFailedException()
 
         // when & then
         mockMvc.perform(취소_요청(reservationNo = "WRNGA2345678", phone = "01012345678")).andExpect(status().isNotFound)
@@ -78,16 +81,40 @@ class PaymentCancelControllerTest {
     @Test
     fun `반복 실패로 차단되면 429를 반환한다`() {
         // given
-        every { cancelService.cancel("BLKDA2345678", "01012345678") } throws ReservationLookupRateLimitedException()
+        every { cancelService.cancel("BLKDA2345678", "01012345678", any()) } throws ReservationLookupRateLimitedException()
 
         // when & then
         mockMvc.perform(취소_요청(reservationNo = "BLKDA2345678", phone = "01012345678")).andExpect(status().isTooManyRequests)
     }
 
     @Test
+    fun `차단 때 남은 시간을 알면 Retry-After를 초 단위로 올려 준다`() {
+        // given
+        every { cancelService.cancel("BLKDA2345678", "01012345678", any()) } throws
+            ReservationLookupRateLimitedException(Duration.ofMillis(59_100))
+
+        // when & then
+        mockMvc
+            .perform(취소_요청(reservationNo = "BLKDA2345678", phone = "01012345678"))
+            .andExpect(status().isTooManyRequests)
+            .andExpect(header().string("Retry-After", "60"))
+    }
+
+    @Test
+    fun `요청의 접속 IP를 서비스에 넘긴다`() {
+        // given
+        every { cancelService.cancel("RESVA2345678", "01012345678", ClientIp("198.51.100.9")) } returns 취소_결과()
+
+        // when & then
+        mockMvc
+            .perform(취소_요청(reservationNo = "RESVA2345678", phone = "01012345678").with { it.apply { remoteAddr = "198.51.100.9" } })
+            .andExpect(status().isOk)
+    }
+
+    @Test
     fun `이미 취소된 예약이면 409를 반환한다`() {
         // given
-        every { cancelService.cancel("ALRDA2345678", "01012345678") } throws ReservationAlreadyCanceledException()
+        every { cancelService.cancel("ALRDA2345678", "01012345678", any()) } throws ReservationAlreadyCanceledException()
 
         // when & then
         mockMvc.perform(취소_요청(reservationNo = "ALRDA2345678", phone = "01012345678")).andExpect(status().isConflict)
@@ -96,7 +123,7 @@ class PaymentCancelControllerTest {
     @Test
     fun `동시 처리 충돌이면 409를 반환한다`() {
         // given
-        every { cancelService.cancel("RACEA2345678", "01012345678") } throws PaymentConflictException()
+        every { cancelService.cancel("RACEA2345678", "01012345678", any()) } throws PaymentConflictException()
 
         // when & then
         mockMvc.perform(취소_요청(reservationNo = "RACEA2345678", phone = "01012345678")).andExpect(status().isConflict)
@@ -117,7 +144,7 @@ class PaymentCancelControllerTest {
 
         // when & then
         invalid.forEach { mockMvc.perform(취소_요청(reservationNo = it, phone = "01012345678")).andExpect(status().isBadRequest) }
-        invalid.forEach { verify(exactly = 0) { cancelService.cancel(it, any()) } }
+        invalid.forEach { verify(exactly = 0) { cancelService.cancel(it, any(), any()) } }
     }
 
     private fun 취소_요청(
