@@ -9,6 +9,7 @@ import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentHistoryRepositoryPort
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
@@ -221,6 +222,27 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         val failure = paymentHistoryRepository.findAllByPaymentId(result.payment.id).single { it.reason?.contains("환불 한도 초과") == true }
         assertThat(failure.fromStatus).isEqualTo(PaymentStatus.CANCELED)
         assertThat(failure.toStatus).isEqualTo(PaymentStatus.CANCELED)
+    }
+
+    @Test
+    fun `PG가 일시적으로 응답하지 않으면 취소는 확정되고 환불 시도 횟수는 그대로다`() {
+        // given
+        val reservation = 결제완료_예약_준비()
+        every { paymentGateway.refund(any(), any(), any()) } throws PaymentGatewayUnavailableException()
+
+        // when
+        val result = cancelService.cancel(reservation.reservationNo!!, PHONE, testClientIp)
+
+        // then: PG에 닿지 않았으므로 시도로 세지 않고, 결제는 CANCELED로 남아 재시도 스케줄러가 이어받는다
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.CANCELED)
+        assertThat(result.payment.refundAttemptCount).isEqualTo(0)
+        val updated = requireNotNull(reservationRepository.findById(reservation.id))
+        assertThat(updated.status).isEqualTo(ReservationStatus.CANCELED)
+        assertThat(logs.list.filter { it.level == Level.ERROR }).isEmpty()
+        assertThat(paymentHistoryRepository.findAllByPaymentId(result.payment.id)).extracting("reason").noneMatch {
+            it?.toString()?.contains("환불 실패") ==
+                true
+        }
     }
 
     @Test
