@@ -7,6 +7,7 @@ import com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension
 import com.ticketrush.payment.TossProperties
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentInquiryResult
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -147,7 +148,7 @@ class TossPaymentGatewayAdapterInquiryTest {
     }
 
     @Test
-    fun `5xx 에러 응답이면 예외를 전파한다`() {
+    fun `5xx 에러 응답이면 PaymentGatewayUnavailableException을 던진다`() {
         wireMock.stubFor(
             get(urlEqualTo("/v1/payments/pk-500"))
                 .willReturn(
@@ -159,7 +160,8 @@ class TossPaymentGatewayAdapterInquiryTest {
         )
 
         assertThatThrownBy { adapter().inquire("pk-500") }
-            .isInstanceOf(HttpServerErrorException::class.java)
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(HttpServerErrorException::class.java)
     }
 
     @Test

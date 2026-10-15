@@ -7,6 +7,7 @@ import com.github.tomakehurst.wiremock.junit5.WireMockExtension
 import com.ticketrush.payment.TossHttpConfig
 import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentConflictException
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry
 import io.github.resilience4j.springboot.circuitbreaker.autoconfigure.CircuitBreakerAutoConfiguration
@@ -63,25 +64,38 @@ class TossPaymentGatewayAdapterCircuitBreakerTest {
     }
 
     @Test
-    fun `연속 실패로 서킷이 열리면 이후 호출은 WireMock에 안 가고 즉시 실패한다`() {
+    fun `연속 실패로 서킷이 열리면 이후 호출은 WireMock에 안 가고 PaymentGatewayUnavailableException으로 즉시 실패한다`() {
         wireMock.stubFor(
             post(urlEqualTo("/v1/payments/confirm"))
                 .willReturn(aResponse().withStatus(500)),
         )
 
-        // CLOSED 상태에서는 500 예외가 호출자에게 그대로 전파되므로 통계용으로 무시한다
+        // minimumNumberOfCalls(10)번 실패하면 서킷이 열린다. 그 전의 5xx도 호출자에게는 같은 예외로 온다
         repeat(10) {
-            try {
-                adapter.charge("pk-$it", "order-$it", 10_000, UUID.randomUUID())
-            } catch (expected: HttpServerErrorException) {
-            }
+            assertThatThrownBy { adapter.charge("pk-$it", "order-$it", 10_000, UUID.randomUUID()) }
+                .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+                .hasCauseInstanceOf(HttpServerErrorException::class.java)
         }
 
-        assertThatThrownBy {
-            adapter.charge("pk-open", "order-open", 10_000, UUID.randomUUID())
-        }.isInstanceOf(CallNotPermittedException::class.java)
+        assertThatThrownBy { adapter.charge("pk-open", "order-open", 10_000, UUID.randomUUID()) }
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(CallNotPermittedException::class.java)
 
-        assertThat(wireMock.allServeEvents).hasSizeLessThan(11)
+        assertThat(wireMock.allServeEvents).hasSize(10)
+    }
+
+    @Test
+    fun `서킷이 열리면 조회와 환불도 WireMock에 안 가고 PaymentGatewayUnavailableException으로 즉시 실패한다`() {
+        circuitBreakerRegistry.circuitBreaker("paymentGateway").transitionToOpenState()
+
+        assertThatThrownBy { adapter.inquire("pk-open") }
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(CallNotPermittedException::class.java)
+        assertThatThrownBy { adapter.refund("pk-open", 10_000, UUID.randomUUID()) }
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(CallNotPermittedException::class.java)
+
+        assertThat(wireMock.allServeEvents).isEmpty()
     }
 
     @Test

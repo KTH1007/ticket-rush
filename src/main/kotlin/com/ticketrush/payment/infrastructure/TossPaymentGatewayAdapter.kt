@@ -4,16 +4,21 @@ import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.shared.AppTimeZone
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
 import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
+import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.RestClient
+import org.springframework.web.client.RestClientException
+import org.springframework.web.client.RestClientResponseException
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
@@ -41,8 +46,15 @@ class TossPaymentGatewayAdapter(
         require(toss.secretKey.isNotBlank()) { "toss 프로필에는 TOSS_SECRET_KEY가 필요합니다" }
     }
 
-    @CircuitBreaker(name = "paymentGateway")
+    @CircuitBreaker(name = "paymentGateway", fallbackMethod = "chargeBlocked")
     override fun charge(
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
+        idempotencyKey: UUID,
+    ): PaymentGatewayResult = unavailableOnInfraFailure { requestCharge(paymentKey, orderId, amount, idempotencyKey) }
+
+    private fun requestCharge(
         paymentKey: String,
         orderId: String,
         amount: Int,
@@ -117,9 +129,9 @@ class TossPaymentGatewayAdapter(
         throw e
     }
 
-    @CircuitBreaker(name = "paymentGateway")
+    @CircuitBreaker(name = "paymentGateway", fallbackMethod = "inquireBlocked")
     override fun inquire(paymentKey: String): PaymentInquiryResult =
-        fetchPayment(paymentKey)?.let(::toInquiryResult) ?: PaymentInquiryResult.NotFound
+        unavailableOnInfraFailure { fetchPayment(paymentKey)?.let(::toInquiryResult) ?: PaymentInquiryResult.NotFound }
 
     // 없는 결제만 null이다. 그 밖의 4xx는 승인 여부를 모르므로 미승인으로 단정하지 않고 던진다
     private fun fetchPayment(paymentKey: String): TossPaymentResponse? =
@@ -141,7 +153,7 @@ class TossPaymentGatewayAdapter(
             }
         }
 
-    @CircuitBreaker(name = "paymentGateway")
+    @CircuitBreaker(name = "paymentGateway", fallbackMethod = "refundBlocked")
     override fun refund(
         pgTransactionId: String,
         amount: Int,
@@ -192,6 +204,43 @@ class TossPaymentGatewayAdapter(
             else -> PaymentGatewayResult.Declined(reason = "Toss status: ${payment.status}")
         }
     }
+
+    // 서킷이 열려 Toss를 부르지 않았다. 호출이 나가 결과를 모르는 5xx와 달리 호출 측이 환불 횟수에 세지 않는다
+    @Suppress("UnusedPrivateFunction", "UnusedParameter")
+    private fun chargeBlocked(
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
+        idempotencyKey: UUID,
+        e: CallNotPermittedException,
+    ): PaymentGatewayResult = throw PaymentGatewayUnavailableException(cause = e)
+
+    @Suppress("UnusedPrivateFunction", "UnusedParameter")
+    private fun inquireBlocked(
+        paymentKey: String,
+        e: CallNotPermittedException,
+    ): PaymentInquiryResult = throw PaymentGatewayUnavailableException(cause = e)
+
+    @Suppress("UnusedPrivateFunction", "UnusedParameter")
+    private fun refundBlocked(
+        pgTransactionId: String,
+        amount: Int,
+        idempotencyKey: UUID,
+        e: CallNotPermittedException,
+    ): PaymentGatewayResult = throw PaymentGatewayUnavailableException(cause = e)
+
+    // 승인과 조회의 5xx, 연결 실패, 타임아웃, 응답을 읽다 끊기거나 해석하지 못한 경우는 Toss의 일시 장애라 결과를 확정하지 않는다.
+    // 환불에는 쓰지 않는다(호출이 나가 결과를 모르므로 실패로 센다)
+    private inline fun <T> unavailableOnInfraFailure(block: () -> T): T =
+        try {
+            block()
+        } catch (e: RestClientException) {
+            throw unavailableOrSelf(e)
+        }
+
+    // 4xx 같은 상태 오류는 호출 측이 결과를 판단하므로 그대로 두고, 5xx와 그 밖의 통신 오류만 일시 장애로 바꾼다
+    private fun unavailableOrSelf(e: RestClientException): RuntimeException =
+        if (e is RestClientResponseException && e !is HttpServerErrorException) e else PaymentGatewayUnavailableException(cause = e)
 
     private fun basicAuth(): String = "Basic " + Base64.getEncoder().encodeToString("${toss.secretKey}:".toByteArray())
 

@@ -6,15 +6,18 @@ import com.github.tomakehurst.wiremock.client.WireMock.equalToJson
 import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
+import com.github.tomakehurst.wiremock.http.Fault
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension
 import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.extension.RegisterExtension
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
+import org.springframework.web.client.ResourceAccessException
 import org.springframework.web.client.RestClient
 import java.time.LocalDateTime
 import java.util.Base64
@@ -227,7 +230,7 @@ class TossPaymentGatewayAdapterTest {
     }
 
     @Test
-    fun `5xx 에러 응답이면 예외를 던진다`() {
+    fun `5xx 에러 응답이면 결과를 확정하지 않고 PaymentGatewayUnavailableException을 던진다`() {
         wireMock.stubFor(
             post(urlEqualTo("/v1/payments/confirm"))
                 .willReturn(
@@ -239,7 +242,17 @@ class TossPaymentGatewayAdapterTest {
         )
 
         assertThatThrownBy { adapter().charge("pk_test_4", "order-4", 10_000, UUID.randomUUID()) }
-            .isInstanceOf(HttpServerErrorException::class.java)
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(HttpServerErrorException::class.java)
+    }
+
+    @Test
+    fun `연결이 끊기면 결과를 확정하지 않고 PaymentGatewayUnavailableException을 던진다`() {
+        wireMock.stubFor(post(urlEqualTo("/v1/payments/confirm")).willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)))
+
+        assertThatThrownBy { adapter().charge("pk_test_reset", "order-reset", 10_000, UUID.randomUUID()) }
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(ResourceAccessException::class.java)
     }
 
     @Test

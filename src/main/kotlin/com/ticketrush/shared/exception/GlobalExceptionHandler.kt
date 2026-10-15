@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.context.request.WebRequest
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler
+import java.time.Duration
 
 private val appLogger = KotlinLogging.logger {}
 
@@ -86,11 +87,22 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
     }
 
     @ExceptionHandler(TooManyRequestsException::class)
-    fun handleTooManyRequests(e: TooManyRequestsException): ResponseEntity<ProblemDetail> {
-        val problem = problemDetail(HttpStatus.TOO_MANY_REQUESTS, e.code, e.message ?: e.code)
-        val response = ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-        // 초 단위로 올리고 최소 1초를 준다. 0초를 주면 클라이언트가 바로 다시 보낸다
-        e.retryAfter?.let {
+    fun handleTooManyRequests(e: TooManyRequestsException): ResponseEntity<ProblemDetail> =
+        respond(HttpStatus.TOO_MANY_REQUESTS, e.code, e.message ?: e.code, e.retryAfter)
+
+    @ExceptionHandler(ServiceUnavailableException::class)
+    fun handleServiceUnavailable(e: ServiceUnavailableException): ResponseEntity<ProblemDetail> =
+        respond(HttpStatus.SERVICE_UNAVAILABLE, e.code, e.message ?: e.code, e.retryAfter)
+
+    // 초 단위로 올리고 최소 1초를 준다. 0초를 주면 클라이언트가 바로 다시 보낸다
+    private fun respond(
+        status: HttpStatus,
+        code: String,
+        detail: String,
+        retryAfter: Duration?,
+    ): ResponseEntity<ProblemDetail> {
+        val response = ResponseEntity.status(status)
+        retryAfter?.let {
             response.header(
                 HttpHeaders.RETRY_AFTER,
                 it
@@ -100,7 +112,7 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
                     .toString(),
             )
         }
-        return response.body(problem)
+        return response.body(problemDetail(status, code, detail))
     }
 
     // title은 RFC 9457 의미대로 사람이 읽는 문구(상태 코드의 reasonPhrase)로 둔다. code는

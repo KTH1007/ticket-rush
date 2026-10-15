@@ -8,6 +8,7 @@ import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.payment.domain.PaymentOrderMismatchException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
@@ -27,6 +28,8 @@ import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
 
+// 승인 흐름의 단계마다 함수로 나눠 함수가 많다
+@Suppress("TooManyFunctions")
 @Service
 class PaymentCommandService(
     private val reservationRepository: ReservationRepositoryPort,
@@ -39,6 +42,20 @@ class PaymentCommandService(
     // @Transactional이 아니다. PG 호출이 트랜잭션 밖에서 일어나야 하므로 이 메서드 자체를 트랜잭션으로 감쌀 수 없다
     // (claimService의 각 단계가 자기 트랜잭션을 갖는다).
     fun confirmPayment(
+        reservationId: Long,
+        holdToken: UUID,
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
+    ): PaymentConfirmationResult =
+        try {
+            confirm(reservationId, holdToken, paymentKey, orderId, amount)
+        } catch (e: PaymentGatewayUnavailableException) {
+            // 결과를 모르는 채 PENDING이 남는다. 그 클레임을 이어받을 수 있게 되는 때에 다시 시도하도록 알린다
+            throw PaymentGatewayUnavailableException(policy.staleClaimTimeout, e)
+        }
+
+    private fun confirm(
         reservationId: Long,
         holdToken: UUID,
         paymentKey: String,
@@ -86,6 +103,9 @@ class PaymentCommandService(
         val inquiry =
             try {
                 paymentGateway.inquire(requireNotNull(previous.tossPaymentKey))
+            } catch (e: PaymentGatewayUnavailableException) {
+                // PG가 막혀 있는 것을 다른 요청이 처리 중인 충돌로 위장하지 않는다
+                throw e
             } catch (e: Exception) {
                 logger.warn(e) { "이전 paymentKey 조회에 실패해 덮어쓰지 않고 충돌로 응답합니다: paymentId=${previous.id}" }
                 throw PaymentConflictException(cause = e)
