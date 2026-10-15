@@ -69,18 +69,24 @@ class TossPaymentGatewayAdapterInquiryTest {
     }
 
     @Test
-    fun `approvedAt이 없거나 형식에 맞지 않아도 예외 없이 approvedAt은 null인 Done을 반환한다`() {
+    fun `approvedAt이 없으면 예외 없이 approvedAt은 null인 Done을 반환한다`() {
         stubInquiry("pk-no-time", status = "DONE", approvedAt = null)
-        stubInquiry("pk-bad-time", status = "DONE", approvedAt = "어제 오후 세 시")
 
         assertThat(adapter().inquire("pk-no-time"))
             .isEqualTo(PaymentInquiryResult.Done("pk-no-time", approvedAt = null, orderId = "order-1", totalAmount = 10_000))
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["어제 오후 세 시", "", "2026-10-01T10:15:30"])
+    fun `approvedAt이 해석되지 않는 값이어도 예외 없이 approvedAt은 null인 Done을 반환한다`(raw: String) {
+        stubInquiry("pk-bad-time", status = "DONE", approvedAt = raw)
+
         assertThat(adapter().inquire("pk-bad-time"))
             .isEqualTo(PaymentInquiryResult.Done("pk-bad-time", approvedAt = null, orderId = "order-1", totalAmount = 10_000))
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["IN_PROGRESS", "ABORTED", "EXPIRED", "CANCELED"])
+    @ValueSource(strings = ["IN_PROGRESS", "ABORTED", "EXPIRED", "CANCELED", "WAITING_FOR_DEPOSIT"])
     fun `DONE이 아닌 status는 그 status를 담은 NotApproved를 반환한다`(status: String) {
         stubInquiry("pk-$status", status = status)
 

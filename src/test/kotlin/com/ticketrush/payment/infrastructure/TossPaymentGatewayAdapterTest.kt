@@ -1,5 +1,9 @@
 package com.ticketrush.payment.infrastructure
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.github.tomakehurst.wiremock.client.WireMock.aResponse
 import com.github.tomakehurst.wiremock.client.WireMock.equalTo
 import com.github.tomakehurst.wiremock.client.WireMock.equalToJson
@@ -14,7 +18,12 @@ import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.extension.RegisterExtension
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
+import org.slf4j.LoggerFactory
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
@@ -29,6 +38,21 @@ class TossPaymentGatewayAdapterTest {
         @JvmField
         @RegisterExtension
         val wireMock: WireMockExtension = WireMockExtension.newInstance().build()
+    }
+
+    private val logs = ListAppender<ILoggingEvent>()
+    private val adapterLogger = LoggerFactory.getLogger("com.ticketrush.payment.infrastructure") as Logger
+
+    @BeforeEach
+    fun captureLogs() {
+        logs.start()
+        adapterLogger.addAppender(logs)
+    }
+
+    @AfterEach
+    fun releaseLogs() {
+        adapterLogger.detachAppender(logs)
+        logs.stop()
     }
 
     private fun adapter(): TossPaymentGatewayAdapter {
@@ -83,13 +107,36 @@ class TossPaymentGatewayAdapterTest {
         assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = "pk", approvedAt = null))
     }
 
-    @Test
-    fun `approvedAt이 형식에 맞지 않아도 예외 없이 approvedAt은 null이고 Approved를 반환한다`() {
-        stubConfirmDone(approvedAt = "어제 오후 세 시")
+    // 이미 승인된 뒤라 파싱 실패로 예외를 던지면 클레임이 PENDING으로 남는다. null로 처리하고 원인을 WARN으로 남긴다
+    @ParameterizedTest
+    @ValueSource(strings = ["어제 오후 세 시", "", "2026-10-01T10:15:30", "2026-13-45T25:61:61+09:00"])
+    fun `approvedAt이 해석되지 않는 값이어도 예외 없이 approvedAt은 null이고 paymentKey를 담은 WARN을 남긴다`(raw: String) {
+        stubConfirmDone(approvedAt = raw)
 
         val result = adapter().charge("pk", "order-1", 10_000, UUID.randomUUID())
 
         assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = "pk", approvedAt = null))
+        val warning = logs.list.single { it.level == Level.WARN }
+        assertThat(warning.formattedMessage).contains("null로 처리합니다", "paymentKey=pk", "approvedAt=$raw")
+        assertThat(warning.throwableProxy).isNull()
+    }
+
+    @Test
+    fun `승인 응답의 status가 DONE이 아니면 그 status를 담은 Declined를 반환한다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""{"paymentKey":"pk_wait","orderId":"order-1","status":"WAITING_FOR_DEPOSIT","totalAmount":10000}"""),
+                ),
+        )
+
+        val result = adapter().charge("pk_wait", "order-1", 10_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+        assertThat((result as PaymentGatewayResult.Declined).reason).contains("WAITING_FOR_DEPOSIT")
     }
 
     @Test
@@ -244,6 +291,20 @@ class TossPaymentGatewayAdapterTest {
         assertThatThrownBy { adapter().charge("pk_test_4", "order-4", 10_000, UUID.randomUUID()) }
             .isInstanceOf(PaymentGatewayUnavailableException::class.java)
             .hasCauseInstanceOf(HttpServerErrorException::class.java)
+    }
+
+    // 이미 승인됐을 수도 있어 해석하지 못한 응답을 거절로 확정하지 않는다
+    @Test
+    fun `응답 본문을 해석하지 못하면 결과를 확정하지 않고 PaymentGatewayUnavailableException을 던진다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .willReturn(
+                    aResponse().withStatus(200).withHeader("Content-Type", "application/json").withBody("<html>bad gateway</html>"),
+                ),
+        )
+
+        assertThatThrownBy { adapter().charge("pk_test_html", "order-html", 10_000, UUID.randomUUID()) }
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
     }
 
     @Test

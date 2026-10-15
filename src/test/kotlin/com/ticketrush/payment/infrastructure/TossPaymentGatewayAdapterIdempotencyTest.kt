@@ -8,6 +8,7 @@ import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension
 import com.github.tomakehurst.wiremock.stubbing.Scenario
 import com.ticketrush.payment.TossProperties
+import com.ticketrush.payment.domain.ChargeIdempotencyKey
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import org.assertj.core.api.Assertions.assertThat
@@ -90,5 +91,33 @@ class TossPaymentGatewayAdapterIdempotencyTest {
                         .withBody(body),
                 )
         wireMock.stubFor(if (to != null) stub.willSetStateTo(to) else stub)
+    }
+
+    // Toss는 에러 응답도 같은 키로 재생한다. 거절 횟수를 섞은 새 키로 요청해야 거절 뒤 재시도가 승인된다
+    @Test
+    fun `거절된 키는 같은 에러를 재생하고 거절 횟수를 섞은 새 키로 요청하면 승인된다`() {
+        val reservationKey = UUID.randomUUID()
+        stubConfirmForKey(reservationKey, 400, """{"code":"REJECT_CARD_PAYMENT","message":"한도초과 혹은 잔액부족으로 결제에 실패했습니다."}""")
+        stubConfirmForKey(ChargeIdempotencyKey.of(reservationKey, 1), 200, """{"paymentKey":"pk_replay","status":"DONE"}""")
+
+        val declined = adapter.charge("pk_replay", "order-replay", 10_000, ChargeIdempotencyKey.of(reservationKey, 0))
+        val replayed = adapter.charge("pk_replay", "order-replay", 10_000, ChargeIdempotencyKey.of(reservationKey, 0))
+        val retried = adapter.charge("pk_replay", "order-replay", 10_000, ChargeIdempotencyKey.of(reservationKey, 1))
+
+        assertThat(declined).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+        assertThat(replayed).isEqualTo(declined)
+        assertThat(retried).isEqualTo(PaymentGatewayResult.Approved("pk_replay"))
+    }
+
+    private fun stubConfirmForKey(
+        key: UUID,
+        status: Int,
+        body: String,
+    ) {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/confirm"))
+                .withHeader("Idempotency-Key", equalTo(key.toString()))
+                .willReturn(aResponse().withStatus(status).withHeader("Content-Type", "application/json").withBody(body)),
+        )
     }
 }

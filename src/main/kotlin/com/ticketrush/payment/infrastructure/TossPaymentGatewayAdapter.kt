@@ -19,9 +19,9 @@ import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.RestClientException
 import org.springframework.web.client.RestClientResponseException
+import java.time.DateTimeException
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
-import java.time.format.DateTimeParseException
 import java.util.Base64
 import java.util.UUID
 
@@ -117,7 +117,7 @@ class TossPaymentGatewayAdapter(
             payment.status != "DONE" -> PaymentGatewayResult.Declined(reason = "Toss status: ${payment.status}")
             // 다른 주문에서 승인된 paymentKey를 가져다 쓴 요청이 승인으로 둔갑하지 않게 한다. 필드가 없으면 불일치로 본다
             payment.orderId != orderId || payment.totalAmount != amount -> PaymentGatewayResult.Declined(reason = "다른 주문의 결제")
-            else -> PaymentGatewayResult.Approved(payment.paymentKey, parseApprovedAt(payment.approvedAt))
+            else -> PaymentGatewayResult.Approved(payment.paymentKey, parseApprovedAt(payment.approvedAt, payment.paymentKey))
         }
     }
 
@@ -265,7 +265,10 @@ class TossPaymentGatewayAdapter(
 
     private fun toResult(response: TossPaymentResponse): PaymentGatewayResult =
         if (response.status == "DONE") {
-            PaymentGatewayResult.Approved(pgTransactionId = response.paymentKey, approvedAt = parseApprovedAt(response.approvedAt))
+            PaymentGatewayResult.Approved(
+                pgTransactionId = response.paymentKey,
+                approvedAt = parseApprovedAt(response.approvedAt, response.paymentKey),
+            )
         } else {
             PaymentGatewayResult.Declined(reason = "예상치 못한 status: ${response.status}")
         }
@@ -275,7 +278,7 @@ class TossPaymentGatewayAdapter(
             "DONE" ->
                 PaymentInquiryResult.Done(
                     pgTransactionId = response.paymentKey,
-                    approvedAt = parseApprovedAt(response.approvedAt),
+                    approvedAt = parseApprovedAt(response.approvedAt, response.paymentKey),
                     orderId = response.orderId,
                     totalAmount = response.totalAmount,
                 )
@@ -284,12 +287,15 @@ class TossPaymentGatewayAdapter(
         }
 
     // 이미 승인된 뒤라 파싱 실패로 예외를 던지면 클레임이 PENDING으로 남는다. null로 두고 호출 측이 서버 시각으로 대체한다
-    private fun parseApprovedAt(raw: String?): LocalDateTime? {
+    private fun parseApprovedAt(
+        raw: String?,
+        paymentKey: String,
+    ): LocalDateTime? {
         if (raw == null) return null
         return try {
             OffsetDateTime.parse(raw).atZoneSameInstant(AppTimeZone.ID).toLocalDateTime()
-        } catch (e: DateTimeParseException) {
-            logger.warn(e) { "토스 approvedAt 파싱에 실패해 서버 시각으로 대체합니다: approvedAt=$raw" }
+        } catch (e: DateTimeException) {
+            logger.warn { "토스 approvedAt을 해석하지 못해 null로 처리합니다: paymentKey=$paymentKey, approvedAt=$raw, 원인=${e.message}" }
             null
         }
     }
