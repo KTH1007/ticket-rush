@@ -124,6 +124,8 @@ ticket-rush:
   reservation-lookup:
     max-attempts: 5
     block-window: 10m
+    ip-max-attempts: 50 # IP 기준 실패 한도. 예약번호를 바꿔 가며 찍는 시도를 막는다(성공은 세지 않는다)
+    ip-block-window: 10m
   payment:
     stale-claim-timeout: 10s # PG 호출 한 번의 최악(connect 3s + read 3s)보다 길게. 승인 뒤 조회까지 하면 12s라 넘길 수 있지만 멱등키와 409로 안전하다
     reclaim-interval: 5s

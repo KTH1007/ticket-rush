@@ -14,6 +14,7 @@ import com.ticketrush.reservation.domain.SeatStatus
 import com.ticketrush.shared.PhoneHash
 import com.ticketrush.shared.PhoneHasher
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.testClientIp
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
 import org.assertj.core.api.Assertions.assertThat
@@ -50,7 +51,7 @@ class ReservationLookupQueryServiceTest : IntegrationTest() {
         val reservation = 예매완료_예약_준비(reservationNo = "MATCH0000001", phone = "01011112222")
 
         // when
-        val result = queryService.lookup("MATCH0000001", "01011112222")
+        val result = queryService.lookup("MATCH0000001", "01011112222", testClientIp)
 
         // then
         assertThat(result.reservation.id).isEqualTo(reservation.id)
@@ -64,14 +65,14 @@ class ReservationLookupQueryServiceTest : IntegrationTest() {
         예매완료_예약_준비(reservationNo = "WRONGPH0001", phone = "01011112222")
 
         // when & then
-        assertThatThrownBy { queryService.lookup("WRONGPH0001", "01099998888") }
+        assertThatThrownBy { queryService.lookup("WRONGPH0001", "01099998888", testClientIp) }
             .isInstanceOf(ReservationLookupFailedException::class.java)
     }
 
     @Test
     fun `존재하지 않는 reservationNo면 실패한다`() {
         // when & then
-        assertThatThrownBy { queryService.lookup("NOTEXIST0001", "01011112222") }
+        assertThatThrownBy { queryService.lookup("NOTEXIST0001", "01011112222", testClientIp) }
             .isInstanceOf(ReservationLookupFailedException::class.java)
     }
 
@@ -79,12 +80,12 @@ class ReservationLookupQueryServiceTest : IntegrationTest() {
     fun `같은 reservationNo로 5번 실패하면 이후 요청은 차단된다`() {
         // given
         repeat(5) {
-            assertThatThrownBy { queryService.lookup("BLOCKME00001", "01099999999") }
+            assertThatThrownBy { queryService.lookup("BLOCKME00001", "01099999999", testClientIp) }
                 .isInstanceOf(ReservationLookupFailedException::class.java)
         }
 
         // when & then
-        assertThatThrownBy { queryService.lookup("BLOCKME00001", "01099999999") }
+        assertThatThrownBy { queryService.lookup("BLOCKME00001", "01099999999", testClientIp) }
             .isInstanceOf(ReservationLookupRateLimitedException::class.java)
     }
 
@@ -95,7 +96,7 @@ class ReservationLookupQueryServiceTest : IntegrationTest() {
         repeat(5) { rateLimiter.tryReserveAttempt("ALREADY0001") }
 
         // when & then: 정확한 phone을 넣어도 차단이 우선
-        assertThatThrownBy { queryService.lookup(reservation.reservationNo!!, "01011112222") }
+        assertThatThrownBy { queryService.lookup(reservation.reservationNo!!, "01011112222", testClientIp) }
             .isInstanceOf(ReservationLookupRateLimitedException::class.java)
     }
 
@@ -106,7 +107,7 @@ class ReservationLookupQueryServiceTest : IntegrationTest() {
         repeat(3) { rateLimiter.tryReserveAttempt("RESETME0001") }
 
         // when: 조회 자체도 슬롯을 하나 예약했다가(4번째) 성공하면 그 슬롯만 돌려줌 -> 다시 3
-        queryService.lookup(reservation.reservationNo!!, "01011112222")
+        queryService.lookup(reservation.reservationNo!!, "01011112222", testClientIp)
 
         // then: 무조건 리셋이었다면 5번 다 열렸겠지만, 내 몫만 돌아왔으니 딱 2번만 더 예약 가능(5 - 3)
         assertThat(rateLimiter.tryReserveAttempt("RESETME0001")).isTrue()

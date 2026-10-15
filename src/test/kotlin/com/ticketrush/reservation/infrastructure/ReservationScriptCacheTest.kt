@@ -4,6 +4,7 @@ import com.ticketrush.reservation.ReservationLookupPolicyProperties
 import com.ticketrush.reservation.SeatPolicyProperties
 import com.ticketrush.reservation.domain.ReservationLookupRateLimiterPort
 import com.ticketrush.reservation.domain.SeatHoldFilterPort
+import com.ticketrush.shared.ClientIp
 import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.스크립트_캐시_비우기
 import org.assertj.core.api.Assertions.assertThat
@@ -98,6 +99,20 @@ class ReservationScriptCacheTest : IntegrationTest() {
         // then
         assertThat(allowed).allMatch { it }
         assertThat(blocked).isFalse()
+    }
+
+    @Test
+    fun `스크립트 캐시가 비어 있어도 IP별 조회 실패를 센다`() {
+        // given
+        val clientIp = ClientIp("ip-${UUID.randomUUID()}")
+        redisTemplate.스크립트_캐시_비우기()
+
+        // when
+        val allowed = rateLimiter.tryReserveIpAttempt(clientIp)
+
+        // then
+        assertThat(allowed).isTrue()
+        assertThat(redisTemplate.opsForValue().get("reservation:lookup-fail-ip:${clientIp.value}")).isEqualTo("1")
     }
 
     @Test

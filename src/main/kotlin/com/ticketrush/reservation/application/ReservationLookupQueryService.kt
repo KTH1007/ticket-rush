@@ -3,12 +3,12 @@ package com.ticketrush.reservation.application
 import com.ticketrush.reservation.domain.GradeQueryPort
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationLookupFailedException
-import com.ticketrush.reservation.domain.ReservationLookupRateLimitedException
 import com.ticketrush.reservation.domain.ReservationLookupRateLimiterPort
 import com.ticketrush.reservation.domain.ReservationLookupResult
 import com.ticketrush.reservation.domain.ReservationLookupSeat
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.SeatQueryPort
+import com.ticketrush.shared.ClientIp
 import com.ticketrush.shared.PhoneHasher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -25,15 +25,16 @@ class ReservationLookupQueryService(
     fun lookup(
         reservationNo: String,
         phone: String,
+        clientIp: ClientIp,
     ): ReservationLookupResult {
-        if (!rateLimiter.tryReserveAttempt(reservationNo)) throw ReservationLookupRateLimitedException()
+        rateLimiter.reserveOrThrow(reservationNo, clientIp)
 
         val reservation = reservationRepository.findByReservationNo(reservationNo)
         if (reservation == null || reservation.phoneHash != phoneHasher.hash(phone)) {
             throw ReservationLookupFailedException()
         }
 
-        rateLimiter.releaseAttempt(reservationNo)
+        rateLimiter.releaseAttempt(reservationNo, clientIp)
         return ReservationLookupResult(reservation, seatsOf(reservation))
     }
 

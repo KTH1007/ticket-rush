@@ -1,4 +1,4 @@
--- KEYS[1]: reservation:lookup-fail:{reservationNo}
+-- KEYS[1]: reservation:lookup-fail:{reservationNo} 또는 reservation:lookup-fail-ip:{ip}
 -- ARGV[1]: maxAttempts
 -- ARGV[2]: TTL(초), 첫 예약일 때만 설정해 고정 윈도우를 만든다
 -- 확인(GET)과 예약(INCR)을 한 스크립트 안에서 원자적으로 묶어, 동시 요청이 전부

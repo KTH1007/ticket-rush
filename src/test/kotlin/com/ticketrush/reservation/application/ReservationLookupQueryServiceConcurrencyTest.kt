@@ -5,6 +5,7 @@ import com.ticketrush.reservation.domain.ReservationLookupFailedException
 import com.ticketrush.reservation.domain.ReservationLookupRateLimitedException
 import com.ticketrush.reservation.domain.ReservationLookupResult
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.testClientIp
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.RepeatedTest
 import org.junit.jupiter.api.Tag
@@ -54,7 +55,7 @@ class ReservationLookupQueryServiceConcurrencyTest : IntegrationTest() {
             repeat(threadCount) {
                 executor.submit {
                     startGate.await()
-                    results.add(runCatching { queryService.lookup(reservationNo, "01099999999") })
+                    results.add(runCatching { queryService.lookup(reservationNo, "01099999999", testClientIp) })
                     doneLatch.countDown()
                 }
             }
