@@ -600,22 +600,50 @@ class PaymentCommandServiceTest : IntegrationTest() {
         assertThat(result.payment.pgTransactionId).isEqualTo("pk-new-after-aborted")
     }
 
+    // 부분 취소는 승인된 적이 있어 새 키로 다시 청구하면 이중 청구가 된다. 표시만 하고 새 승인은 시작하지 않는다
     @Test
-    fun `오래된 PENDING의 이전 paymentKey가 부분 취소됐으면 승인으로 확정하지 않고 새 키로 이어받아 승인한다`() {
+    fun `오래된 PENDING의 이전 paymentKey가 부분 취소됐으면 새 승인을 시작하지 않고 수동 확인으로 표시한 뒤 충돌로 응답한다`() {
         // given
         val reservation = 홀드된_예약_준비()
         불확실한_PENDING_만들기(reservation, "pk-prev-partial")
-        every { reservationNoGenerator.generate() } returns "RESNO000037"
         every { paymentGateway.inquire("pk-prev-partial") } returns PaymentInquiryResult.PartiallyCanceled
-        every { paymentGateway.charge("pk-new-after-partial", any(), any(), any()) } returns
-            PaymentGatewayResult.Approved("pk-new-after-partial")
 
-        // when
-        val result = paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-after-partial")
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-after-partial") }
+            .isInstanceOf(PaymentConflictException::class.java)
+        verify(exactly = 0) { paymentGateway.charge("pk-new-after-partial", any(), any(), any()) }
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-partial")
+        assertThat(payment.refundRequiredAt).isNotNull()
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).last().reason).contains("수동 확인 필요", "부분 취소")
 
-        // then
-        assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
-        assertThat(result.payment.pgTransactionId).isEqualTo("pk-new-after-partial")
+        // 커밋된 PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
+        payment.markFailed()
+        paymentRepository.save(payment)
+    }
+
+    @Test
+    fun `이미 수동 확인으로 표시된 결제는 다시 요청해도 조회와 승인을 하지 않고 충돌로 응답한다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-marked")
+        every { paymentGateway.inquire("pk-prev-marked") } returns PaymentInquiryResult.PartiallyCanceled
+        runCatching { paymentCommandService.결제_확정(reservation, paymentKey = "pk-first-retry") }
+        clearMocks(paymentGateway)
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "pk-second-retry") }
+            .isInstanceOf(PaymentConflictException::class.java)
+        verify(exactly = 0) { paymentGateway.inquire(any()) }
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-marked")
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).count { it.reason?.contains("수동 확인 필요") == true }).isEqualTo(1)
+
+        // 커밋된 PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
+        payment.markFailed()
+        paymentRepository.save(payment)
     }
 
     @Test

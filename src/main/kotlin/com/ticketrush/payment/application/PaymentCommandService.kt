@@ -70,6 +70,8 @@ class PaymentCommandService(
 
         requireHolding(reservation)
         requireOrderMatches(reservation, orderId, amount)
+        // 사람이 확인하도록 표시된 결제는 새 승인을 시작하지 않는다. 이미 승인된 돈이 남아 있을 수 있다
+        if (existingPayment?.refundRequiredAt != null) throw PaymentConflictException()
 
         confirmPreviousIfApproved(reservation, existingPayment, paymentKey)?.let { return it }
 
@@ -114,8 +116,20 @@ class PaymentCommandService(
         return when (inquiry) {
             is PaymentInquiryResult.Done ->
                 if (isPaymentOf(reservation, inquiry)) applyPreviousSuccess(reservation, previous, inquiry) else null
-            is PaymentInquiryResult.NotApproved, PaymentInquiryResult.PartiallyCanceled, PaymentInquiryResult.NotFound -> null
+            PaymentInquiryResult.PartiallyCanceled -> blockForManualCheck(reservation, previous)
+            is PaymentInquiryResult.NotApproved, PaymentInquiryResult.NotFound -> null
         }
+    }
+
+    // 부분 취소는 승인된 적이 있어 같은 결제를 새 키로 다시 청구하면 이중 청구가 된다. 사람이 확인하도록 표시하고 새 승인은 시작하지 않는다
+    private fun blockForManualCheck(
+        reservation: Reservation,
+        previous: Payment,
+    ): Nothing {
+        val detail = "reservationId=${reservation.id}, paymentId=${previous.id}, reservationStatus=${reservation.status}"
+        claimService.markRefundRequired(previous, LocalDateTime.now(clock), "수동 확인 필요: Toss 결제가 부분 취소됨, $detail")
+        logger.error { "Toss 결제가 부분 취소돼 수동 확인 필요: $detail" }
+        throw PaymentConflictException()
     }
 
     // 저장된 paymentKey는 클라이언트가 보낸 값이라, 다른 예약에서 승인된 결제를 이 예약의 승인으로 확정하지 않게 주문번호와 금액을 대조한다
