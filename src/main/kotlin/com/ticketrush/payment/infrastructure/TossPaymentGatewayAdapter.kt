@@ -31,9 +31,13 @@ private const val IDEMPOTENT_REQUEST_PROCESSING = "IDEMPOTENT_REQUEST_PROCESSING
 private const val NOT_FOUND_PAYMENT = "NOT_FOUND_PAYMENT"
 private const val ALREADY_PROCESSING_REQUEST = "ALREADY_PROCESSING_REQUEST"
 private const val ALREADY_CANCELED_PAYMENT = "ALREADY_CANCELED_PAYMENT"
+private const val ALREADY_REFUND_PAYMENT = "ALREADY_REFUND_PAYMENT"
+private const val ALREADY_REFUNDING_PAYMENT = "ALREADY_REFUNDING_PAYMENT"
 private const val NOT_CANCELABLE_AMOUNT = "NOT_CANCELABLE_AMOUNT"
 private const val PARTIAL_CANCELED = "PARTIAL_CANCELED"
 private val ALREADY_PROCESSED_CODES = setOf("ALREADY_PROCESSED_PAYMENT", "DUPLICATED_REQUEST")
+private val ALREADY_CANCELED_CODES = setOf(ALREADY_CANCELED_PAYMENT, ALREADY_REFUND_PAYMENT)
+private val REFUND_IN_PROGRESS_CODES = setOf(ALREADY_REFUNDING_PAYMENT, ALREADY_PROCESSING_REQUEST)
 
 // 실제 Toss Payments confirm/cancel/조회 API를 호출하는 구현체. API별 응답 변환이 한 클래스에 모여 함수가 많다
 @Suppress("TooManyFunctions")
@@ -185,23 +189,29 @@ class TossPaymentGatewayAdapter(
             refundDeclinedOrRethrow(e, pgTransactionId)
         }
 
-    // 환불 4xx 분류. 첫 요청이 처리 중이면 거절로 확정하지 않고, 이미 취소됐다는 응답은 조회로 실제 상태를 확인한다
+    // 환불 4xx 분류. 처리 중이면 거절로 확정하지 않고, 이미 취소(환불)됐다는 응답은 조회로 실제 상태를 확인한다
     private fun refundDeclinedOrRethrow(
         e: HttpClientErrorException,
         pgTransactionId: String,
     ): PaymentGatewayResult {
         val code = errorBodyFrom(e)?.code
-        if (e.statusCode == HttpStatus.CONFLICT && code == IDEMPOTENT_REQUEST_PROCESSING) {
-            throw PaymentConflictException(e)
-        }
+        if (isRefundInProgress(e, code)) throw PaymentConflictException(e)
         throwIfUnauthorized(e)
-        val alreadyCanceled = e.statusCode == HttpStatus.BAD_REQUEST && code == ALREADY_CANCELED_PAYMENT
+        val alreadyCanceled = e.statusCode == HttpStatus.BAD_REQUEST && code in ALREADY_CANCELED_CODES
         val noCancelableAmount = e.statusCode == HttpStatus.FORBIDDEN && code == NOT_CANCELABLE_AMOUNT
         if (alreadyCanceled || noCancelableAmount) {
             return resolveRefundByInquiry(pgTransactionId)
         }
         return PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
     }
+
+    // 첫 요청이 처리 중이거나 이미 환불 중이면 곧 결과가 나올 수 있어 거절로 확정하지 않는다
+    private fun isRefundInProgress(
+        e: HttpClientErrorException,
+        code: String?,
+    ): Boolean =
+        (e.statusCode == HttpStatus.CONFLICT && code == IDEMPOTENT_REQUEST_PROCESSING) ||
+            (e.statusCode == HttpStatus.BAD_REQUEST && code in REFUND_IN_PROGRESS_CODES)
 
     // 이전 시도나 외부(운영자)의 취소를 우리가 모르는 경우라, 조회가 CANCELED이거나 부분 취소로 잔액이 0일 때만 환불 완료로 본다
     private fun resolveRefundByInquiry(pgTransactionId: String): PaymentGatewayResult {

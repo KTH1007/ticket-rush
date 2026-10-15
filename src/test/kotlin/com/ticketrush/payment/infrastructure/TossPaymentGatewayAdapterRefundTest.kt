@@ -15,6 +15,8 @@ import com.ticketrush.payment.domain.PaymentGatewayResult
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.extension.RegisterExtension
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.RestClient
@@ -153,6 +155,37 @@ class TossPaymentGatewayAdapterRefundTest {
 
         assertThatThrownBy { adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID()) }
             .isInstanceOf(HttpServerErrorException::class.java)
+    }
+
+    @Test
+    fun `이미 환불됨 400이고 조회가 CANCELED이면 돈이 이미 돌아갔으므로 Approved를 반환한다`() {
+        stubCancelError(400, "ALREADY_REFUND_PAYMENT", "이미 환불된 결제입니다")
+        stubInquiry("CANCELED")
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY))
+    }
+
+    @Test
+    fun `이미 환불됨 400인데 조회가 DONE이면 환불된 게 아니므로 Declined를 반환한다`() {
+        stubCancelError(400, "ALREADY_REFUND_PAYMENT", "이미 환불된 결제입니다")
+        stubInquiry("DONE")
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isInstanceOf(PaymentGatewayResult.Declined::class.java)
+    }
+
+    // 이미 처리 중이거나 환불 중이면 곧 결과가 나올 수 있어 거절로 확정하지 않고, 조회 없이 충돌로 다음 틱에 다시 확인하게 한다
+    @ParameterizedTest
+    @ValueSource(strings = ["ALREADY_REFUNDING_PAYMENT", "ALREADY_PROCESSING_REQUEST"])
+    fun `환불 중이거나 처리 중이라는 400은 조회 없이 PaymentConflictException을 던진다`(code: String) {
+        stubCancelError(400, code, "처리 중입니다")
+
+        assertThatThrownBy { adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID()) }
+            .isInstanceOf(PaymentConflictException::class.java)
+        wireMock.verify(0, getRequestedFor(urlEqualTo("/v1/payments/$PAYMENT_KEY")))
     }
 
     @Test
