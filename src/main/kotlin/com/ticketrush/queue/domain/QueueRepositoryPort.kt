@@ -1,12 +1,14 @@
 package com.ticketrush.queue.domain
 
+import com.ticketrush.shared.ClientIp
 import com.ticketrush.shared.PhoneHash
 
 interface QueueRepositoryPort {
-    // 오픈, 시작 판정과 순번 부여를 한 번에 한다. scheduleHint는 Redis에 공연 일정이 없을 때만 저장된다
+    // 오픈, 시작 판정과 IP별 발급 상한 확인, 순번 부여를 한 번에 한다. scheduleHint는 Redis에 공연 일정이 없을 때만 저장된다
     fun register(
         eventId: Long,
         token: String,
+        clientIp: ClientIp,
         scheduleHint: EventSchedule? = null,
     ): RegisterResult
 

@@ -17,6 +17,7 @@ class QueuePolicyPropertiesTest {
         jitterRatio: Double = 0.2,
         nearRankThreshold: Long = 100,
         scheduleCacheTtl: Duration = Duration.ofMinutes(10),
+        registerLimit: QueuePolicyProperties.RegisterLimit = QueuePolicyProperties.RegisterLimit(),
     ) = QueuePolicyProperties(
         tokenTtl = tokenTtl,
         activeTtl = activeTtl,
@@ -24,6 +25,7 @@ class QueuePolicyPropertiesTest {
         pollInterval = QueuePolicyProperties.PollInterval(far = far, near = near, farMax = farMax, jitterRatio = jitterRatio),
         nearRankThreshold = nearRankThreshold,
         scheduleCacheTtl = scheduleCacheTtl,
+        registerLimit = registerLimit,
     )
 
     private fun assertRejected(
@@ -157,5 +159,25 @@ class QueuePolicyPropertiesTest {
     fun `오픈 시각 캐시 TTL이 0이나 음수면 거부한다`() {
         assertRejected("scheduleCacheTtl") { properties(scheduleCacheTtl = Duration.ZERO) }
         assertRejected("scheduleCacheTtl") { properties(scheduleCacheTtl = Duration.ofSeconds(-1)) }
+    }
+
+    @Test
+    fun `IP별 발급 상한은 기본값이 분당 100개다`() {
+        val limit = properties().registerLimit
+
+        assertThat(limit.maxPerIp).isEqualTo(100)
+        assertThat(limit.window).isEqualTo(Duration.ofMinutes(1))
+    }
+
+    @Test
+    fun `IP별 발급 상한이 0 이하면 거부한다`() {
+        assertRejected("registerLimit.maxPerIp") { properties(registerLimit = QueuePolicyProperties.RegisterLimit(maxPerIp = 0)) }
+    }
+
+    @Test
+    fun `IP별 발급 윈도우가 1초 미만이면 거부한다`() {
+        assertRejected("registerLimit.window") {
+            properties(registerLimit = QueuePolicyProperties.RegisterLimit(window = Duration.ofMillis(999)))
+        }
     }
 }

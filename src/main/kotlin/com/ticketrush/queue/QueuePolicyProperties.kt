@@ -16,6 +16,8 @@ data class QueuePolicyProperties(
     val scheduleCacheTtl: Duration = Duration.ofMinutes(10),
     // 매진 여부를 캐시하는 시간. 취소로 좌석이 풀리면 이 시간 안에 승격이 다시 시작된다
     val broadcastCacheTtl: Duration = Duration.ofSeconds(1),
+    // 한 IP가 한 공연의 대기열에 받을 수 있는 토큰 수
+    val registerLimit: RegisterLimit = RegisterLimit(),
 ) {
     data class PollInterval(
         val far: Duration,
@@ -24,6 +26,11 @@ data class QueuePolicyProperties(
         val farMax: Duration = Duration.ofMinutes(5),
         // 간격에 더하는 무작위 비율(0.2면 ±20%). 같은 순간에 줄 선 사람들이 같은 순간에 다시 조회하는 것을 흩뜨린다
         val jitterRatio: Double = 0.2,
+    )
+
+    data class RegisterLimit(
+        val maxPerIp: Int = DEFAULT_MAX_PER_IP,
+        val window: Duration = Duration.ofMinutes(1),
     )
 
     init {
@@ -46,10 +53,13 @@ data class QueuePolicyProperties(
         require(nearRankThreshold > 0) { "nearRankThreshold는 양수여야 합니다: $nearRankThreshold" }
         require(scheduleCacheTtl.isAtLeastOneSecond()) { "scheduleCacheTtl은 1초 이상이어야 합니다: $scheduleCacheTtl" }
         require(!broadcastCacheTtl.isNegative) { "broadcastCacheTtl은 음수일 수 없습니다: $broadcastCacheTtl" }
+        require(registerLimit.maxPerIp > 0) { "registerLimit.maxPerIp는 양수여야 합니다: ${registerLimit.maxPerIp}" }
+        require(registerLimit.window.isAtLeastOneSecond()) { "registerLimit.window는 1초 이상이어야 합니다: ${registerLimit.window}" }
     }
 }
 
 private const val MILLIS_PER_SECOND = 1_000L
+private const val DEFAULT_MAX_PER_IP = 100
 
 private fun Duration.isPositive(): Boolean = !isNegative && !isZero
 

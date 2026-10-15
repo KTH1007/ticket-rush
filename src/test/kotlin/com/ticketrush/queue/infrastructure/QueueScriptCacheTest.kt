@@ -1,6 +1,7 @@
 package com.ticketrush.queue.infrastructure
 
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.testClientIp
 import com.ticketrush.support.스크립트_캐시_비우기
 import com.ticketrush.support.스크립트가_캐시돼_있다
 import com.ticketrush.support.열린_공연에_등록
@@ -59,6 +60,18 @@ class QueueScriptCacheTest : IntegrationTest() {
 
         // then
         assertThat(promoted).containsExactly(token)
+    }
+
+    @Test
+    fun `스크립트 캐시가 비어 있어도 IP별 발급 수를 센다`() {
+        // given
+        redisTemplate.스크립트_캐시_비우기()
+
+        // when
+        repository.열린_공연에_등록(eventId, UUID.randomUUID().toString())
+
+        // then
+        assertThat(redisTemplate.opsForValue().get("queue:$eventId:register-ip:${testClientIp.value}")).isEqualTo("1")
     }
 
     @Test
