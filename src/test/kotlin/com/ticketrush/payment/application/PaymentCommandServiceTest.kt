@@ -1,11 +1,13 @@
 package com.ticketrush.payment.application
 
 import com.ticketrush.event.domain.EventRepositoryPort
+import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.PaymentConfirmationResult
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentHistoryRepositoryPort
 import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.payment.domain.PaymentOrderMismatchException
@@ -14,6 +16,7 @@ import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.GradeRepositoryPort
 import com.ticketrush.reservation.domain.HoldTokenMismatchException
 import com.ticketrush.reservation.domain.Reservation
+import com.ticketrush.reservation.domain.ReservationHoldExpiringException
 import com.ticketrush.reservation.domain.ReservationNotFoundException
 import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
@@ -76,6 +79,9 @@ class PaymentCommandServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var clock: Clock
+
+    @Autowired
+    lateinit var policy: PaymentPolicyProperties
 
     @Autowired
     lateinit var jdbcTemplate: JdbcTemplate
@@ -243,13 +249,13 @@ class PaymentCommandServiceTest : IntegrationTest() {
 
     // PG 호출은 최대 6~12초가 걸릴 수 있어, 남은 홀드가 그보다 짧으면 호출 중에 만료돼 청구만 되고 티켓이 없는 상태가 될 수 있다
     @Test
-    fun `남은 홀드 시간이 승인에 필요한 시간보다 짧으면 PG를 부르지 않고 결제를 거부한다`() {
+    fun `남은 홀드 시간이 승인에 필요한 시간보다 짧으면 PG를 부르지 않고 곧 만료된다고 거부한다`() {
         // given
         val reservation = 홀드된_예약_준비(holdExpiresAt = LocalDateTime.now(clock).plusSeconds(5))
 
         // when & then
         assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "near-expiry-payment-key") }
-            .isInstanceOf(ReservationNotHoldingException::class.java)
+            .isInstanceOf(ReservationHoldExpiringException::class.java)
         verify(exactly = 0) { paymentGateway.charge("near-expiry-payment-key", any(), any(), any()) }
     }
 
@@ -594,6 +600,52 @@ class PaymentCommandServiceTest : IntegrationTest() {
         assertThat(result.payment.pgTransactionId).isEqualTo("pk-new-after-aborted")
     }
 
+    // 부분 취소는 승인된 적이 있어 새 키로 다시 청구하면 이중 청구가 된다. 표시만 하고 새 승인은 시작하지 않는다
+    @Test
+    fun `오래된 PENDING의 이전 paymentKey가 부분 취소됐으면 새 승인을 시작하지 않고 수동 확인으로 표시한 뒤 충돌로 응답한다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-partial")
+        every { paymentGateway.inquire("pk-prev-partial") } returns PaymentInquiryResult.PartiallyCanceled
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-after-partial") }
+            .isInstanceOf(PaymentConflictException::class.java)
+        verify(exactly = 0) { paymentGateway.charge("pk-new-after-partial", any(), any(), any()) }
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-partial")
+        assertThat(payment.refundRequiredAt).isNotNull()
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).last().reason).contains("수동 확인 필요", "부분 취소")
+
+        // 커밋된 PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
+        payment.markFailed()
+        paymentRepository.save(payment)
+    }
+
+    @Test
+    fun `이미 수동 확인으로 표시된 결제는 다시 요청해도 조회와 승인을 하지 않고 충돌로 응답한다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-marked")
+        every { paymentGateway.inquire("pk-prev-marked") } returns PaymentInquiryResult.PartiallyCanceled
+        runCatching { paymentCommandService.결제_확정(reservation, paymentKey = "pk-first-retry") }
+        clearMocks(paymentGateway)
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "pk-second-retry") }
+            .isInstanceOf(PaymentConflictException::class.java)
+        verify(exactly = 0) { paymentGateway.inquire(any()) }
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-marked")
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).count { it.reason?.contains("수동 확인 필요") == true }).isEqualTo(1)
+
+        // 커밋된 PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
+        payment.markFailed()
+        paymentRepository.save(payment)
+    }
+
     @Test
     fun `오래된 PENDING의 이전 paymentKey가 Toss에 없으면 새 키로 이어받아 승인한다`() {
         // given
@@ -625,6 +677,50 @@ class PaymentCommandServiceTest : IntegrationTest() {
         val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
         assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
         assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-unknown")
+
+        // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
+        payment.markFailed()
+        paymentRepository.save(payment)
+    }
+
+    @Test
+    fun `PG가 일시적으로 응답하지 않으면 stale 대기 시간을 담은 503 예외로 응답하고 결제는 PENDING으로 남는다`() {
+        // given
+        val reservation = 홀드된_예약_준비(holdExpiresAt = FAR_FUTURE)
+        every { paymentGateway.charge(any(), any(), any(), any()) } throws PaymentGatewayUnavailableException()
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation) }
+            .isInstanceOfSatisfying(PaymentGatewayUnavailableException::class.java) {
+                assertThat(it.retryAfter).isEqualTo(policy.staleClaimTimeout)
+            }
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(payment.chargeAttemptCount).isEqualTo(0)
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id)).extracting("toStatus").doesNotContain(PaymentStatus.FAILED)
+        val updated = requireNotNull(reservationRepository.findById(reservation.id))
+        assertThat(updated.status).isEqualTo(ReservationStatus.HOLDING)
+        assertThat(updated.holdExpiresAt).isEqualTo(FAR_FUTURE)
+
+        // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
+        payment.markFailed()
+        paymentRepository.save(payment)
+    }
+
+    @Test
+    fun `이전 paymentKey 조회가 서킷에 막히면 충돌로 위장하지 않고 503 예외로 응답한다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-blocked")
+        every { paymentGateway.inquire("pk-prev-blocked") } throws PaymentGatewayUnavailableException()
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-not-sent") }
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+        verify(exactly = 0) { paymentGateway.charge("pk-new-not-sent", any(), any(), any()) }
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-blocked")
 
         // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
         payment.markFailed()

@@ -6,6 +6,7 @@ import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
@@ -47,17 +48,23 @@ class PaymentReclaimScheduler(
     fun reclaim(staleBefore: LocalDateTime) {
         if (!running.compareAndSet(false, true)) return
         try {
-            paymentRepository.findStalePending(staleBefore).forEach(::reclaimSafely)
+            for (payment in paymentRepository.findStalePending(staleBefore)) {
+                if (!reclaimSafely(payment)) break
+            }
         } finally {
             running.set(false)
         }
     }
 
-    // 다른 요청이나 인스턴스와 겹쳐 지는 충돌은 정상 경합이라 스택트레이스 없이 한 줄만 남긴다
+    // 다른 요청이나 인스턴스와 겹쳐 지는 충돌은 정상 경합이라 스택트레이스 없이 한 줄만 남긴다.
+    // false면 이번 틱을 멈춘다. PG가 막혀 있으면 나머지 행도 같은 이유로 실패한다
     @Suppress("TooGenericExceptionCaught")
-    private fun reclaimSafely(payment: Payment) {
+    private fun reclaimSafely(payment: Payment): Boolean {
         try {
             reclaimOne(payment)
+        } catch (expected: PaymentGatewayUnavailableException) {
+            logger.warn { "PG가 일시적으로 응답하지 않아 이번 틱의 결제 재시도를 멈춥니다" }
+            return false
         } catch (expected: PaymentConflictException) {
             logger.warn { "다른 요청이 처리 중이라 건너뜁니다: reservationId=${payment.reservationId}" }
         } catch (expected: OptimisticLockingFailureException) {
@@ -65,6 +72,7 @@ class PaymentReclaimScheduler(
         } catch (e: Exception) {
             logger.warn(e) { "결제 재시도 실패: reservationId=${payment.reservationId}" }
         }
+        return true
     }
 
     private fun reclaimOne(snapshot: Payment) {
@@ -120,11 +128,22 @@ class PaymentReclaimScheduler(
     ) {
         when (val inquiry = paymentGateway.inquire(paymentKey)) {
             is PaymentInquiryResult.Done -> alertRefundNeeded(payment, reservation, inquiry)
+            PaymentInquiryResult.PartiallyCanceled -> alertManualCheck(payment, reservation)
             is PaymentInquiryResult.NotApproved ->
                 claimService.markFailedByReconciliation(payment, "Toss 미승인(${inquiry.status}), 예약을 쓸 수 없어 결제 실패로 확정")
             PaymentInquiryResult.NotFound ->
                 claimService.markFailedByReconciliation(payment, "Toss에 결제 내역 없음, 예약을 쓸 수 없어 결제 실패로 확정")
         }
+    }
+
+    // 부분 취소는 승인된 적이 있어 실패로 닫지 않는다. 사람이 확인하도록 PENDING 그대로 표시하고, 표시를 DB에 남기므로 알림은 건당 한 번이다
+    private fun alertManualCheck(
+        payment: Payment,
+        reservation: Reservation,
+    ) {
+        val detail = "reservationId=${reservation.id}, paymentId=${payment.id}, reservationStatus=${reservation.status}"
+        claimService.markRefundRequired(payment, LocalDateTime.now(clock), "수동 확인 필요: Toss 결제가 부분 취소됨, $detail")
+        logger.error { "Toss 결제가 부분 취소돼 수동 확인 필요: $detail" }
     }
 
     // 돈이 움직이는 판단이라 자동 환불하지 않고 PENDING 그대로 둔 채 사람이 처리하도록 알린다. 표시를 DB에 남기므로 알림은 건당 한 번이다

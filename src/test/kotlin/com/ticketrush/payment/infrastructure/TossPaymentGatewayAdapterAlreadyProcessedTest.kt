@@ -9,6 +9,7 @@ import com.github.tomakehurst.wiremock.junit5.WireMockExtension
 import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.extension.RegisterExtension
@@ -77,12 +78,13 @@ class TossPaymentGatewayAdapterAlreadyProcessedTest {
     }
 
     @Test
-    fun `이미 처리됨 400 뒤 조회가 500이면 거절로 확정하지 않고 예외를 전파한다`() {
+    fun `이미 처리됨 400 뒤 조회가 500이면 거절로 확정하지 않고 PaymentGatewayUnavailableException을 던진다`() {
         stubConfirmBadRequest("ALREADY_PROCESSED_PAYMENT")
         wireMock.stubFor(get(urlEqualTo("/v1/payments/pk-4")).willReturn(aResponse().withStatus(500)))
 
         assertThatThrownBy { adapter.charge("pk-4", "order-4", 10_000, UUID.randomUUID()) }
-            .isInstanceOf(HttpServerErrorException::class.java)
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(HttpServerErrorException::class.java)
     }
 
     @Test

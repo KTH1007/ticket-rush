@@ -11,6 +11,7 @@ import com.ticketrush.payment.domain.ChargeIdempotencyKey
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentHistoryRepositoryPort
 import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
@@ -260,6 +261,42 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
 
     @Test
     @Transactional
+    fun `PG가 일시적으로 응답하지 않으면 그 행은 PENDING으로 남고 이번 틱의 나머지 행은 건너뛴다`() {
+        val event = 공연()
+        val first = reservationRepository.예약_하나_저장(event = event)
+        val second = reservationRepository.예약_하나_저장(event = event)
+        클레임(first, paymentKey = "pk-first")
+        클레임(second, paymentKey = "pk-second")
+        every { paymentGateway.charge(any(), any(), any(), any()) } throws PaymentGatewayUnavailableException()
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        verify(exactly = 1) { paymentGateway.charge(any(), any(), any(), any()) }
+        assertThat(paymentRepository.findByReservationId(first.id)?.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(paymentRepository.findByReservationId(second.id)?.status).isEqualTo(PaymentStatus.PENDING)
+        val warnings = logs.list.filter { it.level == Level.WARN }
+        assertThat(warnings).hasSize(1)
+        assertThat(warnings.single().throwableProxy).isNull()
+    }
+
+    @Test
+    @Transactional
+    fun `조회가 서킷에 막혀도 그 행은 PENDING으로 남고 이번 틱을 멈춘다`() {
+        val blocked = 만료된_예약과_좌석()
+        val other = 만료된_예약과_좌석()
+        클레임(blocked, paymentKey = "pk-blocked")
+        클레임(other, paymentKey = "pk-other")
+        every { paymentGateway.inquire(any()) } throws PaymentGatewayUnavailableException()
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        verify(exactly = 1) { paymentGateway.inquire(any()) }
+        assertThat(paymentRepository.findByReservationId(blocked.id)?.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(paymentRepository.findByReservationId(other.id)?.status).isEqualTo(PaymentStatus.PENDING)
+    }
+
+    @Test
+    @Transactional
     fun `예약을 쓸 수 없는데 Toss가 승인(DONE)했으면 결제와 예약을 그대로 두고 환불 필요 알림을 남긴다`() {
         val reservation = 만료된_예약과_좌석()
         val approvedAt = LocalDateTime.of(2026, 10, 1, 10, 15, 30)
@@ -356,6 +393,26 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
         reclaimScheduler.reclaim(staleBefore = staleBefore())
 
         assertFailedByReconciliation(reservation)
+    }
+
+    @Test
+    @Transactional
+    fun `예약을 쓸 수 없는데 Toss 결제가 부분 취소됐으면 실패로 닫지 않고 수동 확인 알림을 남긴다`() {
+        val reservation = 만료된_예약과_좌석()
+        클레임(reservation, paymentKey = "pk-partial")
+        every { paymentGateway.inquire("pk-partial") } returns PaymentInquiryResult.PartiallyCanceled
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(payment.refundRequiredAt).isNotNull()
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).single().reason).contains("수동 확인 필요", "부분 취소")
+        assertThat(logs.list.single { it.level == Level.ERROR }.formattedMessage).contains("부분 취소", "paymentId=${payment.id}")
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        verify(exactly = 1) { paymentGateway.inquire("pk-partial") }
     }
 
     @Test

@@ -10,6 +10,7 @@ import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentHistoryRepositoryPort
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
@@ -203,6 +204,41 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
         retryScheduler.retry(staleBefore())
 
         verify(exactly = 1) { paymentGateway.refund(any(), any(), any()) }
+    }
+
+    @Test
+    @Transactional
+    fun `PG가 일시적으로 응답하지 않으면 시도 횟수와 이력을 늘리지 않고 ERROR도 남기지 않는다`() {
+        val reservation = 예약()
+        취소된_결제(reservation)
+        every { paymentGateway.refund(any(), any(), any()) } throws PaymentGatewayUnavailableException()
+
+        retryScheduler.retry(staleBefore())
+
+        entityManager.flush()
+        entityManager.clear()
+        val payment = 결제(reservation)
+        assertThat(payment.status).isEqualTo(PaymentStatus.CANCELED)
+        assertThat(payment.refundAttemptCount).isEqualTo(0)
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id)).isEmpty()
+        assertThat(logs.list.filter { it.level == Level.ERROR }).isEmpty()
+    }
+
+    @Test
+    @Transactional
+    fun `PG가 일시적으로 응답하지 않으면 이번 틱의 나머지 행은 건너뛰고 한 줄만 남긴다`() {
+        val first = 예약()
+        val second = 예약()
+        취소된_결제(first)
+        취소된_결제(second)
+        every { paymentGateway.refund(any(), any(), any()) } throws PaymentGatewayUnavailableException()
+
+        retryScheduler.retry(staleBefore())
+
+        verify(exactly = 1) { paymentGateway.refund(any(), any(), any()) }
+        val warnings = logs.list.filter { it.level == Level.WARN }
+        assertThat(warnings).hasSize(1)
+        assertThat(warnings.single().throwableProxy).isNull()
     }
 
     @Test

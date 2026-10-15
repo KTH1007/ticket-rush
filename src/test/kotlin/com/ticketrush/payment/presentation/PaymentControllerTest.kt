@@ -6,8 +6,10 @@ import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConfirmationResult
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentDeclinedException
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.HoldTokenMismatchException
+import com.ticketrush.reservation.domain.ReservationHoldExpiringException
 import com.ticketrush.reservation.domain.ReservationNotFoundException
 import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationStatus
@@ -27,9 +29,11 @@ import org.springframework.restdocs.request.RequestDocumentation.parameterWithNa
 import org.springframework.restdocs.request.RequestDocumentation.pathParameters
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import tools.jackson.databind.ObjectMapper
+import java.time.Duration
 import java.time.LocalDateTime
 import java.util.UUID
 import kotlin.test.Test
@@ -107,6 +111,19 @@ class PaymentControllerTest {
     }
 
     @Test
+    fun `홀드가 곧 만료되면 409와 RESERVATION_HOLD_EXPIRING을 반환한다`() {
+        // given
+        val holdToken = UUID.randomUUID()
+        every { paymentCommandService.confirmPayment(1L, holdToken, any(), any(), any()) } throws ReservationHoldExpiringException()
+
+        // when & then
+        mockMvc
+            .perform(결제_확정_요청(holdToken = holdToken))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("RESERVATION_HOLD_EXPIRING"))
+    }
+
+    @Test
     fun `PG가 거절하면 409를 반환한다`() {
         // given
         val holdToken = UUID.randomUUID()
@@ -124,6 +141,21 @@ class PaymentControllerTest {
 
         // when & then
         mockMvc.perform(결제_확정_요청(holdToken = holdToken)).andExpect(status().isConflict)
+    }
+
+    @Test
+    fun `PG가 일시적으로 응답하지 않으면 503과 PAYMENT_GATEWAY_UNAVAILABLE과 Retry-After를 반환한다`() {
+        // given
+        val holdToken = UUID.randomUUID()
+        every { paymentCommandService.confirmPayment(1L, holdToken, any(), any(), any()) } throws
+            PaymentGatewayUnavailableException(Duration.ofSeconds(10))
+
+        // when & then
+        mockMvc
+            .perform(결제_확정_요청(holdToken = holdToken))
+            .andExpect(status().isServiceUnavailable)
+            .andExpect(header().string("Retry-After", "10"))
+            .andExpect(jsonPath("$.code").value("PAYMENT_GATEWAY_UNAVAILABLE"))
     }
 
     // 컬럼(toss_payment_key 200자, toss_order_id 64자)을 넘는 값이 DB까지 가면 제약 위반으로 500이 된다

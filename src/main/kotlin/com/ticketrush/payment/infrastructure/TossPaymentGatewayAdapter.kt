@@ -4,19 +4,24 @@ import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.shared.AppTimeZone
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
 import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
+import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.RestClient
+import org.springframework.web.client.RestClientException
+import org.springframework.web.client.RestClientResponseException
+import java.time.DateTimeException
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
-import java.time.format.DateTimeParseException
 import java.util.Base64
 import java.util.UUID
 
@@ -26,8 +31,13 @@ private const val IDEMPOTENT_REQUEST_PROCESSING = "IDEMPOTENT_REQUEST_PROCESSING
 private const val NOT_FOUND_PAYMENT = "NOT_FOUND_PAYMENT"
 private const val ALREADY_PROCESSING_REQUEST = "ALREADY_PROCESSING_REQUEST"
 private const val ALREADY_CANCELED_PAYMENT = "ALREADY_CANCELED_PAYMENT"
+private const val ALREADY_REFUND_PAYMENT = "ALREADY_REFUND_PAYMENT"
+private const val ALREADY_REFUNDING_PAYMENT = "ALREADY_REFUNDING_PAYMENT"
 private const val NOT_CANCELABLE_AMOUNT = "NOT_CANCELABLE_AMOUNT"
+private const val PARTIAL_CANCELED = "PARTIAL_CANCELED"
 private val ALREADY_PROCESSED_CODES = setOf("ALREADY_PROCESSED_PAYMENT", "DUPLICATED_REQUEST")
+private val ALREADY_CANCELED_CODES = setOf(ALREADY_CANCELED_PAYMENT, ALREADY_REFUND_PAYMENT)
+private val REFUND_IN_PROGRESS_CODES = setOf(ALREADY_REFUNDING_PAYMENT, ALREADY_PROCESSING_REQUEST)
 
 // 실제 Toss Payments confirm/cancel/조회 API를 호출하는 구현체. API별 응답 변환이 한 클래스에 모여 함수가 많다
 @Suppress("TooManyFunctions")
@@ -41,8 +51,15 @@ class TossPaymentGatewayAdapter(
         require(toss.secretKey.isNotBlank()) { "toss 프로필에는 TOSS_SECRET_KEY가 필요합니다" }
     }
 
-    @CircuitBreaker(name = "paymentGateway")
+    @CircuitBreaker(name = "paymentGateway", fallbackMethod = "chargeBlocked")
     override fun charge(
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
+        idempotencyKey: UUID,
+    ): PaymentGatewayResult = unavailableOnInfraFailure { requestCharge(paymentKey, orderId, amount, idempotencyKey) }
+
+    private fun requestCharge(
         paymentKey: String,
         orderId: String,
         amount: Int,
@@ -100,7 +117,7 @@ class TossPaymentGatewayAdapter(
             payment.status != "DONE" -> PaymentGatewayResult.Declined(reason = "Toss status: ${payment.status}")
             // 다른 주문에서 승인된 paymentKey를 가져다 쓴 요청이 승인으로 둔갑하지 않게 한다. 필드가 없으면 불일치로 본다
             payment.orderId != orderId || payment.totalAmount != amount -> PaymentGatewayResult.Declined(reason = "다른 주문의 결제")
-            else -> PaymentGatewayResult.Approved(payment.paymentKey, parseApprovedAt(payment.approvedAt))
+            else -> PaymentGatewayResult.Approved(payment.paymentKey, parseApprovedAt(payment.approvedAt, payment.paymentKey))
         }
     }
 
@@ -110,6 +127,13 @@ class TossPaymentGatewayAdapter(
         if (e.statusCode == HttpStatus.TOO_MANY_REQUESTS || e.statusCode == HttpStatus.REQUEST_TIMEOUT) throw PaymentConflictException(e)
     }
 
+    // 조회의 429(호출 제한)와 408(시간 초과)은 호출을 줄이라는 신호라 서킷이 실패로 세어 호출을 멈추게 한다. 승인과 달리 확정할 결과가 없다
+    private fun throwIfRateLimited(e: HttpClientErrorException) {
+        if (e.statusCode == HttpStatus.TOO_MANY_REQUESTS || e.statusCode == HttpStatus.REQUEST_TIMEOUT) {
+            throw PaymentGatewayUnavailableException(cause = e)
+        }
+    }
+
     // 시크릿 키 설정 실수가 거절이나 미승인으로 확정돼 결제가 잘못 닫히는 걸 막으려고 그대로 던진다
     private fun throwIfUnauthorized(e: HttpClientErrorException) {
         if (e.statusCode != HttpStatus.UNAUTHORIZED) return
@@ -117,9 +141,9 @@ class TossPaymentGatewayAdapter(
         throw e
     }
 
-    @CircuitBreaker(name = "paymentGateway")
+    @CircuitBreaker(name = "paymentGateway", fallbackMethod = "inquireBlocked")
     override fun inquire(paymentKey: String): PaymentInquiryResult =
-        fetchPayment(paymentKey)?.let(::toInquiryResult) ?: PaymentInquiryResult.NotFound
+        unavailableOnInfraFailure { fetchPayment(paymentKey)?.let(::toInquiryResult) ?: PaymentInquiryResult.NotFound }
 
     // 없는 결제만 null이다. 그 밖의 4xx는 승인 여부를 모르므로 미승인으로 단정하지 않고 던진다
     private fun fetchPayment(paymentKey: String): TossPaymentResponse? =
@@ -137,11 +161,12 @@ class TossPaymentGatewayAdapter(
                 null
             } else {
                 throwIfUnauthorized(e)
+                throwIfRateLimited(e)
                 throw e
             }
         }
 
-    @CircuitBreaker(name = "paymentGateway")
+    @CircuitBreaker(name = "paymentGateway", fallbackMethod = "refundBlocked")
     override fun refund(
         pgTransactionId: String,
         amount: Int,
@@ -164,23 +189,29 @@ class TossPaymentGatewayAdapter(
             refundDeclinedOrRethrow(e, pgTransactionId)
         }
 
-    // 환불 4xx 분류. 첫 요청이 처리 중이면 거절로 확정하지 않고, 이미 취소됐다는 응답은 조회로 실제 상태를 확인한다
+    // 환불 4xx 분류. 처리 중이면 거절로 확정하지 않고, 이미 취소(환불)됐다는 응답은 조회로 실제 상태를 확인한다
     private fun refundDeclinedOrRethrow(
         e: HttpClientErrorException,
         pgTransactionId: String,
     ): PaymentGatewayResult {
         val code = errorBodyFrom(e)?.code
-        if (e.statusCode == HttpStatus.CONFLICT && code == IDEMPOTENT_REQUEST_PROCESSING) {
-            throw PaymentConflictException(e)
-        }
+        if (isRefundInProgress(e, code)) throw PaymentConflictException(e)
         throwIfUnauthorized(e)
-        val alreadyCanceled = e.statusCode == HttpStatus.BAD_REQUEST && code == ALREADY_CANCELED_PAYMENT
+        val alreadyCanceled = e.statusCode == HttpStatus.BAD_REQUEST && code in ALREADY_CANCELED_CODES
         val noCancelableAmount = e.statusCode == HttpStatus.FORBIDDEN && code == NOT_CANCELABLE_AMOUNT
         if (alreadyCanceled || noCancelableAmount) {
             return resolveRefundByInquiry(pgTransactionId)
         }
         return PaymentGatewayResult.Declined(reason = declinedReasonFrom(e))
     }
+
+    // 첫 요청이 처리 중이거나 이미 환불 중이면 곧 결과가 나올 수 있어 거절로 확정하지 않는다
+    private fun isRefundInProgress(
+        e: HttpClientErrorException,
+        code: String?,
+    ): Boolean =
+        (e.statusCode == HttpStatus.CONFLICT && code == IDEMPOTENT_REQUEST_PROCESSING) ||
+            (e.statusCode == HttpStatus.BAD_REQUEST && code in REFUND_IN_PROGRESS_CODES)
 
     // 이전 시도나 외부(운영자)의 취소를 우리가 모르는 경우라, 조회가 CANCELED이거나 부분 취소로 잔액이 0일 때만 환불 완료로 본다
     private fun resolveRefundByInquiry(pgTransactionId: String): PaymentGatewayResult {
@@ -193,34 +224,78 @@ class TossPaymentGatewayAdapter(
         }
     }
 
+    // 서킷이 열려 Toss를 부르지 않았다. 호출이 나가 결과를 모르는 5xx와 달리 호출 측이 환불 횟수에 세지 않는다
+    @Suppress("UnusedPrivateFunction", "UnusedParameter")
+    private fun chargeBlocked(
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
+        idempotencyKey: UUID,
+        e: CallNotPermittedException,
+    ): PaymentGatewayResult = throw PaymentGatewayUnavailableException(cause = e)
+
+    @Suppress("UnusedPrivateFunction", "UnusedParameter")
+    private fun inquireBlocked(
+        paymentKey: String,
+        e: CallNotPermittedException,
+    ): PaymentInquiryResult = throw PaymentGatewayUnavailableException(cause = e)
+
+    @Suppress("UnusedPrivateFunction", "UnusedParameter")
+    private fun refundBlocked(
+        pgTransactionId: String,
+        amount: Int,
+        idempotencyKey: UUID,
+        e: CallNotPermittedException,
+    ): PaymentGatewayResult = throw PaymentGatewayUnavailableException(cause = e)
+
+    // 승인과 조회의 5xx, 연결 실패, 타임아웃, 응답을 읽다 끊기거나 해석하지 못한 경우는 Toss의 일시 장애라 결과를 확정하지 않는다.
+    // 환불에는 쓰지 않는다(호출이 나가 결과를 모르므로 실패로 센다)
+    private inline fun <T> unavailableOnInfraFailure(block: () -> T): T =
+        try {
+            block()
+        } catch (e: RestClientException) {
+            throw unavailableOrSelf(e)
+        }
+
+    // 4xx 같은 상태 오류는 호출 측이 결과를 판단하므로 그대로 두고, 5xx와 그 밖의 통신 오류만 일시 장애로 바꾼다
+    private fun unavailableOrSelf(e: RestClientException): RuntimeException =
+        if (e is RestClientResponseException && e !is HttpServerErrorException) e else PaymentGatewayUnavailableException(cause = e)
+
     private fun basicAuth(): String = "Basic " + Base64.getEncoder().encodeToString("${toss.secretKey}:".toByteArray())
 
     private fun toResult(response: TossPaymentResponse): PaymentGatewayResult =
         if (response.status == "DONE") {
-            PaymentGatewayResult.Approved(pgTransactionId = response.paymentKey, approvedAt = parseApprovedAt(response.approvedAt))
+            PaymentGatewayResult.Approved(
+                pgTransactionId = response.paymentKey,
+                approvedAt = parseApprovedAt(response.approvedAt, response.paymentKey),
+            )
         } else {
             PaymentGatewayResult.Declined(reason = "예상치 못한 status: ${response.status}")
         }
 
     private fun toInquiryResult(response: TossPaymentResponse): PaymentInquiryResult =
-        if (response.status == "DONE") {
-            PaymentInquiryResult.Done(
-                pgTransactionId = response.paymentKey,
-                approvedAt = parseApprovedAt(response.approvedAt),
-                orderId = response.orderId,
-                totalAmount = response.totalAmount,
-            )
-        } else {
-            PaymentInquiryResult.NotApproved(status = response.status)
+        when (response.status) {
+            "DONE" ->
+                PaymentInquiryResult.Done(
+                    pgTransactionId = response.paymentKey,
+                    approvedAt = parseApprovedAt(response.approvedAt, response.paymentKey),
+                    orderId = response.orderId,
+                    totalAmount = response.totalAmount,
+                )
+            PARTIAL_CANCELED -> PaymentInquiryResult.PartiallyCanceled
+            else -> PaymentInquiryResult.NotApproved(status = response.status)
         }
 
     // 이미 승인된 뒤라 파싱 실패로 예외를 던지면 클레임이 PENDING으로 남는다. null로 두고 호출 측이 서버 시각으로 대체한다
-    private fun parseApprovedAt(raw: String?): LocalDateTime? {
+    private fun parseApprovedAt(
+        raw: String?,
+        paymentKey: String,
+    ): LocalDateTime? {
         if (raw == null) return null
         return try {
             OffsetDateTime.parse(raw).atZoneSameInstant(AppTimeZone.ID).toLocalDateTime()
-        } catch (e: DateTimeParseException) {
-            logger.warn(e) { "토스 approvedAt 파싱에 실패해 서버 시각으로 대체합니다: approvedAt=$raw" }
+        } catch (e: DateTimeException) {
+            logger.warn { "토스 approvedAt을 해석하지 못해 null로 처리합니다: paymentKey=$paymentKey, approvedAt=$raw, 원인=${e.message}" }
             null
         }
     }

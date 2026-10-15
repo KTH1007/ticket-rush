@@ -8,12 +8,14 @@ import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.payment.domain.PaymentOrderMismatchException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.HoldTokenMismatchException
 import com.ticketrush.reservation.domain.Reservation
+import com.ticketrush.reservation.domain.ReservationHoldExpiringException
 import com.ticketrush.reservation.domain.ReservationNotFoundException
 import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
@@ -27,6 +29,8 @@ import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
 
+// 승인 흐름의 단계마다 함수로 나눠 함수가 많다
+@Suppress("TooManyFunctions")
 @Service
 class PaymentCommandService(
     private val reservationRepository: ReservationRepositoryPort,
@@ -44,6 +48,20 @@ class PaymentCommandService(
         paymentKey: String,
         orderId: String,
         amount: Int,
+    ): PaymentConfirmationResult =
+        try {
+            confirm(reservationId, holdToken, paymentKey, orderId, amount)
+        } catch (e: PaymentGatewayUnavailableException) {
+            // 결과를 모르는 채 PENDING이 남는다. 그 클레임을 이어받을 수 있게 되는 때에 다시 시도하도록 알린다
+            throw PaymentGatewayUnavailableException(policy.staleClaimTimeout, e)
+        }
+
+    private fun confirm(
+        reservationId: Long,
+        holdToken: UUID,
+        paymentKey: String,
+        orderId: String,
+        amount: Int,
     ): PaymentConfirmationResult {
         val reservation = loadOwnedReservation(reservationId, holdToken)
 
@@ -52,6 +70,8 @@ class PaymentCommandService(
 
         requireHolding(reservation)
         requireOrderMatches(reservation, orderId, amount)
+        // 사람이 확인하도록 표시된 결제는 새 승인을 시작하지 않는다. 이미 승인된 돈이 남아 있을 수 있다
+        if (existingPayment?.refundRequiredAt != null) throw PaymentConflictException()
 
         confirmPreviousIfApproved(reservation, existingPayment, paymentKey)?.let { return it }
 
@@ -86,6 +106,9 @@ class PaymentCommandService(
         val inquiry =
             try {
                 paymentGateway.inquire(requireNotNull(previous.tossPaymentKey))
+            } catch (e: PaymentGatewayUnavailableException) {
+                // PG가 막혀 있는 것을 다른 요청이 처리 중인 충돌로 위장하지 않는다
+                throw e
             } catch (e: Exception) {
                 logger.warn(e) { "이전 paymentKey 조회에 실패해 덮어쓰지 않고 충돌로 응답합니다: paymentId=${previous.id}" }
                 throw PaymentConflictException(cause = e)
@@ -93,8 +116,20 @@ class PaymentCommandService(
         return when (inquiry) {
             is PaymentInquiryResult.Done ->
                 if (isPaymentOf(reservation, inquiry)) applyPreviousSuccess(reservation, previous, inquiry) else null
+            PaymentInquiryResult.PartiallyCanceled -> blockForManualCheck(reservation, previous)
             is PaymentInquiryResult.NotApproved, PaymentInquiryResult.NotFound -> null
         }
+    }
+
+    // 부분 취소는 승인된 적이 있어 같은 결제를 새 키로 다시 청구하면 이중 청구가 된다. 사람이 확인하도록 표시하고 새 승인은 시작하지 않는다
+    private fun blockForManualCheck(
+        reservation: Reservation,
+        previous: Payment,
+    ): Nothing {
+        val detail = "reservationId=${reservation.id}, paymentId=${previous.id}, reservationStatus=${reservation.status}"
+        claimService.markRefundRequired(previous, LocalDateTime.now(clock), "수동 확인 필요: Toss 결제가 부분 취소됨, $detail")
+        logger.error { "Toss 결제가 부분 취소돼 수동 확인 필요: $detail" }
+        throw PaymentConflictException()
     }
 
     // 저장된 paymentKey는 클라이언트가 보낸 값이라, 다른 예약에서 승인된 결제를 이 예약의 승인으로 확정하지 않게 주문번호와 금액을 대조한다
@@ -156,11 +191,17 @@ class PaymentCommandService(
         }
 
     private fun requireHolding(reservation: Reservation) {
-        if (reservation.status != ReservationStatus.HOLDING) throw ReservationNotHoldingException(reservation.status)
-        // 남은 홀드가 PG 호출 시간보다 짧으면 호출 중에 만료돼 청구만 되고 티켓이 없을 수 있어 시작 전에 거부한다
-        if (!reservation.isHoldActiveAt(LocalDateTime.now(clock).plus(policy.minHoldRemaining))) {
-            throw ReservationNotHoldingException(ReservationStatus.EXPIRED)
-        }
+        val now = LocalDateTime.now(clock)
+        val rejection =
+            when {
+                reservation.status != ReservationStatus.HOLDING -> ReservationNotHoldingException(reservation.status)
+                // 홀드 시각이 이미 지났으면 스위퍼가 아직 상태를 못 바꿨을 뿐 만료된 것이다
+                !reservation.isHoldActiveAt(now) -> ReservationNotHoldingException(ReservationStatus.EXPIRED)
+                // 남은 홀드가 PG 호출 시간보다 짧으면 호출 중에 만료돼 청구만 되고 티켓이 없을 수 있어 시작 전에 거부한다
+                !reservation.isHoldActiveAt(now.plus(policy.minHoldRemaining)) -> ReservationHoldExpiringException()
+                else -> return
+            }
+        throw rejection
     }
 
     private fun requireOrderMatches(

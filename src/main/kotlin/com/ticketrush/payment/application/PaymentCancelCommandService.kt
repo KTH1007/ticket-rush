@@ -5,6 +5,7 @@ import com.ticketrush.payment.domain.PaymentCancelResult
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.RefundIdempotencyKey
 import com.ticketrush.shared.ClientIp
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -48,12 +49,23 @@ class PaymentCancelCommandService(
             }
             result
         } catch (expected: PaymentConflictException) {
-            logger.warn { "환불이 PG에서 아직 처리 중입니다. 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
-            null
+            skipRefund("환불이 PG에서 아직 처리 중입니다.", payment)
+        } catch (expected: PaymentGatewayUnavailableException) {
+            // PG에 닿지 않은 경우라 시도로 세지 않는다
+            skipRefund("PG가 일시적으로 응답하지 않아 환불을 시도하지 못했습니다.", payment)
         } catch (e: Exception) {
             logger.error(e) { "환불 요청 중 오류가 발생했습니다. 취소는 유지하고 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
             PaymentGatewayResult.Declined(reason = e.message ?: e.javaClass.simpleName)
         }
+    }
+
+    // 환불 결과가 없어 시도로 세지 않는다. 결제는 CANCELED로 남아 재시도 스케줄러가 이어받는다
+    private fun skipRefund(
+        reason: String,
+        payment: Payment,
+    ): PaymentGatewayResult? {
+        logger.warn { "$reason 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
+        return null
     }
 
     // 취소는 이미 커밋돼 환불 결과를 못 적어도 요청을 실패시키지 않는다. 결제가 CANCELED로 남아 재시도 스케줄러가 같은 키로 다시 요청한다

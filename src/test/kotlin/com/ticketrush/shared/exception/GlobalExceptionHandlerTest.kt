@@ -191,4 +191,28 @@ class GlobalExceptionHandlerTest {
         // then
         assertThat(result.response.getHeader("Retry-After")).isEqualTo("1")
     }
+
+    @Test
+    fun `ServiceUnavailableException 발생 시 503과 ProblemDetail을 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/service-unavailable")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(503)
+        val body = objectMapper.readValue(result.response.contentAsString, ProblemDetail::class.java)
+        assertThat(body.title).isEqualTo("Service Unavailable")
+        assertThat(body.detail).isEqualTo("샘플 서비스를 쓸 수 없습니다")
+        assertThat(body.properties?.get("code")).isEqualTo("SAMPLE_UNAVAILABLE")
+        assertThat(result.response.getHeader("Retry-After")).isNull()
+    }
+
+    @Test
+    fun `503의 Retry-After는 남은 시간을 초 단위로 올려 준다`() {
+        // when
+        val result = mockMvc.perform(post("/test/service-unavailable").param("millis", "10000")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(503)
+        assertThat(result.response.getHeader("Retry-After")).isEqualTo("10")
+    }
 }

@@ -40,6 +40,11 @@ class ExceptionTestController {
     @PostMapping("/too-many-requests")
     fun tooManyRequests(): Nothing = throw SampleTooManyRequestsException()
 
+    @PostMapping("/service-unavailable")
+    fun serviceUnavailable(
+        @RequestParam(required = false) millis: Long?,
+    ): Nothing = throw SampleServiceUnavailableException(millis?.let(Duration::ofMillis))
+
     @PostMapping("/too-many-requests/retry-after")
     fun tooManyRequestsWithRetryAfter(
         @RequestParam millis: Long,
@@ -51,6 +56,10 @@ class SampleForbiddenException : ForbiddenException(code = "SAMPLE_FORBIDDEN", m
 class SampleTooManyRequestsException(
     retryAfter: Duration? = null,
 ) : TooManyRequestsException(code = "SAMPLE_TOO_MANY_REQUESTS", message = "샘플 요청이 너무 많습니다", retryAfter = retryAfter)
+
+class SampleServiceUnavailableException(
+    retryAfter: Duration? = null,
+) : ServiceUnavailableException(code = "SAMPLE_UNAVAILABLE", message = "샘플 서비스를 쓸 수 없습니다", retryAfter = retryAfter)
 
 class SampleNotFoundException : NotFoundException(code = "SAMPLE_NOT_FOUND", message = "샘플을 찾을 수 없습니다")
 

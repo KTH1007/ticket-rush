@@ -5,6 +5,7 @@ import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.payment.domain.RefundIdempotencyKey
@@ -45,22 +46,29 @@ class PaymentRefundRetryScheduler(
     fun retry(staleBefore: LocalDateTime) {
         if (!running.compareAndSet(false, true)) return
         try {
-            paymentRepository.findStaleCanceled(staleBefore, policy.refundMaxAttempts).forEach(::retrySafely)
+            for (payment in paymentRepository.findStaleCanceled(staleBefore, policy.refundMaxAttempts)) {
+                if (!retrySafely(payment)) break
+            }
         } finally {
             running.set(false)
         }
     }
 
-    // 다른 인스턴스와 낙관적 락으로 겹치는 건 정상 경합이라 스택트레이스 없이 한 줄만 남긴다
+    // 다른 인스턴스와 낙관적 락으로 겹치는 건 정상 경합이라 스택트레이스 없이 한 줄만 남긴다.
+    // false면 이번 틱을 멈춘다. PG가 막혀 있으면 나머지 행도 같은 이유로 실패한다
     @Suppress("TooGenericExceptionCaught")
-    private fun retrySafely(payment: Payment) {
+    private fun retrySafely(payment: Payment): Boolean {
         try {
             retryOne(payment)
+        } catch (expected: PaymentGatewayUnavailableException) {
+            logger.warn { "PG가 일시적으로 응답하지 않아 이번 틱의 환불 재시도를 멈춥니다" }
+            return false
         } catch (expected: OptimisticLockingFailureException) {
             logger.warn { "다른 인스턴스가 먼저 반영해 건너뜁니다: reservationId=${payment.reservationId}" }
         } catch (e: Exception) {
             logger.warn(e) { "환불 재시도 반영 실패: reservationId=${payment.reservationId}" }
         }
+        return true
     }
 
     private fun retryOne(snapshot: Payment) {
@@ -94,6 +102,9 @@ class PaymentRefundRetryScheduler(
         } catch (expected: PaymentConflictException) {
             logger.warn { "환불이 PG에서 아직 처리 중입니다. 시도로 세지 않고 다음 틱에 다시 확인합니다: paymentId=${payment.id}" }
             null
+        } catch (e: PaymentGatewayUnavailableException) {
+            // PG에 닿지 않은 경우라 시도로 세지 않고 위로 올려 이번 틱을 멈춘다
+            throw e
         } catch (e: Exception) {
             logger.warn(e) { "환불 재시도 호출 실패: paymentId=${payment.id}" }
             PaymentGatewayResult.Declined(reason = e.message ?: e.javaClass.simpleName)
