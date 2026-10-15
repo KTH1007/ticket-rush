@@ -22,6 +22,7 @@
             <encoder class="net.logstash.logback.encoder.LogstashEncoder">
                 <includeMdcKeyName>traceId</includeMdcKeyName>
                 <includeMdcKeyName>instanceId</includeMdcKeyName>
+                <includeMdcKeyName>clientIp</includeMdcKeyName>
                 <customFields>{"app":"ticket-rush"}</customFields>
             </encoder>
         </appender>

@@ -5,7 +5,9 @@ import jakarta.validation.constraints.NotBlank
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.time.Duration
 
 // GlobalExceptionHandlerTest 전용. 실제 도메인 컨트롤러가 아직 없어(#43 이전) 예외 매핑만
 // 검증하기 위한 최소 엔드포인트만 가진 컨트롤러.
@@ -37,11 +39,18 @@ class ExceptionTestController {
 
     @PostMapping("/too-many-requests")
     fun tooManyRequests(): Nothing = throw SampleTooManyRequestsException()
+
+    @PostMapping("/too-many-requests/retry-after")
+    fun tooManyRequestsWithRetryAfter(
+        @RequestParam millis: Long,
+    ): Nothing = throw SampleTooManyRequestsException(Duration.ofMillis(millis))
 }
 
 class SampleForbiddenException : ForbiddenException(code = "SAMPLE_FORBIDDEN", message = "샘플 접근이 지금은 허용되지 않습니다")
 
-class SampleTooManyRequestsException : TooManyRequestsException(code = "SAMPLE_TOO_MANY_REQUESTS", message = "샘플 요청이 너무 많습니다")
+class SampleTooManyRequestsException(
+    retryAfter: Duration? = null,
+) : TooManyRequestsException(code = "SAMPLE_TOO_MANY_REQUESTS", message = "샘플 요청이 너무 많습니다", retryAfter = retryAfter)
 
 class SampleNotFoundException : NotFoundException(code = "SAMPLE_NOT_FOUND", message = "샘플을 찾을 수 없습니다")
 

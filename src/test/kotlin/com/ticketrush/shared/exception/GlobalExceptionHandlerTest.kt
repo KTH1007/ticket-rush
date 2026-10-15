@@ -163,4 +163,32 @@ class GlobalExceptionHandlerTest {
         assertThat(body.detail).isEqualTo("샘플 요청이 너무 많습니다")
         assertThat(body.properties?.get("code")).isEqualTo("SAMPLE_TOO_MANY_REQUESTS")
     }
+
+    @Test
+    fun `남은 시간을 모르는 429는 Retry-After 헤더를 붙이지 않는다`() {
+        // when
+        val result = mockMvc.perform(post("/test/too-many-requests")).andReturn()
+
+        // then
+        assertThat(result.response.getHeader("Retry-After")).isNull()
+    }
+
+    @Test
+    fun `429의 Retry-After는 남은 시간을 초 단위로 올려 준다`() {
+        // when
+        val result = mockMvc.perform(post("/test/too-many-requests/retry-after").param("millis", "1500")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(429)
+        assertThat(result.response.getHeader("Retry-After")).isEqualTo("2")
+    }
+
+    @Test
+    fun `429의 Retry-After는 최소 1초다`() {
+        // when
+        val result = mockMvc.perform(post("/test/too-many-requests/retry-after").param("millis", "0")).andReturn()
+
+        // then
+        assertThat(result.response.getHeader("Retry-After")).isEqualTo("1")
+    }
 }
