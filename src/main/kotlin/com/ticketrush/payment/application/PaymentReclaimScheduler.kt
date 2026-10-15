@@ -128,11 +128,22 @@ class PaymentReclaimScheduler(
     ) {
         when (val inquiry = paymentGateway.inquire(paymentKey)) {
             is PaymentInquiryResult.Done -> alertRefundNeeded(payment, reservation, inquiry)
+            PaymentInquiryResult.PartiallyCanceled -> alertManualCheck(payment, reservation)
             is PaymentInquiryResult.NotApproved ->
                 claimService.markFailedByReconciliation(payment, "Toss 미승인(${inquiry.status}), 예약을 쓸 수 없어 결제 실패로 확정")
             PaymentInquiryResult.NotFound ->
                 claimService.markFailedByReconciliation(payment, "Toss에 결제 내역 없음, 예약을 쓸 수 없어 결제 실패로 확정")
         }
+    }
+
+    // 부분 취소는 승인된 적이 있어 실패로 닫지 않는다. 사람이 확인하도록 PENDING 그대로 표시하고, 표시를 DB에 남기므로 알림은 건당 한 번이다
+    private fun alertManualCheck(
+        payment: Payment,
+        reservation: Reservation,
+    ) {
+        val detail = "reservationId=${reservation.id}, paymentId=${payment.id}, reservationStatus=${reservation.status}"
+        claimService.markRefundRequired(payment, LocalDateTime.now(clock), "수동 확인 필요: Toss 결제가 부분 취소됨, $detail")
+        logger.error { "Toss 결제가 부분 취소돼 수동 확인 필요: $detail" }
     }
 
     // 돈이 움직이는 판단이라 자동 환불하지 않고 PENDING 그대로 둔 채 사람이 처리하도록 알린다. 표시를 DB에 남기므로 알림은 건당 한 번이다

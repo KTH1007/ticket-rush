@@ -397,6 +397,26 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
 
     @Test
     @Transactional
+    fun `예약을 쓸 수 없는데 Toss 결제가 부분 취소됐으면 실패로 닫지 않고 수동 확인 알림을 남긴다`() {
+        val reservation = 만료된_예약과_좌석()
+        클레임(reservation, paymentKey = "pk-partial")
+        every { paymentGateway.inquire("pk-partial") } returns PaymentInquiryResult.PartiallyCanceled
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(payment.refundRequiredAt).isNotNull()
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).single().reason).contains("수동 확인 필요", "부분 취소")
+        assertThat(logs.list.single { it.level == Level.ERROR }.formattedMessage).contains("부분 취소", "paymentId=${payment.id}")
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        verify(exactly = 1) { paymentGateway.inquire("pk-partial") }
+    }
+
+    @Test
+    @Transactional
     fun `조회가 예외를 던지면 그 행은 PENDING으로 남고 다음 행은 계속 처리한다`() {
         val failing = 만료된_예약과_좌석()
         val healthy = reservationRepository.예약_하나_저장(event = 공연())

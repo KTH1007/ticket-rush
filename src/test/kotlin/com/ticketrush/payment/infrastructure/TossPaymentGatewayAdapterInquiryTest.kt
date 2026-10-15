@@ -90,6 +90,32 @@ class TossPaymentGatewayAdapterInquiryTest {
     }
 
     @Test
+    fun `PARTIAL_CANCELED는 승인된 적이 있어 NotApproved가 아니라 PartiallyCanceled를 반환한다`() {
+        stubInquiry("pk-partial", status = "PARTIAL_CANCELED")
+
+        assertThat(adapter().inquire("pk-partial")).isEqualTo(PaymentInquiryResult.PartiallyCanceled)
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = [429, 408])
+    fun `조회의 429와 408은 서킷이 세도록 PaymentGatewayUnavailableException을 던진다`(status: Int) {
+        wireMock.stubFor(
+            get(urlEqualTo("/v1/payments/pk-limited-$status"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(
+                            status,
+                        ).withHeader("Content-Type", "application/json")
+                        .withBody("""{"code":"LIMITED","message":"제한"}"""),
+                ),
+        )
+
+        assertThatThrownBy { adapter().inquire("pk-limited-$status") }
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(HttpClientErrorException::class.java)
+    }
+
+    @Test
     fun `404 NOT_FOUND_PAYMENT는 NotFound를 반환한다`() {
         wireMock.stubFor(
             get(urlEqualTo("/v1/payments/pk-missing"))

@@ -32,6 +32,7 @@ private const val NOT_FOUND_PAYMENT = "NOT_FOUND_PAYMENT"
 private const val ALREADY_PROCESSING_REQUEST = "ALREADY_PROCESSING_REQUEST"
 private const val ALREADY_CANCELED_PAYMENT = "ALREADY_CANCELED_PAYMENT"
 private const val NOT_CANCELABLE_AMOUNT = "NOT_CANCELABLE_AMOUNT"
+private const val PARTIAL_CANCELED = "PARTIAL_CANCELED"
 private val ALREADY_PROCESSED_CODES = setOf("ALREADY_PROCESSED_PAYMENT", "DUPLICATED_REQUEST")
 
 // 실제 Toss Payments confirm/cancel/조회 API를 호출하는 구현체. API별 응답 변환이 한 클래스에 모여 함수가 많다
@@ -122,6 +123,13 @@ class TossPaymentGatewayAdapter(
         if (e.statusCode == HttpStatus.TOO_MANY_REQUESTS || e.statusCode == HttpStatus.REQUEST_TIMEOUT) throw PaymentConflictException(e)
     }
 
+    // 조회의 429(호출 제한)와 408(시간 초과)은 호출을 줄이라는 신호라 서킷이 실패로 세어 호출을 멈추게 한다. 승인과 달리 확정할 결과가 없다
+    private fun throwIfRateLimited(e: HttpClientErrorException) {
+        if (e.statusCode == HttpStatus.TOO_MANY_REQUESTS || e.statusCode == HttpStatus.REQUEST_TIMEOUT) {
+            throw PaymentGatewayUnavailableException(cause = e)
+        }
+    }
+
     // 시크릿 키 설정 실수가 거절이나 미승인으로 확정돼 결제가 잘못 닫히는 걸 막으려고 그대로 던진다
     private fun throwIfUnauthorized(e: HttpClientErrorException) {
         if (e.statusCode != HttpStatus.UNAUTHORIZED) return
@@ -149,6 +157,7 @@ class TossPaymentGatewayAdapter(
                 null
             } else {
                 throwIfUnauthorized(e)
+                throwIfRateLimited(e)
                 throw e
             }
         }
@@ -252,15 +261,16 @@ class TossPaymentGatewayAdapter(
         }
 
     private fun toInquiryResult(response: TossPaymentResponse): PaymentInquiryResult =
-        if (response.status == "DONE") {
-            PaymentInquiryResult.Done(
-                pgTransactionId = response.paymentKey,
-                approvedAt = parseApprovedAt(response.approvedAt),
-                orderId = response.orderId,
-                totalAmount = response.totalAmount,
-            )
-        } else {
-            PaymentInquiryResult.NotApproved(status = response.status)
+        when (response.status) {
+            "DONE" ->
+                PaymentInquiryResult.Done(
+                    pgTransactionId = response.paymentKey,
+                    approvedAt = parseApprovedAt(response.approvedAt),
+                    orderId = response.orderId,
+                    totalAmount = response.totalAmount,
+                )
+            PARTIAL_CANCELED -> PaymentInquiryResult.PartiallyCanceled
+            else -> PaymentInquiryResult.NotApproved(status = response.status)
         }
 
     // 이미 승인된 뒤라 파싱 실패로 예외를 던지면 클레임이 PENDING으로 남는다. null로 두고 호출 측이 서버 시각으로 대체한다

@@ -9,6 +9,7 @@ import com.ticketrush.payment.domain.PaymentDeclinedException
 import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.HoldTokenMismatchException
+import com.ticketrush.reservation.domain.ReservationHoldExpiringException
 import com.ticketrush.reservation.domain.ReservationNotFoundException
 import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationStatus
@@ -107,6 +108,19 @@ class PaymentControllerTest {
 
         // when & then
         mockMvc.perform(결제_확정_요청(holdToken = holdToken)).andExpect(status().isConflict)
+    }
+
+    @Test
+    fun `홀드가 곧 만료되면 409와 RESERVATION_HOLD_EXPIRING을 반환한다`() {
+        // given
+        val holdToken = UUID.randomUUID()
+        every { paymentCommandService.confirmPayment(1L, holdToken, any(), any(), any()) } throws ReservationHoldExpiringException()
+
+        // when & then
+        mockMvc
+            .perform(결제_확정_요청(holdToken = holdToken))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("RESERVATION_HOLD_EXPIRING"))
     }
 
     @Test

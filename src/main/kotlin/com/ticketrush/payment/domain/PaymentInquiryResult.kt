@@ -13,10 +13,13 @@ sealed interface PaymentInquiryResult {
         val totalAmount: Int? = null,
     ) : PaymentInquiryResult
 
-    // DONE이 아닌 모든 status(IN_PROGRESS, ABORTED, EXPIRED, CANCELED 등). 승인된 결제가 아니다
+    // DONE과 PARTIAL_CANCELED가 아닌 모든 status(IN_PROGRESS, ABORTED, EXPIRED, CANCELED 등). 승인된 결제가 아니다
     data class NotApproved(
         val status: String,
     ) : PaymentInquiryResult
+
+    // 승인된 뒤 일부만 취소된 결제. 돈이 남아 있을 수 있어 미승인으로 보지 않고 사람이 확인한다
+    data object PartiallyCanceled : PaymentInquiryResult
 
     // PG에 그 paymentKey의 결제가 없다
     data object NotFound : PaymentInquiryResult

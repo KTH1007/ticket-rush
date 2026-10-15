@@ -15,6 +15,7 @@ import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.HoldTokenMismatchException
 import com.ticketrush.reservation.domain.Reservation
+import com.ticketrush.reservation.domain.ReservationHoldExpiringException
 import com.ticketrush.reservation.domain.ReservationNotFoundException
 import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
@@ -113,7 +114,7 @@ class PaymentCommandService(
         return when (inquiry) {
             is PaymentInquiryResult.Done ->
                 if (isPaymentOf(reservation, inquiry)) applyPreviousSuccess(reservation, previous, inquiry) else null
-            is PaymentInquiryResult.NotApproved, PaymentInquiryResult.NotFound -> null
+            is PaymentInquiryResult.NotApproved, PaymentInquiryResult.PartiallyCanceled, PaymentInquiryResult.NotFound -> null
         }
     }
 
@@ -176,11 +177,17 @@ class PaymentCommandService(
         }
 
     private fun requireHolding(reservation: Reservation) {
-        if (reservation.status != ReservationStatus.HOLDING) throw ReservationNotHoldingException(reservation.status)
-        // 남은 홀드가 PG 호출 시간보다 짧으면 호출 중에 만료돼 청구만 되고 티켓이 없을 수 있어 시작 전에 거부한다
-        if (!reservation.isHoldActiveAt(LocalDateTime.now(clock).plus(policy.minHoldRemaining))) {
-            throw ReservationNotHoldingException(ReservationStatus.EXPIRED)
-        }
+        val now = LocalDateTime.now(clock)
+        val rejection =
+            when {
+                reservation.status != ReservationStatus.HOLDING -> ReservationNotHoldingException(reservation.status)
+                // 홀드 시각이 이미 지났으면 스위퍼가 아직 상태를 못 바꿨을 뿐 만료된 것이다
+                !reservation.isHoldActiveAt(now) -> ReservationNotHoldingException(ReservationStatus.EXPIRED)
+                // 남은 홀드가 PG 호출 시간보다 짧으면 호출 중에 만료돼 청구만 되고 티켓이 없을 수 있어 시작 전에 거부한다
+                !reservation.isHoldActiveAt(now.plus(policy.minHoldRemaining)) -> ReservationHoldExpiringException()
+                else -> return
+            }
+        throw rejection
     }
 
     private fun requireOrderMatches(

@@ -16,6 +16,7 @@ import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.GradeRepositoryPort
 import com.ticketrush.reservation.domain.HoldTokenMismatchException
 import com.ticketrush.reservation.domain.Reservation
+import com.ticketrush.reservation.domain.ReservationHoldExpiringException
 import com.ticketrush.reservation.domain.ReservationNotFoundException
 import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
@@ -248,13 +249,13 @@ class PaymentCommandServiceTest : IntegrationTest() {
 
     // PG 호출은 최대 6~12초가 걸릴 수 있어, 남은 홀드가 그보다 짧으면 호출 중에 만료돼 청구만 되고 티켓이 없는 상태가 될 수 있다
     @Test
-    fun `남은 홀드 시간이 승인에 필요한 시간보다 짧으면 PG를 부르지 않고 결제를 거부한다`() {
+    fun `남은 홀드 시간이 승인에 필요한 시간보다 짧으면 PG를 부르지 않고 곧 만료된다고 거부한다`() {
         // given
         val reservation = 홀드된_예약_준비(holdExpiresAt = LocalDateTime.now(clock).plusSeconds(5))
 
         // when & then
         assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "near-expiry-payment-key") }
-            .isInstanceOf(ReservationNotHoldingException::class.java)
+            .isInstanceOf(ReservationHoldExpiringException::class.java)
         verify(exactly = 0) { paymentGateway.charge("near-expiry-payment-key", any(), any(), any()) }
     }
 
@@ -597,6 +598,24 @@ class PaymentCommandServiceTest : IntegrationTest() {
         // then
         assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
         assertThat(result.payment.pgTransactionId).isEqualTo("pk-new-after-aborted")
+    }
+
+    @Test
+    fun `오래된 PENDING의 이전 paymentKey가 부분 취소됐으면 승인으로 확정하지 않고 새 키로 이어받아 승인한다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-partial")
+        every { reservationNoGenerator.generate() } returns "RESNO000037"
+        every { paymentGateway.inquire("pk-prev-partial") } returns PaymentInquiryResult.PartiallyCanceled
+        every { paymentGateway.charge("pk-new-after-partial", any(), any(), any()) } returns
+            PaymentGatewayResult.Approved("pk-new-after-partial")
+
+        // when
+        val result = paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-after-partial")
+
+        // then
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
+        assertThat(result.payment.pgTransactionId).isEqualTo("pk-new-after-partial")
     }
 
     @Test
