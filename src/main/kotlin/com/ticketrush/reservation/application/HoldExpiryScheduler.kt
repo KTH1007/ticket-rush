@@ -18,15 +18,11 @@ class HoldExpiryScheduler(
     private val reservationRepository: ReservationRepositoryPort,
     private val clock: Clock,
 ) {
-    @Scheduled(fixedRate = SWEEP_INTERVAL_MS)
+    @Scheduled(fixedRateString = "\${ticket-rush.seat.hold-expiry-interval}")
     @Transactional
     fun sweep() {
         val now = LocalDateTime.now(clock)
         reservationRepository.expireHoldingReservations(now)
         seatRepository.releaseExpiredHolds(now)
-    }
-
-    companion object {
-        private const val SWEEP_INTERVAL_MS = 30_000L
     }
 }

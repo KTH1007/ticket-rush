@@ -65,7 +65,7 @@ class SeatLayoutCache(
             throw e
         } catch (e: Exception) {
             val previous = entry.snapshot ?: throw e
-            entry.retryAfterMillis = clock.millis() + RETRY_BACKOFF_MILLIS
+            entry.retryAfterMillis = clock.millis() + props.layoutRetryBackoff.toMillis()
             logger.warn(e) { "좌석 배치를 다시 만들지 못해 이전 배치를 사용합니다: eventId=$eventId" }
             previous
         }
@@ -90,9 +90,5 @@ class SeatLayoutCache(
 
         @Volatile var retryAfterMillis: Long = 0
         val lock = ReentrantLock()
-    }
-
-    private companion object {
-        const val RETRY_BACKOFF_MILLIS = 5_000L
     }
 }

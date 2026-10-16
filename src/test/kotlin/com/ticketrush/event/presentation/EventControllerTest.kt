@@ -1,6 +1,7 @@
 package com.ticketrush.event.presentation
 
 import com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper
+import com.ticketrush.event.SeatMapProperties
 import com.ticketrush.event.application.EventQueryService
 import com.ticketrush.event.application.SeatLayoutSnapshot
 import com.ticketrush.event.application.SeatMapQueryService
@@ -58,6 +59,9 @@ class EventControllerTest {
 
         @Bean
         fun seatMapQueryService(): SeatMapQueryService = mockk()
+
+        @Bean
+        fun seatMapProperties(): SeatMapProperties = SeatMapProperties()
     }
 
     @Test

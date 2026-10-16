@@ -58,4 +58,20 @@ class SeatMapPropertiesTest {
     fun `삭제 시간이 활성 구간보다 짧으면 거부한다`() {
         assertRejected("statusEvictAfter") { properties(activeWindow = Duration.ofSeconds(30), evictAfter = Duration.ofSeconds(10)) }
     }
+
+    @Test
+    fun `응답 캐시와 배치 재시도 대기의 기본값은 1초, 60초, 5초다`() {
+        val defaults = SeatMapProperties()
+
+        assertThat(defaults.statusCacheMaxAge).isEqualTo(Duration.ofSeconds(1))
+        assertThat(defaults.layoutCacheMaxAge).isEqualTo(Duration.ofSeconds(60))
+        assertThat(defaults.layoutRetryBackoff).isEqualTo(Duration.ofSeconds(5))
+    }
+
+    @Test
+    fun `응답 캐시와 배치 재시도 대기가 0이나 음수면 거부한다`() {
+        assertRejected("statusCacheMaxAge") { SeatMapProperties(statusCacheMaxAge = Duration.ZERO) }
+        assertRejected("layoutCacheMaxAge") { SeatMapProperties(layoutCacheMaxAge = Duration.ofSeconds(-1)) }
+        assertRejected("layoutRetryBackoff") { SeatMapProperties(layoutRetryBackoff = Duration.ZERO) }
+    }
 }

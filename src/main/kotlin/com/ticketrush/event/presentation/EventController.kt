@@ -1,5 +1,6 @@
 package com.ticketrush.event.presentation
 
+import com.ticketrush.event.SeatMapProperties
 import com.ticketrush.event.application.EventQueryService
 import com.ticketrush.event.application.SeatMapQueryService
 import com.ticketrush.shared.response.PageResponse
@@ -14,13 +15,13 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-import java.util.concurrent.TimeUnit
 
 @RestController
 @RequestMapping("/api/events")
 class EventController(
     private val eventQueryService: EventQueryService,
     private val seatMapQueryService: SeatMapQueryService,
+    private val seatMapProperties: SeatMapProperties,
 ) {
     @GetMapping
     fun findEvents(
@@ -39,7 +40,7 @@ class EventController(
     ): ResponseEntity<SeatStatusResponse> =
         ResponseEntity
             .ok()
-            .cacheControl(CacheControl.maxAge(1, TimeUnit.SECONDS).cachePublic())
+            .cacheControl(CacheControl.maxAge(seatMapProperties.statusCacheMaxAge).cachePublic())
             .body(seatMapQueryService.findStatus(id))
 
     // 거의 안 바뀌는 데이터라 ETag와 Cache-Control로 클라이언트 캐시를 쓰게 한다. If-None-Match가 같으면 Spring MVC가 304로 응답한다
@@ -54,13 +55,9 @@ class EventController(
                 .ok()
                 .contentType(MediaType.APPLICATION_JSON)
                 .eTag(layout.etag)
-                .cacheControl(CacheControl.maxAge(LAYOUT_MAX_AGE_SECONDS, TimeUnit.SECONDS).cachePublic())
+                .cacheControl(CacheControl.maxAge(seatMapProperties.layoutCacheMaxAge).cachePublic())
                 .header(HttpHeaders.VARY, HttpHeaders.ACCEPT_ENCODING)
         if (!AcceptEncoding.acceptsGzip(acceptEncoding)) return builder.body(layout.json())
         return builder.header(HttpHeaders.CONTENT_ENCODING, "gzip").body(layout.gzipJson)
-    }
-
-    private companion object {
-        const val LAYOUT_MAX_AGE_SECONDS = 60L
     }
 }

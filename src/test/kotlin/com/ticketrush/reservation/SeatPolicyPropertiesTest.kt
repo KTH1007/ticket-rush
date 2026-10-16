@@ -79,11 +79,25 @@ class SeatPolicyPropertiesTest {
         maxPerPhone: Int = 2,
         paymentFailedHoldTtl: Duration = Duration.ofMinutes(1),
         soldMarkTtl: Duration = Duration.ofHours(1),
+        holdExpiryInterval: Duration = Duration.ofSeconds(30),
     ): SeatPolicyProperties =
         SeatPolicyProperties(
             holdTtl = holdTtl,
             maxPerPhone = maxPerPhone,
             paymentFailedHoldTtl = paymentFailedHoldTtl,
             soldMarkTtl = soldMarkTtl,
+            holdExpiryInterval = holdExpiryInterval,
         )
+
+    @Test
+    fun `홀드 만료 주기를 생략하면 기본값은 30초다`() {
+        assertThat(SeatPolicyProperties(Duration.ofMinutes(5), 2, Duration.ofMinutes(1), Duration.ofHours(1)).holdExpiryInterval)
+            .isEqualTo(Duration.ofSeconds(30))
+    }
+
+    @Test
+    fun `holdExpiryInterval이 0 이하면 만들 수 없다`() {
+        assertThatThrownBy { 정책(holdExpiryInterval = Duration.ZERO) }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { 정책(holdExpiryInterval = Duration.ofSeconds(-1)) }.isInstanceOf(IllegalArgumentException::class.java)
+    }
 }
