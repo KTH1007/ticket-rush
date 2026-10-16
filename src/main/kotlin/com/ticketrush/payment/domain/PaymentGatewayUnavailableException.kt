@@ -8,6 +8,8 @@ import java.time.Duration
 class PaymentGatewayUnavailableException(
     retryAfter: Duration? = null,
     cause: Throwable? = null,
+    // Toss가 5xx 응답을 줬다. 그 응답은 멱등키에 묶여 재생되므로 다음 승인은 새 키를 써야 한다
+    val serverResponded: Boolean = false,
 ) : ServiceUnavailableException(
         code = "PAYMENT_GATEWAY_UNAVAILABLE",
         message = "결제 서비스가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도해주세요",

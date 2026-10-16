@@ -289,7 +289,7 @@ class TossPaymentGatewayAdapterTest {
         )
 
         assertThatThrownBy { adapter().charge("pk_test_4", "order-4", 10_000, UUID.randomUUID()) }
-            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .isInstanceOfSatisfying(PaymentGatewayUnavailableException::class.java) { assertThat(it.serverResponded).isTrue() }
             .hasCauseInstanceOf(HttpServerErrorException::class.java)
     }
 
@@ -304,7 +304,7 @@ class TossPaymentGatewayAdapterTest {
         )
 
         assertThatThrownBy { adapter().charge("pk_test_html", "order-html", 10_000, UUID.randomUUID()) }
-            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .isInstanceOfSatisfying(PaymentGatewayUnavailableException::class.java) { assertThat(it.serverResponded).isFalse() }
     }
 
     @Test
@@ -312,7 +312,7 @@ class TossPaymentGatewayAdapterTest {
         wireMock.stubFor(post(urlEqualTo("/v1/payments/confirm")).willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)))
 
         assertThatThrownBy { adapter().charge("pk_test_reset", "order-reset", 10_000, UUID.randomUUID()) }
-            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .isInstanceOfSatisfying(PaymentGatewayUnavailableException::class.java) { assertThat(it.serverResponded).isFalse() }
             .hasCauseInstanceOf(ResourceAccessException::class.java)
     }
 

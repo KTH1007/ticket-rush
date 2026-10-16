@@ -161,6 +161,14 @@ class PaymentClaimService(
         historyRecorder.record(saved.id, PaymentStatus.PENDING, PaymentStatus.PENDING, reason = reason)
     }
 
+    // 저장하면 updatedAt도 갱신돼 다음 이어받기까지 stale 대기 시간이 다시 흐른다
+    @Transactional
+    fun recordServerError(payment: Payment) {
+        payment.recordServerError()
+        val saved = paymentRepository.save(payment)
+        historyRecorder.record(saved.id, PaymentStatus.PENDING, PaymentStatus.PENDING, reason = "Toss 5xx 응답, 다음 승인은 새 멱등키로 요청")
+    }
+
     private fun findUnusedReservationNo(): String {
         repeat(MAX_RESERVATION_NO_ATTEMPTS) {
             val candidate = reservationNoGenerator.generate()

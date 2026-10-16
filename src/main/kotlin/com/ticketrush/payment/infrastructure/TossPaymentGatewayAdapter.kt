@@ -259,7 +259,11 @@ class TossPaymentGatewayAdapter(
 
     // 4xx 같은 상태 오류는 호출 측이 결과를 판단하므로 그대로 두고, 5xx와 그 밖의 통신 오류만 일시 장애로 바꾼다
     private fun unavailableOrSelf(e: RestClientException): RuntimeException =
-        if (e is RestClientResponseException && e !is HttpServerErrorException) e else PaymentGatewayUnavailableException(cause = e)
+        if (e is RestClientResponseException && e !is HttpServerErrorException) {
+            e
+        } else {
+            PaymentGatewayUnavailableException(cause = e, serverResponded = e is HttpServerErrorException)
+        }
 
     private fun basicAuth(): String = "Basic " + Base64.getEncoder().encodeToString("${toss.secretKey}:".toByteArray())
 

@@ -168,6 +168,32 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
         verify(exactly = 1) { paymentGateway.charge("pk-after-decline", orderId, reservation.amount, expectedKey) }
     }
 
+    // Toss가 5xx 응답을 같은 키로 재생하므로, 응답이 있었던 5xx는 횟수를 올려 다음 틱이 새 키를 쓰게 해야 갇히지 않는다
+    @Test
+    @Transactional
+    fun `Toss가 5xx를 응답하면 횟수를 올리고 다음 틱은 그 횟수를 섞은 새 멱등키로 재시도한다`() {
+        val reservation = reservationRepository.예약_하나_저장(event = 공연())
+        클레임(reservation, paymentKey = "pk-server-error")
+        val orderId = reservation.idempotencyKey.toString()
+        every { paymentGateway.charge("pk-server-error", orderId, reservation.amount, reservation.idempotencyKey) } throws
+            PaymentGatewayUnavailableException(serverResponded = true)
+        val rotatedKey = ChargeIdempotencyKey.of(reservation.idempotencyKey, 1)
+        every { paymentGateway.charge("pk-server-error", orderId, reservation.amount, rotatedKey) } returns
+            PaymentGatewayResult.Approved(pgTransactionId = "pk-server-error")
+
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        val afterFirst = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(afterFirst.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(afterFirst.chargeAttemptCount).isEqualTo(1)
+
+        오래된_행으로_만들기(afterFirst)
+        reclaimScheduler.reclaim(staleBefore = staleBefore())
+
+        assertThat(paymentRepository.findByReservationId(reservation.id)?.status).isEqualTo(PaymentStatus.SUCCESS)
+        verify(exactly = 1) { paymentGateway.charge("pk-server-error", orderId, reservation.amount, rotatedKey) }
+    }
+
     @Test
     @Transactional
     fun `게이트웨이가 승인 시각을 주면 paidAt은 서버 시각이 아니라 그 승인 시각이다`() {
@@ -274,6 +300,8 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
         verify(exactly = 1) { paymentGateway.charge(any(), any(), any(), any()) }
         assertThat(paymentRepository.findByReservationId(first.id)?.status).isEqualTo(PaymentStatus.PENDING)
         assertThat(paymentRepository.findByReservationId(second.id)?.status).isEqualTo(PaymentStatus.PENDING)
+        // 응답이 없던 실패는 키를 바꾸지 않는다
+        assertThat(paymentRepository.findByReservationId(first.id)?.chargeAttemptCount).isEqualTo(0)
         val warnings = logs.list.filter { it.level == Level.WARN }
         assertThat(warnings).hasSize(1)
         assertThat(warnings.single().throwableProxy).isNull()
