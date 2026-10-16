@@ -2,6 +2,7 @@ package com.ticketrush.payment.application
 
 import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.payment.PaymentPolicyProperties
+import com.ticketrush.payment.domain.ChargeIdempotencyKey
 import com.ticketrush.payment.domain.PaymentConfirmationResult
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentDeclinedException
@@ -705,6 +706,54 @@ class PaymentCommandServiceTest : IntegrationTest() {
         // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
         payment.markFailed()
         paymentRepository.save(payment)
+    }
+
+    @Test
+    fun `Toss가 5xx를 응답하면 거절 횟수를 올려 PENDING으로 남기고 다음 승인은 새 멱등키로 요청한다`() {
+        // given
+        val reservation = 홀드된_예약_준비(holdExpiresAt = FAR_FUTURE)
+        every { paymentGateway.charge(any(), any(), any(), reservation.idempotencyKey) } throws
+            PaymentGatewayUnavailableException(serverResponded = true)
+
+        // when
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation) }
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+
+        // then
+        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+        assertThat(payment.chargeAttemptCount).isEqualTo(1)
+        assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id)).extracting("reason").anyMatch { it.toString().contains("5xx") }
+
+        // when: stale 대기 시간이 지난 뒤 다시 요청
+        jdbcTemplate.update("UPDATE payment SET updated_at = updated_at - interval '1 hour' WHERE reservation_id = ?", reservation.id)
+        val rotatedKey = ChargeIdempotencyKey.of(reservation.idempotencyKey, 1)
+        every { reservationNoGenerator.generate() } returns "RESNO000041"
+        every { paymentGateway.charge(any(), any(), any(), rotatedKey) } returns PaymentGatewayResult.Approved("PG-TXN-AFTER-5XX")
+        val result = paymentCommandService.결제_확정(reservation)
+
+        // then
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
+        verify(exactly = 1) { paymentGateway.charge(any(), any(), any(), rotatedKey) }
+    }
+
+    // 이전 요청이 Toss에 늦게 닿아도 같은 멱등키라 같은 승인이 재생된다. 키가 달라지면 중복 주문번호 거절로 FAILED가 된다
+    @Test
+    fun `이전 paymentKey가 진행 중이어도 덮어쓰고 이어받기 전과 같은 멱등키로 승인한다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-in-progress")
+        every { reservationNoGenerator.generate() } returns "RESNO000042"
+        every { paymentGateway.inquire("pk-prev-in-progress") } returns PaymentInquiryResult.NotApproved("IN_PROGRESS")
+        every { paymentGateway.charge("pk-new-over-in-progress", any(), any(), reservation.idempotencyKey) } returns
+            PaymentGatewayResult.Approved("pk-new-over-in-progress")
+
+        // when
+        val result = paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-over-in-progress")
+
+        // then
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
+        verify(exactly = 1) { paymentGateway.charge("pk-new-over-in-progress", any(), any(), reservation.idempotencyKey) }
     }
 
     @Test

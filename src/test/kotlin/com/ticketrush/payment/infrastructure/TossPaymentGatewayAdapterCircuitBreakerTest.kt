@@ -84,7 +84,7 @@ class TossPaymentGatewayAdapterCircuitBreakerTest {
         }
 
         assertThatThrownBy { adapter.charge("pk-open", "order-open", 10_000, UUID.randomUUID()) }
-            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .isInstanceOfSatisfying(PaymentGatewayUnavailableException::class.java) { assertThat(it.serverResponded).isFalse() }
             .hasCauseInstanceOf(CallNotPermittedException::class.java)
 
         assertThat(wireMock.allServeEvents).hasSize(10)

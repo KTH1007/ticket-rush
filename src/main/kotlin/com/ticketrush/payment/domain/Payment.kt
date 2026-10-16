@@ -12,6 +12,8 @@ import jakarta.persistence.Table
 import jakarta.persistence.Version
 import java.time.LocalDateTime
 
+// 상태 전이와 횟수 기록마다 함수 하나인 엔티티라 함수가 많다
+@Suppress("TooManyFunctions")
 @Entity
 @Table(name = "payment")
 class Payment(
@@ -108,6 +110,12 @@ class Payment(
     // 확정 거절로 끝난 시도를 센다. 이 횟수가 다음 승인 요청의 멱등키에 섞여 저장된 거절이 재생되지 않게 한다
     fun recordChargeFailure() {
         check(status == PaymentStatus.FAILED) { "FAILED 상태에서만 승인 거절을 기록할 수 있습니다: $status" }
+        chargeAttemptCount++
+    }
+
+    // Toss가 5xx를 응답했다. 응답이 키에 묶여 재생되므로 횟수를 올려 다음 승인이 새 멱등키를 쓰게 한다. 결제는 PENDING 그대로다
+    fun recordServerError() {
+        check(status == PaymentStatus.PENDING) { "PENDING 상태에서만 5xx 응답을 기록할 수 있습니다: $status" }
         chargeAttemptCount++
     }
 

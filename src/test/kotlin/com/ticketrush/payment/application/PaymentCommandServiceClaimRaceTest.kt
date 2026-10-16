@@ -31,7 +31,16 @@ class PaymentCommandServiceClaimRaceTest {
     private val claimService = mockk<PaymentClaimService>()
     private val clock = Clock.fixed(Instant.parse("2026-10-06T00:00:00Z"), ZoneOffset.UTC)
     private val policy = PaymentPolicyProperties(staleClaimTimeout = Duration.ofSeconds(10), reclaimInterval = Duration.ofSeconds(5))
-    private val service = PaymentCommandService(reservationRepository, paymentRepository, paymentGateway, claimService, policy, clock)
+    private val service =
+        PaymentCommandService(
+            reservationRepository,
+            paymentRepository,
+            paymentGateway,
+            claimService,
+            PaymentCharger(paymentGateway, claimService),
+            policy,
+            clock,
+        )
 
     @Test
     fun `클레임을 이어받다 낙관적 락에 지면 서버 오류가 아니라 충돌 예외로 응답하고 PG는 부르지 않는다`() {

@@ -183,6 +183,25 @@ class PaymentTest {
     }
 
     @Test
+    fun `5xx 응답을 기록하면 횟수가 오르고 상태는 PENDING 그대로다`() {
+        val payment = 결제(id = 1L)
+
+        payment.recordServerError()
+
+        assertThat(payment.chargeAttemptCount).isEqualTo(1)
+        assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
+    }
+
+    @Test
+    fun `PENDING이 아닌 결제에 5xx 응답을 기록하려 하면 예외가 발생한다`() {
+        val payment = 결제(id = 1L)
+        payment.markFailed()
+
+        assertThatThrownBy { payment.recordServerError() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
     fun `FAILED인 결제는 재시도하면 PENDING으로 다시 열린다`() {
         val payment = 결제(id = 1L)
         payment.markFailed()

@@ -1,7 +1,6 @@
 package com.ticketrush.payment.application
 
 import com.ticketrush.payment.PaymentPolicyProperties
-import com.ticketrush.payment.domain.ChargeIdempotencyKey
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConfirmationResult
 import com.ticketrush.payment.domain.PaymentConflictException
@@ -29,14 +28,15 @@ import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
 
-// 승인 흐름의 단계마다 함수로 나눠 함수가 많다
-@Suppress("TooManyFunctions")
+// 승인 흐름의 단계마다 함수로 나누고 협력 객체를 따로 둬서 함수와 생성자 인자가 많다
+@Suppress("TooManyFunctions", "LongParameterList")
 @Service
 class PaymentCommandService(
     private val reservationRepository: ReservationRepositoryPort,
     private val paymentRepository: PaymentRepositoryPort,
     private val paymentGateway: PaymentGatewayPort,
     private val claimService: PaymentClaimService,
+    private val charger: PaymentCharger,
     private val policy: PaymentPolicyProperties,
     private val clock: Clock,
 ) {
@@ -170,9 +170,7 @@ class PaymentCommandService(
         amount: Int,
     ): PaymentConfirmationResult =
         try {
-            // Toss가 같은 키의 거절을 재생하므로 거절된 적이 있으면 그 횟수를 섞은 새 키로 요청한다
-            val chargeKey = ChargeIdempotencyKey.of(reservation.idempotencyKey, claimed.chargeAttemptCount)
-            when (val result = paymentGateway.charge(paymentKey, orderId, amount, chargeKey)) {
+            when (val result = charger.charge(claimed, reservation, paymentKey, orderId, amount)) {
                 is PaymentGatewayResult.Approved ->
                     claimService.applySuccess(
                         claimed,

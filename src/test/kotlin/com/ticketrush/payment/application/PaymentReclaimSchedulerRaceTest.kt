@@ -44,6 +44,7 @@ class PaymentReclaimSchedulerRaceTest {
             reservationRepository,
             paymentGateway,
             claimService,
+            PaymentCharger(paymentGateway, claimService),
             PaymentPolicyProperties(staleClaimTimeout = Duration.ofSeconds(10), reclaimInterval = Duration.ofSeconds(5)),
             clock,
         )
