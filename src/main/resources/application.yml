@@ -131,13 +131,13 @@ ticket-rush:
     ip-max-attempts: 50 # IP 기준 실패 한도. 예약번호를 바꿔 가며 찍는 시도를 막는다(성공은 세지 않는다)
     ip-block-window: 10m
   payment:
-    stale-claim-timeout: 10s # PG 호출 한 번의 최악(connect 3s + read 3s)보다 길게. 승인 뒤 조회까지 하면 12s라 넘길 수 있지만 멱등키와 409로 안전하다
+    stale-claim-timeout: 10s # PG 호출 한 번에 필요한 시간(connect와 read 타임아웃의 합)보다 길게. 승인 뒤 조회까지 하면 두 배라 넘길 수 있지만 멱등키와 409로 안전하다
     reclaim-interval: 5s
     fake-delay: 0ms # toss 프로필이 아닐 때 쓰는 가짜 PG의 응답 지연
     refund-retry-delay: 5m # 환불이 실패한 CANCELED 결제를 다시 시도하기 전 대기. Toss 장애가 풀릴 시간을 준다
     refund-retry-interval: 30s # 환불 재시도 대상을 찾는 주기. 재시도 간격(refund-retry-delay)보다 훨씬 짧으면 충분하다. 길면 재시도가 그만큼 늦다
     refund-max-attempts: 5 # 취소 시점의 첫 시도를 포함한 총 횟수. 소진하면 자동 재시도를 멈추고 ERROR로 알려 사람이 처리한다
-    min-hold-remaining: 15s # 승인 호출(최대 약 12s)이 끝나기 전에 홀드가 만료돼 청구만 되고 티켓이 없는 일을 막는 하한. 이전 키 조회가 붙는 드문 경로는 최대 약 18s로 여유가 없지만, 놓쳐도 PENDING으로 남아 회수 스케줄러가 처리함
+    min-hold-remaining: 15s # 승인과 이어지는 조회(타임아웃 합의 두 배)가 끝나기 전에 홀드가 만료돼 청구만 되고 티켓이 없는 일을 막는 하한. 이전 키 조회까지 붙는 드문 경로는 세 배라 여유가 없지만, 놓쳐도 PENDING으로 남아 회수 스케줄러가 처리함
   toss:
     base-url: https://api.tosspayments.com
     connect-timeout: 3s # stale-claim-timeout과 min-hold-remaining이 이 두 값에서 계산된다. 어긋나면 toss 프로필 기동 때 거부한다

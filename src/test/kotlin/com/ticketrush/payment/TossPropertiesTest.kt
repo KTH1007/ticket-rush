@@ -28,4 +28,19 @@ class TossPropertiesTest {
         assertThatThrownBy { TossProperties(baseUrl = "u", secretKey = "k", readTimeout = Duration.ofSeconds(-1)) }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    // 1ms 미만은 HTTP 클라이언트가 0ms로 바꿔 타임아웃이 꺼지고, int 범위를 넘으면 값이 넘친다
+    @Test
+    fun `타임아웃은 1ms 이상 int 최대 밀리초 이하만 허용한다`() {
+        val max = Duration.ofMillis(Int.MAX_VALUE.toLong())
+
+        assertThat(TossProperties(baseUrl = "u", secretKey = "k", connectTimeout = Duration.ofMillis(1), readTimeout = max).readTimeout)
+            .isEqualTo(max)
+        assertThatThrownBy { TossProperties(baseUrl = "u", secretKey = "k", connectTimeout = Duration.ofNanos(999_999)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("connectTimeout")
+        assertThatThrownBy { TossProperties(baseUrl = "u", secretKey = "k", readTimeout = max.plusMillis(1)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("readTimeout")
+    }
 }
