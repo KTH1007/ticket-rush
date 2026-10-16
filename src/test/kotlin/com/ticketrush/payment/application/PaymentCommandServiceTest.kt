@@ -737,6 +737,25 @@ class PaymentCommandServiceTest : IntegrationTest() {
         verify(exactly = 1) { paymentGateway.charge(any(), any(), any(), rotatedKey) }
     }
 
+    // 이전 요청이 Toss에 늦게 닿아도 같은 멱등키라 같은 승인이 재생된다. 키가 달라지면 중복 주문번호 거절로 FAILED가 된다
+    @Test
+    fun `이전 paymentKey가 진행 중이어도 덮어쓰고 이어받기 전과 같은 멱등키로 승인한다`() {
+        // given
+        val reservation = 홀드된_예약_준비()
+        불확실한_PENDING_만들기(reservation, "pk-prev-in-progress")
+        every { reservationNoGenerator.generate() } returns "RESNO000042"
+        every { paymentGateway.inquire("pk-prev-in-progress") } returns PaymentInquiryResult.NotApproved("IN_PROGRESS")
+        every { paymentGateway.charge("pk-new-over-in-progress", any(), any(), reservation.idempotencyKey) } returns
+            PaymentGatewayResult.Approved("pk-new-over-in-progress")
+
+        // when
+        val result = paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-over-in-progress")
+
+        // then
+        assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
+        verify(exactly = 1) { paymentGateway.charge("pk-new-over-in-progress", any(), any(), reservation.idempotencyKey) }
+    }
+
     @Test
     fun `이전 paymentKey 조회가 서킷에 막히면 충돌로 위장하지 않고 503 예외로 응답한다`() {
         // given
