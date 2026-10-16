@@ -6,6 +6,7 @@ import com.ticketrush.outbox.domain.OutboxEvent
 import com.ticketrush.outbox.domain.OutboxRepositoryPort
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.shared.PhoneEncryptor
+import com.ticketrush.shared.TickGuard
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
@@ -24,10 +25,11 @@ class OutboxRelayScheduler(
     private val policy: OutboxPolicyProperties,
     private val clock: Clock,
 ) {
+    // 느린 발송이 쌓이는 동안 새 틱이 계속 시작돼 같은 외부 시스템에 요청이 늘지 않게, 한 인스턴스에서는 한 번에 한 틱만 돈다
+    private val tick = TickGuard()
+
     @Scheduled(fixedRateString = "\${ticket-rush.outbox.poll-interval}")
-    fun relay() {
-        outboxRepository.claimBatch(policy.chunkSize, LocalDateTime.now(clock)).forEach(::processOne)
-    }
+    fun relay() = tick.runIfIdle { outboxRepository.claimBatch(policy.chunkSize, LocalDateTime.now(clock)).forEach(::processOne) }
 
     // 어떤 이유로 실패하든(네트워크 오류, 예약 조회 실패 등) 재시도 처리로 넘겨야 한다
     @Suppress("TooGenericExceptionCaught")

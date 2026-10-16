@@ -11,13 +11,13 @@ import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
+import com.ticketrush.shared.TickGuard
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Clock
 import java.time.LocalDateTime
-import java.util.concurrent.atomic.AtomicBoolean
 
 private val logger = KotlinLogging.logger {}
 
@@ -35,7 +35,7 @@ class PaymentReclaimScheduler(
     private val clock: Clock,
 ) {
     // PG 호출이 길어져 틱이 겹치면 같은 행을 동시에 이어받게 되므로, 한 인스턴스에서는 한 번에 한 틱만 돈다
-    private val running = AtomicBoolean(false)
+    private val tick = TickGuard()
 
     // 기동 직후 즉시 도는 첫 틱을 한 주기 미룬다. 테스트에서는 다른 테스트가 커밋한 행을 첫 틱이 집어가는 문제가 있었다
     @Scheduled(
@@ -46,16 +46,12 @@ class PaymentReclaimScheduler(
         reclaim(LocalDateTime.now(clock).minus(policy.staleClaimTimeout))
     }
 
-    fun reclaim(staleBefore: LocalDateTime) {
-        if (!running.compareAndSet(false, true)) return
-        try {
+    fun reclaim(staleBefore: LocalDateTime) =
+        tick.runIfIdle {
             for (payment in paymentRepository.findStalePending(staleBefore)) {
                 if (!reclaimSafely(payment)) break
             }
-        } finally {
-            running.set(false)
         }
-    }
 
     // 다른 요청이나 인스턴스와 겹쳐 지는 충돌은 정상 경합이라 스택트레이스 없이 한 줄만 남긴다.
     // false면 이번 틱을 멈춘다. PG가 막혀 있으면 나머지 행도 같은 이유로 실패한다
