@@ -67,4 +67,22 @@ class PaymentPolicyPropertiesTest {
             )
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun `환불 재시도 주기를 생략하면 기본값은 30초다`() {
+        val policy = PaymentPolicyProperties(staleClaimTimeout = Duration.ofSeconds(10), reclaimInterval = Duration.ofSeconds(5))
+
+        assertThat(policy.refundRetryInterval).isEqualTo(Duration.ofSeconds(30))
+    }
+
+    @Test
+    fun `refundRetryInterval이 0 이하면 예외가 난다`() {
+        assertThatThrownBy {
+            PaymentPolicyProperties(
+                staleClaimTimeout = Duration.ofSeconds(10),
+                reclaimInterval = Duration.ofSeconds(5),
+                refundRetryInterval = Duration.ZERO,
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
 }

@@ -36,8 +36,8 @@ class PaymentRefundRetryScheduler(
 
     // 기동 직후 즉시 도는 첫 틱을 한 주기 미룬다. 첫 틱이 돌고 있으면 겹침 방지 가드 때문에 같은 시점에 직접 부른 호출이 건너뛰어진다
     @Scheduled(
-        fixedRateString = "\${ticket-rush.payment.reclaim-interval}",
-        initialDelayString = "\${ticket-rush.payment.reclaim-interval}",
+        fixedRateString = "\${ticket-rush.payment.refund-retry-interval}",
+        initialDelayString = "\${ticket-rush.payment.refund-retry-interval}",
     )
     fun retry() {
         retry(LocalDateTime.now(clock).minus(policy.refundRetryDelay))

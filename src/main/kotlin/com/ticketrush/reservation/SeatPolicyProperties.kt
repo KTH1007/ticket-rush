@@ -9,6 +9,7 @@ data class SeatPolicyProperties(
     val maxPerPhone: Int,
     val paymentFailedHoldTtl: Duration,
     val soldMarkTtl: Duration,
+    val holdExpiryInterval: Duration = Duration.ofSeconds(30),
 ) {
     init {
         require(!holdTtl.isNegative && !holdTtl.isZero) { "holdTtl은 양수여야 합니다: $holdTtl" }
@@ -25,6 +26,7 @@ data class SeatPolicyProperties(
         require(paymentFailedHoldTtl < holdTtl) {
             "paymentFailedHoldTtl은 holdTtl보다 짧아야 합니다: paymentFailedHoldTtl=$paymentFailedHoldTtl, holdTtl=$holdTtl"
         }
+        require(holdExpiryInterval.isPositive()) { "holdExpiryInterval은 양수여야 합니다: $holdExpiryInterval" }
         // 판매 뒤에 마크가 홀드 때보다 먼저 사라지면 늘리는 의미가 없다.
         require(soldMarkTtl >= holdTtl) {
             "soldMarkTtl은 holdTtl 이상이어야 합니다: soldMarkTtl=$soldMarkTtl, holdTtl=$holdTtl"
