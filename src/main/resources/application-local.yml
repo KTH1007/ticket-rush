@@ -8,6 +8,10 @@ spring:
   jpa:
     properties: { hibernate: { format_sql: true } }
 
+ticket-rush:
+  payment:
+    gateway: fake   # 로컬 개발 기본. Toss로 시험하려면 환경 변수 TICKET_RUSH_PAYMENT_GATEWAY=toss
+
 logging:
   level:
     com.ticketrush: DEBUG

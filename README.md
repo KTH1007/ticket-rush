@@ -64,10 +64,10 @@
 
 ### 결제
 
-- PG 연동: 기본은 가짜 PG(`FakePaymentGatewayAdapter`), `toss` 프로필이면 Toss Payments
+- PG 연동: `ticket-rush.payment.gateway`(`fake` 또는 `toss`)로 명시한다. 값이 없으면 기동이 실패하고, 가짜 PG(`FakePaymentGatewayAdapter`)는 local, docker, test 프로필에서만 켜진다. 전환 절차는 `docs/runbook/payment-gateway-switch.md`
 - 서버 측 금액 검증
 - Idempotency-Key 기반 멱등성
-- Circuit Breaker (`toss` 프로필의 PG 호출에만 적용)
+- Circuit Breaker (gateway가 `toss`일 때의 PG 호출에만 적용)
 - 결제 실패 보상 처리 (실패 시 홀드 시간 단축. 거절된 결제는 같은 예약으로 다시 시도할 수 있고, PG 응답을 못 받은 PENDING 결제는 회수 스케줄러가 재시도하거나 PG 조회로 정리)
 
 ### 취소 및 후처리
@@ -143,7 +143,8 @@ v1에서는 Kafka를 사용하지 않는다.
 ```bash
 # 1. 환경 변수 준비
 cp .env.example .env   # PHONE_HMAC_KEY, PHONE_ENCRYPTION_KEY, TOSS_SECRET_KEY, GRAFANA_ADMIN_PASSWORD 채우기
-                       # (TOSS_SECRET_KEY는 toss 프로필에서만 필요하다. 그 프로필을 키 없이 켜면 기동 때 실패한다)
+                       # (TOSS_SECRET_KEY는 TICKET_RUSH_PAYMENT_GATEWAY=toss일 때만 필요하다. 키 없이 toss로 켜면 기동 때 실패한다.
+                       #  local 프로필의 기본값은 fake다)
 
 # 2. 인프라 기동 (PostgreSQL, Redis, Flyway 마이그레이션)
 docker compose up -d
@@ -176,7 +177,7 @@ nginx -> App 1
 
 App -> PostgreSQL
     -> Redis
-    -> PG (기본은 Fake, toss 프로필이면 Toss Payments)
+    -> PG (설정으로 fake 또는 toss를 명시, 값이 없으면 기동 실패)
 
 Prometheus -> App
 Grafana -> Prometheus

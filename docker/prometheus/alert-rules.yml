@@ -34,3 +34,14 @@ groups:
         annotations:
           summary: 환불 미처리 건수 지표가 수집되지 않음
           description: 앱이 내려갔거나 수집 대상에서 빠졌다
+
+  - name: payment-gateway
+    rules:
+      # 인스턴스마다 PG 구현이 다르면 같은 결제가 어느 인스턴스로 가느냐에 따라 승인과 환불이 갈린다
+      - alert: PaymentGatewayInconsistent
+        expr: count(count by (type) (payment_gateway_info)) > 1
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: 인스턴스마다 PG 구현이 다름
+          description: "fake와 toss가 섞여 있다. 전환은 모든 인스턴스를 한꺼번에 바꾼다"

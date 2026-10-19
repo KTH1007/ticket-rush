@@ -63,6 +63,8 @@ services:
     cpus: ${APP_CPUS:-2}
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      # 측정용 구성이라 가짜 PG를 명시한다. 프로필에는 기본값을 두지 않는다
+      TICKET_RUSH_PAYMENT_GATEWAY: fake
       INSTANCE_ID: measure-1
       DB_PASSWORD: measurepw
       PHONE_HMAC_KEY: ${PHONE_HMAC_KEY}
@@ -98,6 +100,7 @@ services:
     cpus: ${APP_CPUS:-2}
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      TICKET_RUSH_PAYMENT_GATEWAY: fake
       INSTANCE_ID: measure-2
       DB_PASSWORD: measurepw
       PHONE_HMAC_KEY: ${PHONE_HMAC_KEY}

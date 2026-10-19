@@ -1,5 +1,7 @@
 package com.ticketrush.payment.infrastructure
 
+import com.ticketrush.payment.ConditionalOnPaymentGateway
+import com.ticketrush.payment.PaymentGatewayType
 import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
@@ -10,7 +12,6 @@ import com.ticketrush.shared.AppTimeZone
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
-import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
@@ -44,14 +45,14 @@ private val REFUND_IN_PROGRESS_CODES = setOf(ALREADY_REFUNDING_PAYMENT, ALREADY_
 
 // 실제 Toss Payments confirm/cancel/조회 API를 호출하는 구현체. API별 응답 변환이 한 클래스에 모여 함수가 많다
 @Suppress("TooManyFunctions")
-@Profile("toss")
+@ConditionalOnPaymentGateway(PaymentGatewayType.TOSS)
 @Component
 class TossPaymentGatewayAdapter(
     private val restClient: RestClient,
     private val toss: TossProperties,
 ) : PaymentGatewayPort {
     init {
-        require(toss.secretKey.isNotBlank()) { "toss 프로필에는 TOSS_SECRET_KEY가 필요합니다" }
+        require(toss.secretKey.isNotBlank()) { "gateway가 toss이면 TOSS_SECRET_KEY가 필요합니다" }
     }
 
     @CircuitBreaker(name = "paymentGateway", fallbackMethod = "chargeBlocked")
