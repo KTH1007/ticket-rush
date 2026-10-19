@@ -33,6 +33,7 @@ ticket-rush:
     stale-claim-timeout: 500ms
     reclaim-interval: 200ms
   payment:
+    gateway: fake   # 설정이 없으면 기동이 실패한다. 테스트는 가짜 PG로 돈다
     stale-claim-timeout: 500ms
     # 캐시된 컨텍스트의 틱이 다른 테스트가 커밋한 PENDING 행을 가로채지 않게 늘린다. 스케줄러 테스트는 reclaim(staleBefore)를 직접 부른다
     reclaim-interval: 1h

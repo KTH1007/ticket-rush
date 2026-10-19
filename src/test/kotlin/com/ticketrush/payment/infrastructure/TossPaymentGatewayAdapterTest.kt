@@ -182,7 +182,7 @@ class TossPaymentGatewayAdapterTest {
             .isInstanceOf(PaymentConflictException::class.java)
     }
 
-    // toss 프로필이 아닐 때는 키가 필요 없어 설정 기본값이 빈 문자열이므로, 프로필을 켜고 키를 빠뜨리면 기동 때 바로 드러나야 한다
+    // gateway가 toss가 아닐 때는 키가 필요 없어 설정 기본값이 빈 문자열이므로, toss로 켜고 키를 빠뜨리면 기동 때 바로 드러나야 한다
     @Test
     fun `시크릿 키가 비어 있으면 어댑터를 만들 때 실패한다`() {
         assertThatThrownBy {

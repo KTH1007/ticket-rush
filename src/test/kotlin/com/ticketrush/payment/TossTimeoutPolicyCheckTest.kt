@@ -50,30 +50,30 @@ class TossTimeoutPolicyCheckTest {
             .hasMessageContaining("minHoldRemaining")
     }
 
-    // 프로필과 빈 등록까지 확인한다. toss 프로필이 아니면 점검 자체가 없다
-    private fun runner(vararg profiles: String) =
+    // 설정에 따른 빈 등록까지 확인한다. gateway가 toss가 아니면 점검 자체가 없다
+    private fun runner(gateway: String) =
         ApplicationContextRunner()
-            .withInitializer { it.environment.setActiveProfiles(*profiles) }
+            .withPropertyValues("$PAYMENT_GATEWAY_PROPERTY=$gateway")
             .withUserConfiguration(TossTimeoutPolicyCheck::class.java)
             .withBean(TossProperties::class.java, { toss() })
 
     @Test
-    fun `toss 프로필에서 설정이 어긋나면 컨텍스트가 뜨지 않는다`() {
+    fun `gateway가 toss일 때 설정이 어긋나면 컨텍스트가 뜨지 않는다`() {
         runner("toss")
             .withBean(PaymentPolicyProperties::class.java, { payment(stale = Duration.ofSeconds(5)) })
             .run { assertThat(it).hasFailed() }
     }
 
     @Test
-    fun `toss 프로필에서 기본값이면 점검이 등록된다`() {
+    fun `gateway가 toss일 때 기본값이면 점검이 등록된다`() {
         runner("toss")
             .withBean(PaymentPolicyProperties::class.java, { payment() })
             .run { assertThat(it).hasSingleBean(TossTimeoutPolicyCheck::class.java) }
     }
 
     @Test
-    fun `toss 프로필이 아니면 점검이 등록되지 않는다`() {
-        runner("test")
+    fun `gateway가 fake이면 점검이 등록되지 않는다`() {
+        runner("fake")
             .withBean(PaymentPolicyProperties::class.java, { payment(stale = Duration.ofSeconds(5)) })
             .run { assertThat(it).doesNotHaveBean(TossTimeoutPolicyCheck::class.java) }
     }

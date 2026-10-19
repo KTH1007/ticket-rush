@@ -23,9 +23,9 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.EnableAspectJAutoProxy
 import org.springframework.context.annotation.Import
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.test.context.TestPropertySource
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.RestClientException
 import java.util.UUID
@@ -38,7 +38,7 @@ import kotlin.test.Test
 @Import(CircuitBreakerAutoConfiguration::class)
 class TossTestConfig
 
-@ActiveProfiles("toss")
+@TestPropertySource(properties = ["ticket-rush.payment.gateway=toss"])
 @SpringBootTest(classes = [TossTestConfig::class, TossHttpConfig::class, TossPaymentGatewayAdapter::class])
 class TossPaymentGatewayAdapterCircuitBreakerTest {
     companion object {

@@ -1,11 +1,10 @@
 package com.ticketrush.payment
 
-import org.springframework.context.annotation.Profile
 import org.springframework.stereotype.Component
 
 // stale-claim-timeout과 min-hold-remaining은 Toss 타임아웃에서 계산한 하한이라, 한쪽만 바뀌어 어긋나면 기동 때 드러나게 한다.
 // 읽기 타임아웃은 읽기 사이의 대기라 호출 전체의 상한이 아니므로 이 합은 어디까지나 휴리스틱이다
-@Profile("toss")
+@ConditionalOnPaymentGateway(PaymentGatewayType.TOSS)
 @Component
 class TossTimeoutPolicyCheck(
     toss: TossProperties,
