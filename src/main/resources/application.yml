@@ -64,6 +64,14 @@ management:
   metrics:
     tags:
       instance: ${INSTANCE_ID:local}
+  info:
+    env:
+      enabled: true   # 아래 info 설정을 /actuator/info로 노출한다
+
+# 인스턴스마다 PG 구현이 같은지 /actuator/info로 직접 확인한다
+info:
+  payment:
+    gateway: ${ticket-rush.payment.gateway}
 
 springdoc:
   swagger-ui:

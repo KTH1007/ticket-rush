@@ -96,3 +96,43 @@ tests:
             exp_annotations:
               summary: 환불 미처리 건수 지표가 수집되지 않음
               description: 앱이 내려갔거나 수집 대상에서 빠졌다
+
+  # 인스턴스마다 PG 구현이 다르면 5분 지속 뒤에 울린다
+  - interval: 15s
+    input_series:
+      - series: 'payment_gateway_info{type="fake",instance="app-1"}'
+        values: '1x47'
+      - series: 'payment_gateway_info{type="toss",instance="app-2"}'
+        values: '1x47'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PaymentGatewayInconsistent
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: PaymentGatewayInconsistent
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: 인스턴스마다 PG 구현이 다름
+              description: "fake와 toss가 섞여 있다. 전환은 모든 인스턴스를 한꺼번에 바꾼다"
+
+  # 같은 구현이면 인스턴스가 여러 대여도 울리지 않는다
+  - interval: 15s
+    input_series:
+      - series: 'payment_gateway_info{type="toss",instance="app-1"}'
+        values: '1x47'
+      - series: 'payment_gateway_info{type="toss",instance="app-2"}'
+        values: '1x47'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: PaymentGatewayInconsistent
+        exp_alerts: []
+
+  - interval: 15s
+    input_series:
+      - series: 'payment_gateway_info{type="fake",instance="local"}'
+        values: '1x47'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: PaymentGatewayInconsistent
+        exp_alerts: []
