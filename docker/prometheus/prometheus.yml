@@ -1,6 +1,10 @@
 global:
   scrape_interval: 5s        # 부하테스트 구간을 보려면 기본 15초로는 거칠다
 
+# 알림을 보낼 Alertmanager가 없어 규칙 상태는 Prometheus의 Alerts 화면에서만 본다
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+
 scrape_configs:
   - job_name: ticket-rush
     metrics_path: /actuator/prometheus

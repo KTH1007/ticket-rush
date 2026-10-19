@@ -1,0 +1,36 @@
+groups:
+  - name: payment-refund
+    rules:
+      # 인스턴스마다 전체 건수를 보고하므로 sum이 아니라 max로 합친다
+      - alert: PaymentRefundRequired
+        expr: max(payment_refund_required) > 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: 환불이 필요한데 처리되지 않은 결제가 있음
+          description: "Toss는 승인했지만 예약이 만료돼 고객이 돈만 낸 건이 {{ $value }}건이다. 환불한 뒤 정리 절차로 닫는다"
+
+      - alert: PaymentRefundExhausted
+        expr: max(payment_refund_exhausted) > 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: 환불 시도를 소진한 취소 건이 있음
+          description: "취소는 접수됐지만 자동 환불이 모두 실패한 건이 {{ $value }}건이다. 환불한 뒤 정리 절차로 닫는다"
+
+      # 건수 갱신이 멈추면 위 두 지표가 낡은 값이라 0이어도 믿을 수 없다. 한 인스턴스만 멈춘 건 max가 가려 주므로 전부 멈췄을 때만 울린다
+      - alert: PaymentRefundBacklogStale
+        expr: min(payment_refund_backlog_age_seconds) > 120
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: 환불 미처리 건수 갱신이 멈춤
+          description: "모든 인스턴스에서 마지막 갱신 뒤 {{ $value }}초가 지났다. DB 연결을 확인한다"
+
+      - alert: PaymentRefundBacklogAbsent
+        expr: absent(payment_refund_backlog_age_seconds)
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 환불 미처리 건수 지표가 수집되지 않음
+          description: 앱이 내려갔거나 수집 대상에서 빠졌다
