@@ -40,6 +40,14 @@ class ScheduledTasksPolicyTest : IntegrationTest() {
         assertThat(paymentPolicy.refundRetryInterval).isNotEqualTo(paymentPolicy.reclaimInterval)
     }
 
+    // MeterBinder 빈이 너무 일찍 만들어지면 @Scheduled가 조용히 빠질 수 있어, 등록됐는지와 주기를 같이 확인한다
+    @Test
+    fun `환불 미처리 건수 갱신 주기는 설정에서 읽는다`() {
+        val task = fixedRate("PaymentRefundBacklogMetrics", "refresh")
+
+        assertThat(task.intervalDuration).isEqualTo(paymentPolicy.refundBacklogRefreshInterval)
+    }
+
     // 프록시가 씌워진 빈은 클래스 이름 뒤에 접미사가 붙을 수 있어 이름의 앞부분과 메서드 이름으로 찾는다
     private fun fixedRate(
         scheduler: String,

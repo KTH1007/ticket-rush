@@ -39,6 +39,7 @@ ticket-rush:
     # 캐시된 컨텍스트의 틱이 다른 테스트가 커밋해 둔 CANCELED 행을 집어가지 않게 끈다. 스케줄러 테스트는 retry(staleBefore)를 직접 부른다
     refund-retry-interval: 2h   # 회수 주기와 값을 다르게 둬서, 두 설정이 섞이지 않았는지 설정 테스트가 구분하게 한다
     refund-retry-delay: 1h
+    refund-backlog-refresh-interval: 1h   # 캐시된 컨텍스트의 갱신이 테스트 중에 끼지 않게 한다. 갱신은 테스트가 직접 부른다
   toss:
     base-url: http://localhost:0
     secret-key: test-secret-key

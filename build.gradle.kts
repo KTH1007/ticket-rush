@@ -150,6 +150,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation(libs.testcontainers.redis)
     testImplementation(libs.wiremock)
+    testImplementation("io.micrometer:micrometer-registry-prometheus")
 
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

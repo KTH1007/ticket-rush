@@ -21,6 +21,12 @@ interface PaymentJpaRepository : JpaRepository<Payment, Long> {
     fun countRefundRequired(): Long
 
     @Query(
+        "SELECT COUNT(p) FROM Payment p WHERE p.status = com.ticketrush.payment.domain.PaymentStatus.CANCELED " +
+            "AND p.refundAttemptCount >= :maxAttempts",
+    )
+    fun countExhaustedRefunds(maxAttempts: Int): Long
+
+    @Query(
         "SELECT p FROM Payment p WHERE p.status = com.ticketrush.payment.domain.PaymentStatus.CANCELED " +
             "AND p.updatedAt < :staleBefore AND p.refundAttemptCount < :maxAttempts ORDER BY p.updatedAt",
     )

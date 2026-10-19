@@ -85,4 +85,24 @@ class PaymentPolicyPropertiesTest {
             )
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun `환불 미처리 건수 갱신 주기를 생략하면 기본값은 15초다`() {
+        val policy = PaymentPolicyProperties(staleClaimTimeout = Duration.ofSeconds(10), reclaimInterval = Duration.ofSeconds(5))
+
+        assertThat(policy.refundBacklogRefreshInterval).isEqualTo(Duration.ofSeconds(15))
+    }
+
+    @Test
+    fun `refundBacklogRefreshInterval이 0 이하면 예외가 난다`() {
+        listOf(Duration.ZERO, Duration.ofSeconds(-1)).forEach { interval ->
+            assertThatThrownBy {
+                PaymentPolicyProperties(
+                    staleClaimTimeout = Duration.ofSeconds(10),
+                    reclaimInterval = Duration.ofSeconds(5),
+                    refundBacklogRefreshInterval = interval,
+                )
+            }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("refundBacklogRefreshInterval")
+        }
+    }
 }
