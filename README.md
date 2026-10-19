@@ -64,7 +64,7 @@
 
 ### 결제
 
-- PG 연동: `ticket-rush.payment.gateway`(`fake` 또는 `toss`)로 명시한다. 값이 없으면 기동이 실패하고, 가짜 PG(`FakePaymentGatewayAdapter`)는 local, docker, test 프로필에서만 켜진다.
+- PG 연동: `ticket-rush.payment.gateway`(`fake` 또는 `toss`)로 명시한다. 값이 없으면 기동이 실패하고, 가짜 PG(`FakePaymentGatewayAdapter`)는 local, docker, test 프로필에서만 켜진다. 전환 절차는 `docs/runbook/payment-gateway-switch.md`
 - 서버 측 금액 검증
 - Idempotency-Key 기반 멱등성
 - Circuit Breaker (gateway가 `toss`일 때의 PG 호출에만 적용)
