@@ -2,6 +2,7 @@ package com.ticketrush.payment.application
 
 import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.Payment
+import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -20,17 +21,28 @@ class PaymentRefundRecorder(
     @Transactional
     fun recordSuccess(
         payment: Payment,
-        pgTransactionId: String,
+        approved: PaymentGatewayResult.Approved,
     ) {
-        markRefunded(payment, "환불 재시도 성공: $pgTransactionId")
+        markRefunded(payment, successReason("환불 재시도 성공", approved))
     }
 
     // 취소 요청에서 바로 성공한 환불. 재시도 성공과 이력 문구만 다르다. 저장된 결제를 돌려준다
     @Transactional
     fun recordCancelSuccess(
         payment: Payment,
-        pgTransactionId: String,
-    ): Payment = markRefunded(payment, "환불 완료: $pgTransactionId")
+        approved: PaymentGatewayResult.Approved,
+    ): Payment = markRefunded(payment, successReason("환불 완료", approved))
+
+    // 운영자가 Toss에서 직접 취소한 건은 우리 호출의 성공과 이력에서 구분한다
+    private fun successReason(
+        ourCall: String,
+        approved: PaymentGatewayResult.Approved,
+    ): String =
+        if (approved.externallyCanceled) {
+            "환불 완료(Toss에서 외부 취소 확인): ${approved.pgTransactionId}"
+        } else {
+            "$ourCall: ${approved.pgTransactionId}"
+        }
 
     private fun markRefunded(
         payment: Payment,

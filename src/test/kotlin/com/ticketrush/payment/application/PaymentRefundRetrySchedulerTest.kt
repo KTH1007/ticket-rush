@@ -124,6 +124,22 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
 
     @Test
     @Transactional
+    fun `Toss에서 외부 취소로 확인된 환불은 REFUNDED가 되고 이력 사유가 우리 호출과 구분된다`() {
+        val reservation = 예약()
+        취소된_결제(reservation, pgTransactionId = "pk-external")
+        every { paymentGateway.refund(any(), any(), any()) } returns
+            PaymentGatewayResult.Approved(pgTransactionId = "pk-external", externallyCanceled = true)
+
+        retryScheduler.retry(staleBefore())
+
+        val payment = 결제(reservation)
+        assertThat(payment.status).isEqualTo(PaymentStatus.REFUNDED)
+        val history = paymentHistoryRepository.findAllByPaymentId(payment.id).single()
+        assertThat(history.reason).isEqualTo("환불 완료(Toss에서 외부 취소 확인): pk-external")
+    }
+
+    @Test
+    @Transactional
     fun `환불이 거절되면 시도 횟수가 올라 DB에 저장되고 결제는 CANCELED로 남으며 이력에 사유가 남는다`() {
         val reservation = 예약()
         취소된_결제(reservation)

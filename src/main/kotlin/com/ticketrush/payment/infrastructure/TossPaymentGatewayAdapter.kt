@@ -35,6 +35,9 @@ private const val ALREADY_REFUND_PAYMENT = "ALREADY_REFUND_PAYMENT"
 private const val ALREADY_REFUNDING_PAYMENT = "ALREADY_REFUNDING_PAYMENT"
 private const val NOT_CANCELABLE_AMOUNT = "NOT_CANCELABLE_AMOUNT"
 private const val PARTIAL_CANCELED = "PARTIAL_CANCELED"
+
+// 환불 요청에 싣는 사유. 조회 응답의 취소 내역에서 우리 요청과 운영자의 직접 취소를 가르는 기준이기도 하다
+private const val REFUND_CANCEL_REASON = "사용자 취소 요청"
 private val ALREADY_PROCESSED_CODES = setOf("ALREADY_PROCESSED_PAYMENT", "DUPLICATED_REQUEST")
 private val ALREADY_CANCELED_CODES = setOf(ALREADY_CANCELED_PAYMENT, ALREADY_REFUND_PAYMENT)
 private val REFUND_IN_PROGRESS_CODES = setOf(ALREADY_REFUNDING_PAYMENT, ALREADY_PROCESSING_REQUEST)
@@ -181,7 +184,7 @@ class TossPaymentGatewayAdapter(
                     .header("Idempotency-Key", idempotencyKey.toString())
                     .contentType(MediaType.APPLICATION_JSON)
                     // cancelAmount를 생략하면 Toss가 전액 취소하므로, 의도한 금액을 명시한다
-                    .body(mapOf("cancelReason" to "사용자 취소 요청", "cancelAmount" to amount))
+                    .body(mapOf("cancelReason" to REFUND_CANCEL_REASON, "cancelAmount" to amount))
                     .retrieve()
                     .body(TossPaymentResponse::class.java)
             toCancelResult(requireNotNull(response) { "토스 cancel 응답 본문이 비어 있습니다" })
@@ -219,9 +222,15 @@ class TossPaymentGatewayAdapter(
         return when {
             payment == null -> PaymentGatewayResult.Declined(reason = "Toss에 해당 결제가 없습니다")
             payment.status == "CANCELED" || (payment.status == "PARTIAL_CANCELED" && payment.balanceAmount == 0) ->
-                PaymentGatewayResult.Approved(pgTransactionId = pgTransactionId)
+                PaymentGatewayResult.Approved(pgTransactionId = pgTransactionId, externallyCanceled = isExternallyCanceled(payment))
             else -> PaymentGatewayResult.Declined(reason = "Toss status: ${payment.status}")
         }
+    }
+
+    // 우리가 보낸 사유의 취소가 하나도 없으면 운영자가 Toss에서 직접 취소한 것이다. 취소 내역이 없으면 판단하지 못하므로 외부로 단정하지 않는다
+    private fun isExternallyCanceled(payment: TossPaymentResponse): Boolean {
+        val cancels = payment.cancels.orEmpty()
+        return cancels.isNotEmpty() && cancels.none { it.cancelReason == REFUND_CANCEL_REASON }
     }
 
     // 서킷이 열려 Toss를 부르지 않았다. 호출이 나가 결과를 모르는 5xx와 달리 호출 측이 환불 횟수에 세지 않는다
@@ -328,6 +337,11 @@ class TossPaymentGatewayAdapter(
         val orderId: String? = null,
         val totalAmount: Int? = null,
         val balanceAmount: Int? = null,
+        val cancels: List<TossCancel>? = null,
+    )
+
+    private data class TossCancel(
+        val cancelReason: String? = null,
     )
 
     private data class TossErrorResponse(

@@ -101,7 +101,7 @@ class PaymentRefundRetrySchedulerRaceTest {
         scheduler.retry(LocalDateTime.now(clock))
 
         // then
-        verify(exactly = 1) { recorder.recordSuccess(match { it.id == 2L }, "pk-2") }
+        verify(exactly = 1) { recorder.recordSuccess(match { it.id == 2L }, PaymentGatewayResult.Approved(pgTransactionId = "pk-2")) }
     }
 
     @Test

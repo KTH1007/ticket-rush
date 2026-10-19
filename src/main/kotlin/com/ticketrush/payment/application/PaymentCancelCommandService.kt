@@ -76,7 +76,7 @@ class PaymentCancelCommandService(
     ): Payment =
         try {
             when (result) {
-                is PaymentGatewayResult.Approved -> refundRecorder.recordCancelSuccess(payment, result.pgTransactionId)
+                is PaymentGatewayResult.Approved -> refundRecorder.recordCancelSuccess(payment, result)
                 is PaymentGatewayResult.Declined -> refundRecorder.recordFailure(payment, result.reason)
             }
         } catch (e: Exception) {
