@@ -88,6 +88,39 @@ class PaymentRepositoryTest : IntegrationTest() {
     }
 
     @Test
+    fun `uk_payment_toss_payment_key 위반 시(한 결제 키를 두 예약이 사용) 예외 발생`() {
+        // given
+        paymentRepository.save(결제(예약_하나_저장().id, tossPaymentKey = "pk-shared"))
+
+        // when & then
+        assertThatThrownBy { paymentRepository.save(결제(예약_하나_저장().id, tossPaymentKey = "pk-shared")) }
+            .isInstanceOf(DataIntegrityViolationException::class.java)
+            .hasMessageContaining("uk_payment_toss_payment_key")
+    }
+
+    @Test
+    fun `uk_payment_pg_transaction_id 위반 시(한 PG 거래를 두 결제가 사용) 예외 발생`() {
+        // given
+        paymentRepository.save(결제(예약_하나_저장().id, pgTransactionId = "pg-shared"))
+
+        // when & then
+        assertThatThrownBy { paymentRepository.save(결제(예약_하나_저장().id, pgTransactionId = "pg-shared")) }
+            .isInstanceOf(DataIntegrityViolationException::class.java)
+            .hasMessageContaining("uk_payment_pg_transaction_id")
+    }
+
+    // 승인 전에는 키와 거래 id가 아직 없으므로 NULL인 행은 제한하지 않는다
+    @Test
+    fun `결제 키와 PG 거래 id가 NULL인 행은 여러 개 저장된다`() {
+        val first = paymentRepository.save(결제(예약_하나_저장().id))
+        val second = paymentRepository.save(결제(예약_하나_저장().id))
+
+        assertThat(first.id).isNotEqualTo(second.id)
+        assertThat(first.tossPaymentKey).isNull()
+        assertThat(second.pgTransactionId).isNull()
+    }
+
+    @Test
     fun `ck_payment_amount 위반 시 예외 발생`() {
         // given
         val reservation = 예약_하나_저장()

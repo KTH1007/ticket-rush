@@ -89,7 +89,8 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
         // given
         val reservation = 홀드된_예약_준비()
         every { reservationNoGenerator.generate() } answers { "RESNO" + System.nanoTime().toString().takeLast(7) }
-        every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-CONC")
+        every { paymentGateway.charge(any(), any(), any(), any()) } returns
+            PaymentGatewayResult.Approved("PG-TXN-CONC-${reservation.id}")
 
         // when
         val results = 동시_결제_확정_시도(reservation, threadCount = 2)
@@ -113,13 +114,14 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
         claimService.claimOrTakeOver(
             reservation.id,
             reservation.amount,
-            "test-payment-key",
+            결제_키(reservation),
             reservation.idempotencyKey.toString(),
             LocalDateTime.now(clock),
         )
         Thread.sleep(policy.staleClaimTimeout.toMillis() + 100)
         every { reservationNoGenerator.generate() } answers { "RESNO" + System.nanoTime().toString().takeLast(7) }
-        every { paymentGateway.charge(any(), any(), any(), any()) } returns PaymentGatewayResult.Approved("PG-TXN-STALE")
+        every { paymentGateway.charge(any(), any(), any(), any()) } returns
+            PaymentGatewayResult.Approved("PG-TXN-STALE-${reservation.id}")
 
         // when
         val results = 동시_결제_확정_시도(reservation, threadCount = 2)
@@ -130,11 +132,14 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
         assertThat(failure).isInstanceOf(PaymentConflictException::class.java)
     }
 
+    // 커밋된 행의 결제 키와 PG 거래 id는 DB에서 유일해야 해서 예약마다 다른 값을 쓴다. 같은 예약의 요청들은 같은 키를 보낸다
+    private fun 결제_키(reservation: Reservation): String = "pk-conc-${reservation.id}"
+
     private fun PaymentCommandService.결제_확정(reservation: Reservation): PaymentConfirmationResult =
         confirmPayment(
             reservationId = reservation.id,
             holdToken = reservation.holdToken,
-            paymentKey = "test-payment-key",
+            paymentKey = 결제_키(reservation),
             orderId = reservation.idempotencyKey.toString(),
             amount = reservation.amount,
         )
