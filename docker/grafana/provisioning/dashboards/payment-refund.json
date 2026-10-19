@@ -36,7 +36,7 @@
         "defaults": {
           "unit": "none",
           "decimals": 0,
-          "noValue": "0",
+          "noValue": "수집 안 됨",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -49,7 +49,20 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "수집 안 됨",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       },
@@ -86,7 +99,7 @@
         "defaults": {
           "unit": "none",
           "decimals": 0,
-          "noValue": "0",
+          "noValue": "수집 안 됨",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -99,7 +112,20 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "수집 안 됨",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       },
@@ -136,7 +162,7 @@
         "defaults": {
           "unit": "s",
           "decimals": 0,
-          "noValue": "0",
+          "noValue": "수집 안 됨",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -149,7 +175,20 @@
                 "value": 120
               }
             ]
-          }
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "수집 안 됨",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       },
