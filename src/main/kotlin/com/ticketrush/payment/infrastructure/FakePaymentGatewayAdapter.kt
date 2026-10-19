@@ -1,7 +1,5 @@
 package com.ticketrush.payment.infrastructure
 
-import com.ticketrush.payment.ConditionalOnPaymentGateway
-import com.ticketrush.payment.PaymentGatewayType
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentInquiryResult

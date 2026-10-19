@@ -6,6 +6,7 @@ import java.time.Duration
 @ConfigurationProperties(prefix = "ticket-rush.payment")
 data class PaymentPolicyProperties(
     val staleClaimTimeout: Duration,
+    // 스케줄러는 yml 값을 직접 읽는다. 이 필드는 기동 때 값을 검증하고, 정책 테스트가 스케줄러 주기와 비교하는 기준이다
     val reclaimInterval: Duration,
     val refundRetryDelay: Duration = Duration.ofMinutes(5),
     val refundRetryInterval: Duration = Duration.ofSeconds(30),

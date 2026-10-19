@@ -1,4 +1,4 @@
-package com.ticketrush.payment
+package com.ticketrush.payment.infrastructure
 
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy

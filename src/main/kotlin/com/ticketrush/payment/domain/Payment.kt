@@ -65,10 +65,12 @@ class Payment(
     var refundRequiredAt: LocalDateTime? = refundRequiredAt
         protected set
 
+    // 이름은 시도 횟수지만 실패해서 멱등키를 소진한 시도만 센다(확정 거절, 5xx 응답). 다음 승인의 멱등키에 섞인다
     @Column(name = "charge_attempt_count", nullable = false)
     var chargeAttemptCount: Int = chargeAttemptCount
         protected set
 
+    // 환불이 실패해 멱등키를 소진한 횟수(취소 시점의 첫 실패 포함). 다음 환불 키에 섞이고 한도에 닿으면 자동 재시도를 멈춘다
     @Column(name = "refund_attempt_count", nullable = false)
     var refundAttemptCount: Int = refundAttemptCount
         protected set

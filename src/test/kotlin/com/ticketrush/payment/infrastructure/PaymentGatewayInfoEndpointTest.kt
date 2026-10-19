@@ -1,4 +1,4 @@
-package com.ticketrush.payment
+package com.ticketrush.payment.infrastructure
 
 import com.ticketrush.support.IntegrationTest
 import org.springframework.beans.factory.annotation.Autowired

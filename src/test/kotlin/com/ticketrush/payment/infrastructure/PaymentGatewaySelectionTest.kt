@@ -1,12 +1,11 @@
-package com.ticketrush.payment
+package com.ticketrush.payment.infrastructure
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.PaymentGatewayPort
-import com.ticketrush.payment.infrastructure.FakePaymentGatewayAdapter
-import com.ticketrush.payment.infrastructure.TossPaymentGatewayAdapter
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
