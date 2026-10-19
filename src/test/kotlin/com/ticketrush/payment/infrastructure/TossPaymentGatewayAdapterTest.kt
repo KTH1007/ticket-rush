@@ -226,7 +226,7 @@ class TossPaymentGatewayAdapterTest {
     }
 
     @Test
-    fun `401 인증 실패는 Declined가 아니라 예외를 던진다`() {
+    fun `401 인증 실패는 Declined가 아니라 PG에 닿지 못한 경우처럼 예외를 던진다`() {
         wireMock.stubFor(
             post(urlEqualTo("/v1/payments/confirm"))
                 .willReturn(
@@ -238,7 +238,8 @@ class TossPaymentGatewayAdapterTest {
         )
 
         assertThatThrownBy { adapter().charge("pk_test_8", "order-8", 10_000, UUID.randomUUID()) }
-            .isInstanceOf(HttpClientErrorException.Unauthorized::class.java)
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(HttpClientErrorException.Unauthorized::class.java)
     }
 
     @Test

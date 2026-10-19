@@ -95,7 +95,9 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     lateinit var outboxRepository: com.ticketrush.outbox.domain.OutboxRepositoryPort
 
     private val logs = ListAppender<ILoggingEvent>()
-    private val serviceLogger = LoggerFactory.getLogger(PaymentCancelCommandService::class.java.name) as Logger
+
+    // 환불 호출 결과의 로그는 PaymentRefunder가 남기므로 서비스 하나가 아니라 패키지 로거에 붙인다
+    private val serviceLogger = LoggerFactory.getLogger("com.ticketrush.payment.application") as Logger
 
     @BeforeEach
     fun captureLogs() {

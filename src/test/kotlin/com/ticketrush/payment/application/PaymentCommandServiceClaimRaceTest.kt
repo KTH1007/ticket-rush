@@ -4,6 +4,7 @@ import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
+import com.ticketrush.payment.domain.PaymentInquiryResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.domain.Reservation
@@ -71,6 +72,29 @@ class PaymentCommandServiceClaimRaceTest {
 
         verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
     }
+
+    // 응답을 못 받은 이전 paymentKey가 이미 승인됐다면 그 승인을 확정하는데, 이때 다른 요청과 겹쳐 지는 쪽은 서버 오류가 아니라 충돌로 응답한다
+    @Test
+    fun `이전 paymentKey의 승인을 확정하다 낙관적 락에 지면 서버 오류가 아니라 충돌 예외로 응답한다`() {
+        val reservation = 예약()
+        every { reservationRepository.findById(RESERVATION_ID) } returns reservation
+        every { paymentRepository.findByReservationId(RESERVATION_ID) } returns 오래된_이전_클레임("pk-prev")
+        every { paymentGateway.inquire("pk-prev") } returns
+            PaymentInquiryResult.Done("pk-prev", LocalDateTime.of(2026, 10, 5, 23, 59), reservation.idempotencyKey.toString(), AMOUNT)
+        every { claimService.applySuccess(any(), any(), any(), any()) } throws
+            ObjectOptimisticLockingFailureException(Payment::class.java, 1L)
+
+        assertThatThrownBy {
+            service.confirmPayment(RESERVATION_ID, reservation.holdToken, "pk-new", reservation.idempotencyKey.toString(), AMOUNT)
+        }.isInstanceOf(PaymentConflictException::class.java)
+
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
+    }
+
+    private fun 오래된_이전_클레임(paymentKey: String): Payment =
+        Payment(id = 1L, reservationId = RESERVATION_ID, amount = AMOUNT).apply {
+            recordAttempt(paymentKey, "order-prev", LocalDateTime.of(2026, 10, 5, 0, 0))
+        }
 
     private fun 성공한_결제(): Payment =
         Payment(id = 1L, reservationId = RESERVATION_ID, amount = AMOUNT, status = PaymentStatus.SUCCESS, pgTransactionId = "pk-done")
