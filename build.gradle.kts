@@ -168,7 +168,8 @@ val snippetsDir = layout.buildDirectory.dir("generated-snippets")
 
 tasks.named<Test>("test") {
     outputs.dir(snippetsDir)
-    // 알림 규칙을 읽는 테스트가 있어, 이 파일만 고쳐도 테스트가 다시 돌게 한다
+    // 운영 SQL과 알림 규칙을 읽는 테스트가 있어, 이 파일만 고쳐도 테스트가 다시 돌게 한다
+    inputs.dir("scripts/refund").withPropertyName("refundScripts")
     inputs.dir("docker/prometheus").withPropertyName("prometheusRules")
     useJUnitPlatform {
         // 동시성 테스트는 스레드를 여러 개 띄워 느리고 CPU를 많이 쓴다.

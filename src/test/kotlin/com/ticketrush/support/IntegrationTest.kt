@@ -19,7 +19,8 @@ abstract class IntegrationTest {
     companion object {
         // 싱글턴 재사용. @Testcontainers 방식은 클래스마다 컨테이너를 새로 띄워
         // 클래스가 늘면 기동 시간이 빌드 전체를 지배한다.
-        private val postgres =
+        // 운영 SQL 스크립트를 psql로 그대로 실행하는 테스트가 컨테이너에 접근한다
+        val postgres: PostgreSQLContainer =
             PostgreSQLContainer(DockerImageName.parse("postgres:18-alpine"))
                 .withDatabaseName("ticketrush")
                 .withUsername("test")
