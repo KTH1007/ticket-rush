@@ -71,6 +71,78 @@ class TossPaymentGatewayAdapterRefundTest {
         assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY))
     }
 
+    // 우리가 보낸 사유("사용자 취소 요청")가 취소 내역에 있으면 우리 요청이 처리된 것이다(응답만 유실됐다)
+    @Test
+    fun `이미 취소됨이고 취소 내역에 우리 사유가 있으면 외부 취소가 아니다`() {
+        stubCancelError(400, "ALREADY_CANCELED_PAYMENT", "이미 취소된 결제 입니다")
+        stubInquiry("CANCELED", cancelReasons = listOf("사용자 취소 요청"))
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY, externallyCanceled = false))
+    }
+
+    @Test
+    fun `이미 취소됨이고 취소 내역에 우리 사유가 없으면 운영자의 외부 취소로 본다`() {
+        stubCancelError(400, "ALREADY_CANCELED_PAYMENT", "이미 취소된 결제 입니다")
+        stubInquiry("CANCELED", cancelReasons = listOf("고객 요청으로 콘솔에서 취소"))
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY, externallyCanceled = true))
+    }
+
+    @Test
+    fun `취소 내역에 우리 사유와 운영자 사유가 섞여 있으면 우리 요청이 처리된 것으로 본다`() {
+        stubCancelError(400, "ALREADY_CANCELED_PAYMENT", "이미 취소된 결제 입니다")
+        stubInquiry("PARTIAL_CANCELED", balanceAmount = 0, cancelReasons = listOf("콘솔 부분 취소", "사용자 취소 요청"))
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY, externallyCanceled = false))
+    }
+
+    @Test
+    fun `취소 가능 금액 초과 403이고 운영자의 부분 취소로 잔액이 0이면 외부 취소로 본다`() {
+        stubCancelError(403, "NOT_CANCELABLE_AMOUNT", "취소 할 수 있는 금액이 없습니다")
+        stubInquiry("PARTIAL_CANCELED", balanceAmount = 0, cancelReasons = listOf("콘솔 부분 취소 1", "콘솔 부분 취소 2"))
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY, externallyCanceled = true))
+    }
+
+    // 취소 내역이 없으면 누가 취소했는지 모르므로 외부라고 단정하지 않는다
+    @Test
+    fun `조회 응답에 취소 내역이 없거나 비어 있으면 외부 취소로 단정하지 않는다`() {
+        stubCancelError(400, "ALREADY_CANCELED_PAYMENT", "이미 취소된 결제 입니다")
+
+        stubInquiry("CANCELED")
+        val withoutCancels = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+        stubInquiry("CANCELED", cancelReasons = emptyList())
+        val emptyCancels = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(withoutCancels).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY, externallyCanceled = false))
+        assertThat(emptyCancels).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY, externallyCanceled = false))
+    }
+
+    @Test
+    fun `환불 요청이 바로 성공하면 외부 취소가 아니다`() {
+        wireMock.stubFor(
+            post(urlEqualTo("/v1/payments/$PAYMENT_KEY/cancel"))
+                .willReturn(
+                    jsonResponse(
+                        200,
+                        """{"paymentKey":"$PAYMENT_KEY","status":"CANCELED","cancels":[{"cancelReason":"사용자 취소 요청"}]}""",
+                    ),
+                ),
+        )
+
+        val result = adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID())
+
+        assertThat(result).isEqualTo(PaymentGatewayResult.Approved(pgTransactionId = PAYMENT_KEY, externallyCanceled = false))
+    }
+
     @Test
     fun `이미 취소됨 400인데 조회가 DONE이면 환불된 게 아니므로 Declined를 반환한다`() {
         stubCancelError(400, "ALREADY_CANCELED_PAYMENT", "이미 취소된 결제 입니다")
@@ -278,11 +350,16 @@ class TossPaymentGatewayAdapterRefundTest {
     private fun stubInquiry(
         status: String,
         balanceAmount: Int? = null,
+        cancelReasons: List<String>? = null,
     ) {
         val balance = balanceAmount?.let { ""","balanceAmount":$it""" }.orEmpty()
+        val cancels =
+            cancelReasons
+                ?.joinToString(prefix = ""","cancels":[""", postfix = "]") { """{"cancelReason":"$it","cancelStatus":"DONE"}""" }
+                .orEmpty()
         wireMock.stubFor(
             get(urlEqualTo("/v1/payments/$PAYMENT_KEY"))
-                .willReturn(jsonResponse(200, """{"paymentKey":"$PAYMENT_KEY","status":"$status"$balance}""")),
+                .willReturn(jsonResponse(200, """{"paymentKey":"$PAYMENT_KEY","status":"$status"$balance$cancels}""")),
         )
     }
 

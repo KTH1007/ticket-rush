@@ -76,7 +76,7 @@ class PaymentRefundRetryScheduler(
         // PG가 같은 환불을 처리 중이면 실패가 아니라서 시도로 세지 않고 다음 틱에 다시 확인한다
         val result = requestRefund(payment, reservation, pgTransactionId) ?: return
         when (result) {
-            is PaymentGatewayResult.Approved -> recorder.recordSuccess(payment, result.pgTransactionId)
+            is PaymentGatewayResult.Approved -> recorder.recordSuccess(payment, result)
             is PaymentGatewayResult.Declined -> recorder.recordFailure(payment, result.reason)
         }
     }

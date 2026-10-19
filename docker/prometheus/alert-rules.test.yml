@@ -1,0 +1,98 @@
+rule_files: [alert-rules.yml]
+evaluation_interval: 15s
+
+tests:
+  # 한 인스턴스만 2건을 보고해도 울린다(sum이 아니라 max). 2분 지속 전에는 울리지 않는다
+  - interval: 15s
+    input_series:
+      - series: 'payment_refund_required{instance="app-1"}'
+        values: '0x7 2x40'
+      - series: 'payment_refund_required{instance="app-2"}'
+        values: '0x47'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: PaymentRefundRequired
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: PaymentRefundRequired
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: 환불이 필요한데 처리되지 않은 결제가 있음
+              description: "Toss는 승인했지만 예약이 만료돼 고객이 돈만 낸 건이 2건이다. 환불한 뒤 정리 절차로 닫는다"
+
+  # 인스턴스가 같은 건수를 보고해도 합산하지 않는다(1건이 2건으로 부풀지 않는다)
+  - interval: 15s
+    input_series:
+      - series: 'payment_refund_exhausted{instance="app-1"}'
+        values: '1x47'
+      - series: 'payment_refund_exhausted{instance="app-2"}'
+        values: '1x47'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PaymentRefundExhausted
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: 환불 시도를 소진한 취소 건이 있음
+              description: "취소는 접수됐지만 자동 환불이 모두 실패한 건이 1건이다. 환불한 뒤 정리 절차로 닫는다"
+
+  - interval: 15s
+    input_series:
+      - series: 'payment_refund_required{instance="app-1"}'
+        values: '0x47'
+      - series: 'payment_refund_exhausted{instance="app-1"}'
+        values: '0x47'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PaymentRefundRequired
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: PaymentRefundExhausted
+        exp_alerts: []
+
+  # 모든 인스턴스의 갱신이 멈춘 경우만 울리고, 한 인스턴스만 멈추면 울리지 않는다
+  - interval: 15s
+    input_series:
+      - series: 'payment_refund_backlog_age_seconds{instance="app-1"}'
+        values: '0+15x47'
+      - series: 'payment_refund_backlog_age_seconds{instance="app-2"}'
+        values: '0+15x47'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PaymentRefundBacklogStale
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: 환불 미처리 건수 갱신이 멈춤
+              description: "모든 인스턴스에서 마지막 갱신 뒤 300초가 지났다. DB 연결을 확인한다"
+  - interval: 15s
+    input_series:
+      - series: 'payment_refund_backlog_age_seconds{instance="app-1"}'
+        values: '0+15x47'
+      - series: 'payment_refund_backlog_age_seconds{instance="app-2"}'
+        values: '3x47'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PaymentRefundBacklogStale
+        exp_alerts: []
+
+  # 지표가 사라져도 조회 구간(5분) 동안은 마지막 값이 보이고, 그 뒤 지속 시간까지 지나야 울린다
+  - interval: 15s
+    input_series:
+      - series: 'payment_refund_backlog_age_seconds{instance="app-1"}'
+        values: '3x8 _x70'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PaymentRefundBacklogAbsent
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: PaymentRefundBacklogAbsent
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: PaymentRefundBacklogAbsent
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: 환불 미처리 건수 지표가 수집되지 않음
+              description: 앱이 내려갔거나 수집 대상에서 빠졌다

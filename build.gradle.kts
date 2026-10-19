@@ -150,6 +150,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation(libs.testcontainers.redis)
     testImplementation(libs.wiremock)
+    testImplementation("io.micrometer:micrometer-registry-prometheus")
 
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
@@ -167,6 +168,10 @@ val snippetsDir = layout.buildDirectory.dir("generated-snippets")
 
 tasks.named<Test>("test") {
     outputs.dir(snippetsDir)
+    // 운영 SQL, 알림 규칙, 대시보드를 읽는 테스트가 있어, 이 파일만 고쳐도 테스트가 다시 돌게 한다
+    inputs.dir("scripts/refund").withPropertyName("refundScripts")
+    inputs.dir("docker/prometheus").withPropertyName("prometheusRules")
+    inputs.dir("docker/grafana/provisioning/dashboards").withPropertyName("grafanaDashboards")
     useJUnitPlatform {
         // 동시성 테스트는 스레드를 여러 개 띄워 느리고 CPU를 많이 쓴다.
         // 매 빌드에 넣으면 피드백 주기가 길어진다.

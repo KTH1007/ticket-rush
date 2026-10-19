@@ -293,6 +293,38 @@ class PaymentRepositoryTest : IntegrationTest() {
 
     @Test
     @Transactional
+    fun `환불 시도가 한도에 도달한 CANCELED 결제만 소진 건수에 센다`() {
+        // given
+        val before = paymentRepository.countExhaustedRefunds(maxAttempts = 5)
+        취소된_결제(refundAttemptCount = 4)
+        취소된_결제(refundAttemptCount = 5)
+        취소된_결제(refundAttemptCount = 7)
+        paymentRepository.save(
+            결제(예약_하나_저장().id, status = PaymentStatus.REFUNDED, pgTransactionId = "pk-refunded", refundAttemptCount = 5),
+        )
+        paymentRepository.save(결제(예약_하나_저장().id, tossPaymentKey = "pk-pending", refundAttemptCount = 5))
+
+        // when
+        val after = paymentRepository.countExhaustedRefunds(maxAttempts = 5)
+
+        // then
+        assertThat(after).isEqualTo(before + 2)
+    }
+
+    @Test
+    @Transactional
+    fun `소진 건수는 정리돼 REFUNDED가 된 결제를 세지 않는다`() {
+        val exhausted = 취소된_결제(refundAttemptCount = 5)
+        val before = paymentRepository.countExhaustedRefunds(maxAttempts = 5)
+
+        exhausted.markRefunded()
+        paymentRepository.save(exhausted)
+
+        assertThat(paymentRepository.countExhaustedRefunds(maxAttempts = 5)).isEqualTo(before - 1)
+    }
+
+    @Test
+    @Transactional
     fun `최근에 취소됐거나 CANCELED가 아닌 결제는 stale 조회에서 빠진다`() {
         // given
         val staleCanceled = 취소된_결제()

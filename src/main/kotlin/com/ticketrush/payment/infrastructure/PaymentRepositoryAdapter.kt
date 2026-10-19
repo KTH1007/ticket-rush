@@ -17,6 +17,8 @@ class PaymentRepositoryAdapter(
 
     override fun countRefundRequired(): Long = jpaRepository.countRefundRequired()
 
+    override fun countExhaustedRefunds(maxAttempts: Int): Long = jpaRepository.countExhaustedRefunds(maxAttempts)
+
     override fun findStaleCanceled(
         staleBefore: LocalDateTime,
         maxAttempts: Int,

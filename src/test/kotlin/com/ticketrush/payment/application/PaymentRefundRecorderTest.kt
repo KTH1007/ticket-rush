@@ -6,6 +6,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.Payment
+import com.ticketrush.payment.domain.PaymentGatewayResult
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
 import io.mockk.every
@@ -59,6 +60,49 @@ class PaymentRefundRecorderTest {
 
         val alert = logs.list.single { it.level == Level.ERROR }.formattedMessage
         assertThat(alert).contains("수동 처리 필요").contains("paymentId=$PAYMENT_ID").contains("reservationId=$RESERVATION_ID")
+    }
+
+    @Test
+    fun `재시도에서 우리 호출로 환불에 성공하면 이력 사유에 재시도 성공이 남는다`() {
+        recorder(maxAttempts = 5).recordSuccess(취소된_결제(), PaymentGatewayResult.Approved(pgTransactionId = "pk-1"))
+
+        verify(exactly = 1) {
+            historyRecorder.record(PAYMENT_ID, PaymentStatus.CANCELED, PaymentStatus.REFUNDED, "환불 재시도 성공: pk-1")
+        }
+    }
+
+    @Test
+    fun `재시도에서 외부 취소로 확인된 환불은 이력 사유가 우리 호출과 구분된다`() {
+        recorder(maxAttempts = 5).recordSuccess(
+            취소된_결제(),
+            PaymentGatewayResult.Approved(pgTransactionId = "pk-1", externallyCanceled = true),
+        )
+
+        verify(exactly = 1) {
+            historyRecorder.record(PAYMENT_ID, PaymentStatus.CANCELED, PaymentStatus.REFUNDED, "환불 완료(Toss에서 외부 취소 확인): pk-1")
+        }
+    }
+
+    @Test
+    fun `취소 요청에서 우리 호출로 환불에 성공하면 이력 사유에 환불 완료가 남는다`() {
+        val saved = recorder(maxAttempts = 5).recordCancelSuccess(취소된_결제(), PaymentGatewayResult.Approved(pgTransactionId = "pk-2"))
+
+        assertThat(saved.status).isEqualTo(PaymentStatus.REFUNDED)
+        verify(exactly = 1) {
+            historyRecorder.record(PAYMENT_ID, PaymentStatus.CANCELED, PaymentStatus.REFUNDED, "환불 완료: pk-2")
+        }
+    }
+
+    @Test
+    fun `취소 요청에서 외부 취소로 확인된 환불도 이력 사유가 구분된다`() {
+        recorder(maxAttempts = 5).recordCancelSuccess(
+            취소된_결제(),
+            PaymentGatewayResult.Approved(pgTransactionId = "pk-2", externallyCanceled = true),
+        )
+
+        verify(exactly = 1) {
+            historyRecorder.record(PAYMENT_ID, PaymentStatus.CANCELED, PaymentStatus.REFUNDED, "환불 완료(Toss에서 외부 취소 확인): pk-2")
+        }
     }
 
     private fun recorder(maxAttempts: Int): PaymentRefundRecorder =

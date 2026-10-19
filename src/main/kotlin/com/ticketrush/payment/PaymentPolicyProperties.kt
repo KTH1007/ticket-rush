@@ -10,6 +10,7 @@ data class PaymentPolicyProperties(
     val refundRetryDelay: Duration = Duration.ofMinutes(5),
     val refundRetryInterval: Duration = Duration.ofSeconds(30),
     val refundMaxAttempts: Int = 5,
+    val refundBacklogRefreshInterval: Duration = Duration.ofSeconds(15),
     val minHoldRemaining: Duration = Duration.ofSeconds(15),
 ) {
     init {
@@ -24,6 +25,9 @@ data class PaymentPolicyProperties(
         }
         require(refundRetryInterval.isPositive()) { "refundRetryInterval은 양수여야 합니다: $refundRetryInterval" }
         require(refundMaxAttempts > 0) { "refundMaxAttempts는 양수여야 합니다: $refundMaxAttempts" }
+        require(refundBacklogRefreshInterval.isPositive()) {
+            "refundBacklogRefreshInterval은 양수여야 합니다: $refundBacklogRefreshInterval"
+        }
         require(!minHoldRemaining.isNegative && !minHoldRemaining.isZero) {
             "minHoldRemaining은 양수여야 합니다: $minHoldRemaining"
         }
