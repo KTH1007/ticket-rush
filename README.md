@@ -145,6 +145,8 @@ v1에서는 Kafka를 사용하지 않는다.
 cp .env.example .env   # PHONE_HMAC_KEY, PHONE_ENCRYPTION_KEY, TOSS_SECRET_KEY, GRAFANA_ADMIN_PASSWORD 채우기
                        # (TOSS_SECRET_KEY는 TICKET_RUSH_PAYMENT_GATEWAY=toss일 때만 필요하다. 키 없이 toss로 켜면 기동 때 실패한다.
                        #  local 프로필의 기본값은 fake다)
+                       # local 프로필은 앱이 이 .env를 직접 읽는다. 작업 디렉터리가 프로젝트 루트여야 하므로
+                       # 인텔리제이는 실행 설정의 Working directory를 확인한다
 
 # 2. 인프라 기동 (PostgreSQL, Redis, Flyway 마이그레이션)
 docker compose up -d
