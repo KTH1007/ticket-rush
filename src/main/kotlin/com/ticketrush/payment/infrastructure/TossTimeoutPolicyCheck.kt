@@ -1,5 +1,6 @@
-package com.ticketrush.payment
+package com.ticketrush.payment.infrastructure
 
+import com.ticketrush.payment.PaymentPolicyProperties
 import org.springframework.stereotype.Component
 
 // stale-claim-timeout과 min-hold-remaining은 Toss 타임아웃에서 계산한 하한이라, 한쪽만 바뀌어 어긋나면 기동 때 드러나게 한다.

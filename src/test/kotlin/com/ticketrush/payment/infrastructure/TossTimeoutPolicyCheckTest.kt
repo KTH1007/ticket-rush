@@ -1,5 +1,6 @@
-package com.ticketrush.payment
+package com.ticketrush.payment.infrastructure
 
+import com.ticketrush.payment.PaymentPolicyProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy

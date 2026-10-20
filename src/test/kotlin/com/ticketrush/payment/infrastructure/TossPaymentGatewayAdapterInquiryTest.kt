@@ -6,7 +6,6 @@ import com.github.tomakehurst.wiremock.client.WireMock.get
 import com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension
-import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentInquiryResult
 import org.assertj.core.api.Assertions.assertThat
@@ -148,7 +147,7 @@ class TossPaymentGatewayAdapterInquiryTest {
     }
 
     @Test
-    fun `401 인증 실패는 NotFound가 아니라 예외를 다시 던진다`() {
+    fun `401 인증 실패는 NotFound가 아니라 PG에 닿지 못한 경우처럼 예외를 던진다`() {
         wireMock.stubFor(
             get(urlEqualTo("/v1/payments/pk-unauthorized"))
                 .willReturn(
@@ -160,7 +159,8 @@ class TossPaymentGatewayAdapterInquiryTest {
         )
 
         assertThatThrownBy { adapter().inquire("pk-unauthorized") }
-            .isInstanceOf(HttpClientErrorException.Unauthorized::class.java)
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(HttpClientErrorException.Unauthorized::class.java)
     }
 
     @Test

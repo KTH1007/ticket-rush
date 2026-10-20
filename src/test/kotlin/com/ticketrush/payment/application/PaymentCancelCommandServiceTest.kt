@@ -95,7 +95,9 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
     lateinit var outboxRepository: com.ticketrush.outbox.domain.OutboxRepositoryPort
 
     private val logs = ListAppender<ILoggingEvent>()
-    private val serviceLogger = LoggerFactory.getLogger(PaymentCancelCommandService::class.java.name) as Logger
+
+    // 환불 호출 결과의 로그는 PaymentRefunder가 남기므로 서비스 하나가 아니라 패키지 로거에 붙인다
+    private val serviceLogger = LoggerFactory.getLogger("com.ticketrush.payment.application") as Logger
 
     @BeforeEach
     fun captureLogs() {
@@ -199,7 +201,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
 
         // then
         verify(exactly = 1) {
-            paymentGateway.refund("PG-TXN-ORIGINAL", 200_000, RefundIdempotencyKey.of(reservation.idempotencyKey, 0))
+            paymentGateway.refund("PG-TXN-ORIGINAL-${reservation.id}", 200_000, RefundIdempotencyKey.of(reservation.idempotencyKey, 0))
         }
     }
 
@@ -404,7 +406,8 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
 
     private fun 결제완료_결제_저장(reservationId: Long): Payment {
         val payment = Payment(reservationId = reservationId, amount = 200_000)
-        payment.markSuccess("PG-TXN-ORIGINAL", LocalDateTime.of(2026, 1, 1, 0, 0))
+        // 커밋된 행의 PG 거래 id는 DB에서 유일해야 해서 예약마다 다른 값을 쓴다
+        payment.markSuccess("PG-TXN-ORIGINAL-$reservationId", LocalDateTime.of(2026, 1, 1, 0, 0))
         return paymentRepository.save(payment)
     }
 

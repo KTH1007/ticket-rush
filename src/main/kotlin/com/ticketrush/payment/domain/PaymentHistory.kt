@@ -12,6 +12,7 @@ import java.time.LocalDateTime
 
 // BaseEntity를 상속하지 않는다. payment_history는 추가만 되는 로그라 updated_at 컬럼이
 // 없는데, BaseEntity는 created_at/updated_at을 세트로 강제해서 여기엔 안 맞는다.
+// from과 to가 같은 행은 상태 변화 없이 남기는 메모성 기록이라, 전이만 필요한 소비자는 걸러야 한다.
 @Entity
 @Table(name = "payment_history")
 class PaymentHistory(

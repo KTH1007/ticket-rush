@@ -1,4 +1,4 @@
-package com.ticketrush.payment
+package com.ticketrush.payment.infrastructure
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.core.env.Environment

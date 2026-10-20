@@ -1,8 +1,5 @@
 package com.ticketrush.payment.infrastructure
 
-import com.ticketrush.payment.ConditionalOnPaymentGateway
-import com.ticketrush.payment.PaymentGatewayType
-import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
@@ -138,11 +135,12 @@ class TossPaymentGatewayAdapter(
         }
     }
 
-    // 시크릿 키 설정 실수가 거절이나 미승인으로 확정돼 결제가 잘못 닫히는 걸 막으려고 그대로 던진다
+    // 시크릿 키 설정 실수가 거절이나 미승인으로 확정돼 결제가 잘못 닫히는 걸 막는다.
+    // 고쳐질 때까지 재시도가 소용없으니 환불 횟수를 소모하지 않게 PG에 닿지 못한 경우와 같게 다룬다
     private fun throwIfUnauthorized(e: HttpClientErrorException) {
         if (e.statusCode != HttpStatus.UNAUTHORIZED) return
         logger.error { "Toss 인증 실패(401), 시크릿 키 설정 확인 필요" }
-        throw e
+        throw PaymentGatewayUnavailableException(cause = e)
     }
 
     @CircuitBreaker(name = "paymentGateway", fallbackMethod = "inquireBlocked")

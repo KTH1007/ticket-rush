@@ -20,6 +20,7 @@ import com.ticketrush.reservation.domain.ReservationNotHoldingException
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
 import java.time.Clock
@@ -27,6 +28,8 @@ import java.time.LocalDateTime
 import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
+
+private const val TOSS_PAYMENT_KEY_CONSTRAINT = "uk_payment_toss_payment_key"
 
 // 승인 흐름의 단계마다 함수로 나누고 협력 객체를 따로 둬서 함수와 생성자 인자가 많다
 @Suppress("TooManyFunctions", "LongParameterList")
@@ -81,7 +84,8 @@ class PaymentCommandService(
         return callGatewayAndApply(reservation, claimed, paymentKey, orderId, amount)
     }
 
-    // 같은 결제를 동시에 이어받거나 다시 열다 진 쪽은 낙관적 락 충돌로 걸리는데, 서버 오류가 아니라 충돌로 응답한다
+    // 같은 결제를 동시에 이어받거나 다시 열다 진 쪽은 낙관적 락 충돌로 걸리는데, 서버 오류가 아니라 충돌로 응답한다.
+    // 다른 예약이 이미 쓰는 결제 키로 요청한 것도 서버 오류가 아니라 주문 불일치로 응답한다
     private fun claim(
         reservation: Reservation,
         paymentKey: String,
@@ -91,6 +95,10 @@ class PaymentCommandService(
             claimService.claimOrTakeOver(reservation.id, reservation.amount, paymentKey, orderId, LocalDateTime.now(clock))
         } catch (e: OptimisticLockingFailureException) {
             throw PaymentConflictException(cause = e)
+        } catch (e: DataIntegrityViolationException) {
+            if (e.mostSpecificCause.message?.contains(TOSS_PAYMENT_KEY_CONSTRAINT) != true) throw e
+            logger.warn { "다른 예약이 이미 쓰는 결제 키입니다: reservationId=${reservation.id}" }
+            throw PaymentOrderMismatchException()
         }
 
     // 응답을 못 받은 오래된 PENDING을 다른 paymentKey로 덮어쓰기 전에 이전 키를 조회한다. 이미 승인됐으면 그 승인을 확정하고, 아니면 교체한다.

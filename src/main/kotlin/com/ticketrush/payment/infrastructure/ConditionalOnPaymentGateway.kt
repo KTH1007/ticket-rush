@@ -1,4 +1,4 @@
-package com.ticketrush.payment
+package com.ticketrush.payment.infrastructure
 
 import org.springframework.context.annotation.Condition
 import org.springframework.context.annotation.ConditionContext

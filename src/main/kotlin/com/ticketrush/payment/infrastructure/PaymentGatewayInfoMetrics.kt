@@ -1,6 +1,5 @@
 package com.ticketrush.payment.infrastructure
 
-import com.ticketrush.payment.PaymentGatewayType
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.binder.MeterBinder

@@ -36,6 +36,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.TestConfiguration
@@ -105,6 +106,20 @@ class PaymentCommandServiceTest : IntegrationTest() {
     @BeforeEach
     fun resetGatewayMock() {
         clearMocks(paymentGateway)
+    }
+
+    private val createdReservationIds = mutableListOf<Long>()
+
+    // 커밋된 PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로, 단언이 실패해도 정리한다
+    @AfterEach
+    fun 남은_PENDING_정리() {
+        createdReservationIds.forEach { reservationId ->
+            paymentRepository.findByReservationId(reservationId)?.takeIf { it.status == PaymentStatus.PENDING }?.let {
+                it.markFailed()
+                paymentRepository.save(it)
+            }
+        }
+        createdReservationIds.clear()
     }
 
     @Test
@@ -411,7 +426,8 @@ class PaymentCommandServiceTest : IntegrationTest() {
 
         val reservation = 홀드된_예약_준비()
         every { reservationNoGenerator.generate() } returnsMany listOf("COLLIDE00001", "UNIQUE000001")
-        every { paymentGateway.charge(any(), any(), any(), reservation.idempotencyKey) } returns PaymentGatewayResult.Approved("PG-TXN-2")
+        every { paymentGateway.charge(any(), any(), any(), reservation.idempotencyKey) } returns
+            PaymentGatewayResult.Approved("PG-TXN-COLLIDE-2")
 
         // when
         val result = paymentCommandService.결제_확정(reservation)
@@ -419,6 +435,24 @@ class PaymentCommandServiceTest : IntegrationTest() {
         // then
         assertThat(result.reservationNo).isEqualTo("UNIQUE000001")
         verify(exactly = 1) { paymentGateway.charge(any(), any(), any(), reservation.idempotencyKey) }
+    }
+
+    // 결제 키는 클라이언트가 보내는 값이라, 다른 예약이 이미 쓰는 키로 요청하면 PG에 가기 전에 주문 불일치로 막는다
+    @Test
+    fun `다른 예약이 이미 쓰는 결제 키로 승인을 요청하면 주문 불일치로 응답하고 PG는 부르지 않는다`() {
+        // given
+        val sharedKey = 고유한_결제_키()
+        val first = 홀드된_예약_준비()
+        every { reservationNoGenerator.generate() } returns "RESNO000201"
+        every { paymentGateway.charge(any(), any(), any(), first.idempotencyKey) } returns PaymentGatewayResult.Approved("PG-TXN-SHARED-1")
+        paymentCommandService.결제_확정(first, sharedKey)
+        val second = 홀드된_예약_준비()
+
+        // when & then
+        assertThatThrownBy { paymentCommandService.결제_확정(second, sharedKey) }
+            .isInstanceOf(PaymentOrderMismatchException::class.java)
+        verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), second.idempotencyKey) }
+        assertThat(paymentRepository.findByReservationId(second.id)).isNull()
     }
 
     @Test
@@ -474,10 +508,6 @@ class PaymentCommandServiceTest : IntegrationTest() {
         assertThat(updated.holdExpiresAt).isEqualTo(FAR_FUTURE)
         val seat = seatRepository.findAllByEventId(reservation.eventId).single()
         assertThat(seat.holdExpiresAt).isEqualTo(FAR_FUTURE)
-
-        // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
-        payment.markFailed()
-        paymentRepository.save(payment)
     }
 
     @Test
@@ -518,10 +548,6 @@ class PaymentCommandServiceTest : IntegrationTest() {
         assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
         assertThat(payment.tossPaymentKey).isEqualTo("retry-payment-key")
         assertThat(payment.chargeAttemptCount).isEqualTo(1)
-
-        // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
-        payment.markFailed()
-        paymentRepository.save(payment)
     }
 
     // 응답을 못 받은 PENDING을 다른 paymentKey로 덮어쓰기 전에 이전 키가 이미 승인됐는지 확인해야, 승인된 결제를 놓치지 않는다
@@ -618,10 +644,6 @@ class PaymentCommandServiceTest : IntegrationTest() {
         assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-partial")
         assertThat(payment.refundRequiredAt).isNotNull()
         assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).last().reason).contains("수동 확인 필요", "부분 취소")
-
-        // 커밋된 PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
-        payment.markFailed()
-        paymentRepository.save(payment)
     }
 
     @Test
@@ -641,10 +663,6 @@ class PaymentCommandServiceTest : IntegrationTest() {
         val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
         assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-marked")
         assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).count { it.reason?.contains("수동 확인 필요") == true }).isEqualTo(1)
-
-        // 커밋된 PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
-        payment.markFailed()
-        paymentRepository.save(payment)
     }
 
     @Test
@@ -678,10 +696,6 @@ class PaymentCommandServiceTest : IntegrationTest() {
         val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
         assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
         assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-unknown")
-
-        // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
-        payment.markFailed()
-        paymentRepository.save(payment)
     }
 
     @Test
@@ -702,21 +716,19 @@ class PaymentCommandServiceTest : IntegrationTest() {
         val updated = requireNotNull(reservationRepository.findById(reservation.id))
         assertThat(updated.status).isEqualTo(ReservationStatus.HOLDING)
         assertThat(updated.holdExpiresAt).isEqualTo(FAR_FUTURE)
-
-        // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
-        payment.markFailed()
-        paymentRepository.save(payment)
     }
 
     @Test
     fun `Toss가 5xx를 응답하면 거절 횟수를 올려 PENDING으로 남기고 다음 승인은 새 멱등키로 요청한다`() {
         // given
         val reservation = 홀드된_예약_준비(holdExpiresAt = FAR_FUTURE)
+        // 같은 결제 키로 다시 요청해야 이어받기로 이어진다
+        val paymentKey = 고유한_결제_키()
         every { paymentGateway.charge(any(), any(), any(), reservation.idempotencyKey) } throws
             PaymentGatewayUnavailableException(serverResponded = true)
 
         // when
-        assertThatThrownBy { paymentCommandService.결제_확정(reservation) }
+        assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey) }
             .isInstanceOf(PaymentGatewayUnavailableException::class.java)
 
         // then
@@ -730,7 +742,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
         val rotatedKey = ChargeIdempotencyKey.of(reservation.idempotencyKey, 1)
         every { reservationNoGenerator.generate() } returns "RESNO000041"
         every { paymentGateway.charge(any(), any(), any(), rotatedKey) } returns PaymentGatewayResult.Approved("PG-TXN-AFTER-5XX")
-        val result = paymentCommandService.결제_확정(reservation)
+        val result = paymentCommandService.결제_확정(reservation, paymentKey)
 
         // then
         assertThat(result.payment.status).isEqualTo(PaymentStatus.SUCCESS)
@@ -770,10 +782,6 @@ class PaymentCommandServiceTest : IntegrationTest() {
         val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
         assertThat(payment.status).isEqualTo(PaymentStatus.PENDING)
         assertThat(payment.tossPaymentKey).isEqualTo("pk-prev-blocked")
-
-        // 커밋된 stale PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
-        payment.markFailed()
-        paymentRepository.save(payment)
     }
 
     @Test
@@ -801,11 +809,6 @@ class PaymentCommandServiceTest : IntegrationTest() {
         assertThatThrownBy { paymentCommandService.결제_확정(reservation, paymentKey = "pk-new-fresh") }
             .isInstanceOf(PaymentConflictException::class.java)
         verify(exactly = 0) { paymentGateway.inquire("pk-prev-fresh") }
-
-        // 커밋된 PENDING 행이 남으면 이후 컨텍스트의 회수 스케줄러가 집어가므로 정리한다
-        val payment = requireNotNull(paymentRepository.findByReservationId(reservation.id))
-        payment.markFailed()
-        paymentRepository.save(payment)
     }
 
     // 응답 없이 끝난 승인(타임아웃)으로 PENDING을 남긴 뒤, 갱신 시각을 옮겨 오래된(또는 신선한) 클레임으로 만든다
@@ -821,7 +824,7 @@ class PaymentCommandServiceTest : IntegrationTest() {
 
     private fun PaymentCommandService.결제_확정(
         reservation: Reservation,
-        paymentKey: String = "test-payment-key",
+        paymentKey: String = 고유한_결제_키(),
     ): PaymentConfirmationResult =
         confirmPayment(
             reservationId = reservation.id,
@@ -848,8 +851,12 @@ class PaymentCommandServiceTest : IntegrationTest() {
             slotNo = 1,
             holdExpiresAt = holdExpiresAt,
         )
+        createdReservationIds += reservation.id
         return reservation
     }
+
+    // 커밋된 행의 결제 키는 DB에서 유일해야 해서 호출마다 다른 값을 쓴다
+    private fun 고유한_결제_키(): String = "pk-${UUID.randomUUID()}"
 
     companion object {
         private val FAR_FUTURE: LocalDateTime = LocalDateTime.of(2030, 1, 1, 0, 0)

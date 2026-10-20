@@ -42,7 +42,7 @@ class PaymentRefundRetrySchedulerRaceTest {
         PaymentRefundRetryScheduler(
             paymentRepository,
             reservationRepository,
-            paymentGateway,
+            PaymentRefunder(paymentGateway),
             recorder,
             PaymentPolicyProperties(staleClaimTimeout = Duration.ofSeconds(10), reclaimInterval = Duration.ofSeconds(5)),
             clock,

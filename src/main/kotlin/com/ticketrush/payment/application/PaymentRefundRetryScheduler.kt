@@ -2,14 +2,9 @@ package com.ticketrush.payment.application
 
 import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.payment.domain.Payment
-import com.ticketrush.payment.domain.PaymentConflictException
-import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
-import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.payment.domain.PaymentStatus
-import com.ticketrush.payment.domain.RefundIdempotencyKey
-import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.shared.TickGuard
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -26,7 +21,7 @@ private val logger = KotlinLogging.logger {}
 class PaymentRefundRetryScheduler(
     private val paymentRepository: PaymentRepositoryPort,
     private val reservationRepository: ReservationRepositoryPort,
-    private val paymentGateway: PaymentGatewayPort,
+    private val refunder: PaymentRefunder,
     private val recorder: PaymentRefundRecorder,
     private val policy: PaymentPolicyProperties,
     private val clock: Clock,
@@ -51,14 +46,11 @@ class PaymentRefundRetryScheduler(
         }
 
     // 다른 인스턴스와 낙관적 락으로 겹치는 건 정상 경합이라 스택트레이스 없이 한 줄만 남긴다.
-    // false면 이번 틱을 멈춘다. PG가 막혀 있으면 나머지 행도 같은 이유로 실패한다
+    // false면 이번 틱을 멈춘다
     @Suppress("TooGenericExceptionCaught")
     private fun retrySafely(payment: Payment): Boolean {
         try {
-            retryOne(payment)
-        } catch (expected: PaymentGatewayUnavailableException) {
-            logger.warn { "PG가 일시적으로 응답하지 않아 이번 틱의 환불 재시도를 멈춥니다" }
-            return false
+            return retryOne(payment)
         } catch (expected: OptimisticLockingFailureException) {
             logger.warn { "다른 인스턴스가 먼저 반영해 건너뜁니다: reservationId=${payment.reservationId}" }
         } catch (e: Exception) {
@@ -67,43 +59,30 @@ class PaymentRefundRetryScheduler(
         return true
     }
 
-    private fun retryOne(snapshot: Payment) {
-        val payment = findStillCanceled(snapshot) ?: return
+    // 틱을 계속할지 돌려준다. PG에 닿지 않았으면 나머지 행도 같은 이유로 실패하므로 멈춘다
+    private fun retryOne(snapshot: Payment): Boolean {
+        val payment = findStillCanceled(snapshot) ?: return true
         val reservation =
             requireNotNull(reservationRepository.findById(payment.reservationId)) { "예약을 찾을 수 없습니다: ${payment.reservationId}" }
-        val pgTransactionId = requireNotNull(payment.pgTransactionId) { "취소 대상인데 원 거래 id가 없습니다: ${payment.id}" }
 
-        // PG가 같은 환불을 처리 중이면 실패가 아니라서 시도로 세지 않고 다음 틱에 다시 확인한다
-        val result = requestRefund(payment, reservation, pgTransactionId) ?: return
+        val result =
+            when (val outcome = refunder.refund(payment, reservation.idempotencyKey)) {
+                is PaymentRefunder.Outcome.Completed -> outcome.result
+                // 실패가 아니라서 시도로 세지 않고 다음 틱에 다시 확인한다
+                PaymentRefunder.Outcome.InProgress -> return true
+                PaymentRefunder.Outcome.Unreachable -> {
+                    logger.warn { "PG에 닿지 않아 이번 틱의 환불 재시도를 멈춥니다" }
+                    return false
+                }
+            }
         when (result) {
             is PaymentGatewayResult.Approved -> recorder.recordSuccess(payment, result)
             is PaymentGatewayResult.Declined -> recorder.recordFailure(payment, result.reason)
         }
+        return true
     }
 
     // 목록 조회 뒤 다른 인스턴스나 흐름이 먼저 환불을 끝냈을 수 있어 최신 상태를 다시 읽는다
     private fun findStillCanceled(snapshot: Payment): Payment? =
         paymentRepository.findByReservationId(snapshot.reservationId)?.takeIf { it.status == PaymentStatus.CANCELED }
-
-    // 호출 자체가 실패해도(5xx, 타임아웃, 인증 오류) 환불이 안 된 것으로 보고 거절과 같이 시도 횟수에 센다. 충돌(처리 중)만 null
-    @Suppress("TooGenericExceptionCaught")
-    private fun requestRefund(
-        payment: Payment,
-        reservation: Reservation,
-        pgTransactionId: String,
-    ): PaymentGatewayResult? {
-        val refundKey = RefundIdempotencyKey.of(reservation.idempotencyKey, payment.refundAttemptCount)
-        return try {
-            paymentGateway.refund(pgTransactionId, payment.amount, refundKey)
-        } catch (expected: PaymentConflictException) {
-            logger.warn { "환불이 PG에서 아직 처리 중입니다. 시도로 세지 않고 다음 틱에 다시 확인합니다: paymentId=${payment.id}" }
-            null
-        } catch (e: PaymentGatewayUnavailableException) {
-            // PG에 닿지 않은 경우라 시도로 세지 않고 위로 올려 이번 틱을 멈춘다
-            throw e
-        } catch (e: Exception) {
-            logger.warn(e) { "환불 재시도 호출 실패: paymentId=${payment.id}" }
-            PaymentGatewayResult.Declined(reason = e.message ?: e.javaClass.simpleName)
-        }
-    }
 }

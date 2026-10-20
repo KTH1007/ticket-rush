@@ -35,9 +35,11 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import java.time.Clock
 import java.time.LocalDateTime
@@ -255,6 +257,22 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
         val warnings = logs.list.filter { it.level == Level.WARN }
         assertThat(warnings).hasSize(1)
         assertThat(warnings.single().throwableProxy).isNull()
+    }
+
+    // 시크릿 키 설정 오류(401)는 어댑터가 PG에 닿지 못한 경우로 올린다. 고쳐지기 전까지 재시도가 소용없으니 횟수가 소진되면 안 된다
+    @Test
+    @Transactional
+    fun `인증 설정 오류로 PG에 닿지 못하면 환불 시도 횟수를 올리지 않는다`() {
+        val reservation = 예약()
+        취소된_결제(reservation)
+        val unauthorized = HttpClientErrorException.create(HttpStatus.UNAUTHORIZED, "Unauthorized", HttpHeaders.EMPTY, ByteArray(0), null)
+        every { paymentGateway.refund(any(), any(), any()) } throws PaymentGatewayUnavailableException(cause = unauthorized)
+
+        repeat(3) { retryScheduler.retry(staleBefore()) }
+
+        val payment = 결제(reservation)
+        assertThat(payment.status).isEqualTo(PaymentStatus.CANCELED)
+        assertThat(payment.refundAttemptCount).isEqualTo(0)
     }
 
     @Test

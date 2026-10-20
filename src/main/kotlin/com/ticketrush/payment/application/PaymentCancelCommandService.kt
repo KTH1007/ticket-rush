@@ -2,11 +2,8 @@ package com.ticketrush.payment.application
 
 import com.ticketrush.payment.domain.Payment
 import com.ticketrush.payment.domain.PaymentCancelResult
-import com.ticketrush.payment.domain.PaymentConflictException
-import com.ticketrush.payment.domain.PaymentGatewayPort
 import com.ticketrush.payment.domain.PaymentGatewayResult
-import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
-import com.ticketrush.payment.domain.RefundIdempotencyKey
+import com.ticketrush.payment.domain.PaymentRepositoryPort
 import com.ticketrush.shared.ClientIp
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
@@ -18,8 +15,9 @@ private val logger = KotlinLogging.logger {}
 @Service
 class PaymentCancelCommandService(
     private val cancelRecorder: PaymentCancelRecorder,
-    private val paymentGateway: PaymentGatewayPort,
+    private val refunder: PaymentRefunder,
     private val refundRecorder: PaymentRefundRecorder,
+    private val paymentRepository: PaymentRepositoryPort,
 ) {
     fun cancel(
         reservationNo: String,
@@ -30,45 +28,15 @@ class PaymentCancelCommandService(
         return PaymentCancelResult(applyRefund(canceled), reservationNo)
     }
 
+    // 환불 호출이 어떻게 끝나도 확정된 취소는 그대로다. 결과가 없으면(처리 중, PG에 안 닿음) 시도로 세지 않고 CANCELED로 남긴다
     private fun applyRefund(canceled: CanceledPayment): Payment {
-        val result = requestRefund(canceled) ?: return canceled.payment
+        val outcome = refunder.refund(canceled.payment, canceled.reservationKey)
+        val result = (outcome as? PaymentRefunder.Outcome.Completed)?.result ?: return canceled.payment
         return recordRefund(canceled.payment, result)
     }
 
-    // 환불 호출이 예외를 던져도(네트워크 오류 등) 확정된 취소는 그대로다. "환불 실패해도 취소는 확정된다"는
-    // 계약을 예외 경로에서도 지키려고 거절로 바꿔 돌려준다. PG가 같은 환불을 처리 중인 충돌은 실패가 아니라서 null로 돌려 시도로 세지 않는다.
-    @Suppress("TooGenericExceptionCaught")
-    private fun requestRefund(canceled: CanceledPayment): PaymentGatewayResult? {
-        val payment = canceled.payment
-        val pgTransactionId = requireNotNull(payment.pgTransactionId) { "취소 대상인데 원 거래 id가 없습니다: ${payment.id}" }
-        val refundKey = RefundIdempotencyKey.of(canceled.reservationKey, payment.refundAttemptCount)
-        return try {
-            val result = paymentGateway.refund(pgTransactionId, payment.amount, refundKey)
-            if (result is PaymentGatewayResult.Declined) {
-                logger.warn { "환불이 거절됐습니다. 취소는 유지하고 결제는 CANCELED로 남깁니다: paymentId=${payment.id}, reason=${result.reason}" }
-            }
-            result
-        } catch (expected: PaymentConflictException) {
-            skipRefund("환불이 PG에서 아직 처리 중입니다.", payment)
-        } catch (expected: PaymentGatewayUnavailableException) {
-            // PG에 닿지 않은 경우라 시도로 세지 않는다
-            skipRefund("PG가 일시적으로 응답하지 않아 환불을 시도하지 못했습니다.", payment)
-        } catch (e: Exception) {
-            logger.error(e) { "환불 요청 중 오류가 발생했습니다. 취소는 유지하고 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
-            PaymentGatewayResult.Declined(reason = e.message ?: e.javaClass.simpleName)
-        }
-    }
-
-    // 환불 결과가 없어 시도로 세지 않는다. 결제는 CANCELED로 남아 재시도 스케줄러가 이어받는다
-    private fun skipRefund(
-        reason: String,
-        payment: Payment,
-    ): PaymentGatewayResult? {
-        logger.warn { "$reason 결제는 CANCELED로 남깁니다: paymentId=${payment.id}" }
-        return null
-    }
-
-    // 취소는 이미 커밋돼 환불 결과를 못 적어도 요청을 실패시키지 않는다. 결제가 CANCELED로 남아 재시도 스케줄러가 같은 키로 다시 요청한다
+    // 취소는 이미 커밋돼 환불 결과를 못 적어도 저장된 결제를 다시 읽어 응답한다. 재조회까지 실패하면 예외가 나가지만
+    // 결제는 CANCELED로 남아 재시도 스케줄러가 같은 키로 이어받는다
     @Suppress("TooGenericExceptionCaught")
     private fun recordRefund(
         payment: Payment,
@@ -81,6 +49,7 @@ class PaymentCancelCommandService(
             }
         } catch (e: Exception) {
             logger.error(e) { "환불 결과를 반영하지 못했습니다. 결제는 CANCELED로 남고 재시도 스케줄러가 이어받습니다: paymentId=${payment.id}, result=$result" }
-            payment
+            // 반영 도중에 넘겨받은 객체를 먼저 바꿨을 수 있어, 응답은 저장된 값을 다시 읽어 만든다
+            paymentRepository.findByReservationId(payment.reservationId) ?: payment
         }
 }

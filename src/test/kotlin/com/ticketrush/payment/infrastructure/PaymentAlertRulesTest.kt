@@ -1,6 +1,5 @@
 package com.ticketrush.payment.infrastructure
 
-import com.ticketrush.payment.PAYMENT_GATEWAY_PROPERTY
 import com.ticketrush.payment.PaymentPolicyProperties
 import com.ticketrush.support.TestClock
 import io.micrometer.prometheusmetrics.PrometheusConfig

@@ -9,9 +9,9 @@ import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension
-import com.ticketrush.payment.TossProperties
 import com.ticketrush.payment.domain.PaymentConflictException
 import com.ticketrush.payment.domain.PaymentGatewayResult
+import com.ticketrush.payment.domain.PaymentGatewayUnavailableException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.extension.RegisterExtension
@@ -290,11 +290,12 @@ class TossPaymentGatewayAdapterRefundTest {
     }
 
     @Test
-    fun `401 인증 실패는 Declined가 아니라 예외를 던진다`() {
+    fun `401 인증 실패는 Declined가 아니라 PG에 닿지 못한 경우처럼 예외를 던진다`() {
         stubCancelError(401, "UNAUTHORIZED_KEY", "인증되지 않은 시크릿 키 혹은 클라이언트 키 입니다.")
 
         assertThatThrownBy { adapter.refund(PAYMENT_KEY, 20_000, UUID.randomUUID()) }
-            .isInstanceOf(HttpClientErrorException.Unauthorized::class.java)
+            .isInstanceOf(PaymentGatewayUnavailableException::class.java)
+            .hasCauseInstanceOf(HttpClientErrorException.Unauthorized::class.java)
     }
 
     @Test
