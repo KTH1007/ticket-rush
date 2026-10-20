@@ -35,7 +35,8 @@ class PaymentCancelCommandService(
         return recordRefund(canceled.payment, result)
     }
 
-    // 취소는 이미 커밋돼 환불 결과를 못 적어도 요청을 실패시키지 않는다. 결제가 CANCELED로 남아 재시도 스케줄러가 같은 키로 다시 요청한다
+    // 취소는 이미 커밋돼 환불 결과를 못 적어도 저장된 결제를 다시 읽어 응답한다. 재조회까지 실패하면 예외가 나가지만
+    // 결제는 CANCELED로 남아 재시도 스케줄러가 같은 키로 이어받는다
     @Suppress("TooGenericExceptionCaught")
     private fun recordRefund(
         payment: Payment,
