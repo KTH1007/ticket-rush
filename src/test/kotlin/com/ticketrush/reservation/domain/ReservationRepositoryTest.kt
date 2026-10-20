@@ -203,6 +203,49 @@ class ReservationRepositoryTest : IntegrationTest() {
         assertThat(found).isNull()
     }
 
+    @Test
+    fun `예매번호 조회는 uk_reservation_no 인덱스를 탄다`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        // 1건짜리 테이블에선 플래너 선택이 통계에 따라 갈릴 수 있어 실제 규모를 흉내 낸다
+        예약_대량_저장(event.id, count = 2000)
+        try {
+            jdbcTemplate.execute("ANALYZE reservation")
+
+            // when
+            val plan =
+                jdbcTemplate
+                    .queryForList("EXPLAIN SELECT * FROM reservation WHERE reservation_no = ?", "IX0000000001")
+                    .joinToString("\n") { it.values.first().toString() }
+
+            // then
+            // 겹치는 인덱스가 다시 생기면 플래너가 그쪽을 골라 이 단언이 깨진다
+            assertThat(plan).contains("Index Scan using uk_reservation_no")
+            assertThat(plan).doesNotContain("Seq Scan")
+        } finally {
+            // 테스트 간 DB가 공유돼 남기면 다른 테스트가 이 행을 보게 된다
+            jdbcTemplate.update("DELETE FROM reservation WHERE reservation_no LIKE 'IX%'")
+        }
+    }
+
+    // 건별 save()는 수천 건에서 너무 느려 배치 INSERT로 채운다. 예매번호는 IX 접두사라 정리할 때 골라 지운다
+    private fun 예약_대량_저장(
+        eventId: Long,
+        count: Int,
+    ) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO reservation(reservation_no, idempotency_key, event_id, phone_hash, quantity, amount, status,
+                                    hold_token, hold_expires_at, version, created_at, updated_at)
+            SELECT 'IX' || lpad(g::text, 10, '0'), gen_random_uuid(), ?, decode(md5(g::text), 'hex'), 2, 200000, 'PAID',
+                   gen_random_uuid(), NULL, 0, now(), now()
+            FROM generate_series(1, ?) g
+            """.trimIndent(),
+            eventId,
+            count,
+        )
+    }
+
     private fun 상태_조회(id: Long): ReservationStatus =
         ReservationStatus.valueOf(
             jdbcTemplate.queryForObject("SELECT status FROM reservation WHERE id = ?", String::class.java, id)!!,
