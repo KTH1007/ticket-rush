@@ -4,6 +4,7 @@ import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.flushAndClear
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.예약_하나_저장
 import jakarta.persistence.EntityManager
@@ -226,8 +227,7 @@ class PaymentRepositoryTest : IntegrationTest() {
         // when
         saved.recordRefundAttempt()
         paymentRepository.save(saved)
-        entityManager.flush()
-        entityManager.clear()
+        entityManager.flushAndClear()
 
         // then
         assertThat(requireNotNull(paymentRepository.findByReservationId(saved.reservationId)).refundAttemptCount).isEqualTo(1)

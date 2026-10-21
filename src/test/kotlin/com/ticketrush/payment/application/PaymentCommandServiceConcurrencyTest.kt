@@ -16,6 +16,7 @@ import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
 import com.ticketrush.support.예약_하나_저장
+import com.ticketrush.support.유일한_예매번호
 import com.ticketrush.support.홀드된_좌석_하나_저장
 import io.mockk.every
 import io.mockk.mockk
@@ -88,7 +89,7 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
     fun `정확히 동시에 결제 확정이 두 번 들어오면 하나만 성공하고 재시도하면 그 결과로 수렴한다`() {
         // given
         val reservation = 홀드된_예약_준비()
-        every { reservationNoGenerator.generate() } answers { "RESNO" + System.nanoTime().toString().takeLast(7) }
+        every { reservationNoGenerator.generate() } answers { 유일한_예매번호() }
         every { paymentGateway.charge(any(), any(), any(), any()) } returns
             PaymentGatewayResult.Approved("PG-TXN-CONC-${reservation.id}")
 
@@ -119,7 +120,7 @@ class PaymentCommandServiceConcurrencyTest : IntegrationTest() {
             LocalDateTime.now(clock),
         )
         Thread.sleep(policy.staleClaimTimeout.toMillis() + 100)
-        every { reservationNoGenerator.generate() } answers { "RESNO" + System.nanoTime().toString().takeLast(7) }
+        every { reservationNoGenerator.generate() } answers { 유일한_예매번호() }
         every { paymentGateway.charge(any(), any(), any(), any()) } returns
             PaymentGatewayResult.Approved("PG-TXN-STALE-${reservation.id}")
 

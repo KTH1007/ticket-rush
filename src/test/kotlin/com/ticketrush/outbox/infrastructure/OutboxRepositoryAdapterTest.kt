@@ -4,6 +4,7 @@ import com.ticketrush.outbox.domain.OutboxEvent
 import com.ticketrush.outbox.domain.OutboxRepositoryPort
 import com.ticketrush.outbox.domain.OutboxStatus
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.flushAndClear
 import jakarta.persistence.EntityManager
 import org.assertj.core.api.Assertions.assertThat
 import org.springframework.beans.factory.annotation.Autowired
@@ -81,6 +82,23 @@ class OutboxRepositoryAdapterTest : IntegrationTest() {
 
     @Test
     @Transactional
+    fun `markDone으로 DONE이 된 행은 DB 제약을 통과하고 claimed_at이 남는다`() {
+        // given
+        outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
+        val claimed = outboxRepository.claimBatch(limit = 10, now = now).single()
+
+        // when
+        outboxRepository.markDone(claimed.id, requireNotNull(claimed.claimedAt))
+        entityManager.flushAndClear()
+
+        // then
+        val done = requireNotNull(outboxRepository.findById(claimed.id))
+        assertThat(done.status).isEqualTo(OutboxStatus.DONE)
+        assertThat(done.claimedAt).isEqualTo(claimed.claimedAt)
+    }
+
+    @Test
+    @Transactional
     fun `claimedAt이 일치하지 않으면(소유권을 잃으면) markDone을 건너뛴다`() {
         // given
         outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
@@ -121,13 +139,29 @@ class OutboxRepositoryAdapterTest : IntegrationTest() {
         // when
         outboxRepository.markFailedOrRetry(claimed.id, requireNotNull(claimed.claimedAt), now, Duration.ofSeconds(30), maxAttempts = 5)
         // 롤백 테스트는 flush 전엔 UPDATE가 DB로 안 나가 ck_outbox_claim_state가 평가되지 않는다
-        entityManager.flush()
-        entityManager.clear()
+        entityManager.flushAndClear()
 
         // then
         val retried = requireNotNull(outboxRepository.findById(claimed.id))
         assertThat(retried.status).isEqualTo(OutboxStatus.PENDING)
         assertThat(retried.claimedAt).isNull()
+    }
+
+    @Test
+    @Transactional
+    fun `markFailedOrRetry가 한도에 닿아 FAILED가 된 행은 DB 제약을 통과하고 claimed_at이 남는다`() {
+        // given
+        outboxRepository.save(이벤트(aggregateId = 1L, nextAttemptAt = now))
+        val claimed = outboxRepository.claimBatch(limit = 10, now = now).single()
+
+        // when
+        outboxRepository.markFailedOrRetry(claimed.id, requireNotNull(claimed.claimedAt), now, Duration.ofSeconds(30), maxAttempts = 1)
+        entityManager.flushAndClear()
+
+        // then
+        val failed = requireNotNull(outboxRepository.findById(claimed.id))
+        assertThat(failed.status).isEqualTo(OutboxStatus.FAILED)
+        assertThat(failed.claimedAt).isEqualTo(claimed.claimedAt)
     }
 
     @Test

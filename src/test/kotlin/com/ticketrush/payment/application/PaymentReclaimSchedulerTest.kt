@@ -24,6 +24,7 @@ import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.reservation.domain.SeatStatus
 import com.ticketrush.shared.PhoneHash
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.flushAndClear
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
 import com.ticketrush.support.예약_하나_저장
@@ -492,8 +493,7 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
 
     // 좌석의 홀드 단축은 벌크 UPDATE라 영속성 컨텍스트를 비우고 DB에서 다시 읽어야 보인다
     private fun assertReservationAndSeatUntouched(reservation: Reservation) {
-        entityManager.flush()
-        entityManager.clear()
+        entityManager.flushAndClear()
         val savedReservation = requireNotNull(reservationRepository.findById(reservation.id))
         assertThat(savedReservation.status).isEqualTo(ReservationStatus.HOLDING)
         assertThat(savedReservation.holdExpiresAt).isEqualTo(HOLD_PASSED_AT)
@@ -510,8 +510,7 @@ class PaymentReclaimSchedulerTest : IntegrationTest() {
         assertThat(history.toStatus).isEqualTo(PaymentStatus.FAILED)
         assertThat(history.reason).isNotBlank()
         verify(exactly = 0) { paymentGateway.charge(any(), any(), any(), any()) }
-        entityManager.flush()
-        entityManager.clear()
+        entityManager.flushAndClear()
         val savedReservation = requireNotNull(reservationRepository.findById(reservation.id))
         assertThat(savedReservation.status).isEqualTo(ReservationStatus.EXPIRED)
         assertThat(savedReservation.holdExpiresAt).isEqualTo(HOLD_PASSED_AT)
