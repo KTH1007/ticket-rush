@@ -12,6 +12,7 @@ import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.reservation.domain.SeatSelection
 import com.ticketrush.shared.EncryptedPhone
 import com.ticketrush.shared.PhoneHash
+import com.ticketrush.shared.isUniqueViolation
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
@@ -21,6 +22,9 @@ import java.time.LocalDateTime
 import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
+
+// 예외 번역이 이 이름으로 위반을 구분하므로 마이그레이션에서 이름을 바꾸면 번역이 조용히 빗나간다
+internal const val SEAT_SLOT_INDEX = "ux_seat_slot"
 
 // 협력 객체 7개가 모두 필요하다. 억지로 묶으면 책임이 흐려져 그대로 둔다
 @Suppress("LongParameterList")
@@ -185,7 +189,7 @@ class ReservationCommandService(
                 holdExpiresAt = holdExpiresAt,
             )
         } catch (e: DataIntegrityViolationException) {
-            if (e.message?.contains("ux_seat_slot") == true) throw ReservationLimitExceededException()
+            if (e.isUniqueViolation(SEAT_SLOT_INDEX)) throw ReservationLimitExceededException()
             throw e
         }
 }

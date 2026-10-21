@@ -10,6 +10,7 @@ import com.ticketrush.payment.domain.ReservationPaidEvent
 import com.ticketrush.reservation.SeatPolicyProperties
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
+import com.ticketrush.shared.isUniqueViolation
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
@@ -91,7 +92,7 @@ class PaymentClaimService(
         try {
             paymentRepository.save(Payment(reservationId = reservationId, amount = amount))
         } catch (e: DataIntegrityViolationException) {
-            if (e.message?.contains("uk_payment_reservation") == true) throw PaymentConflictException(cause = e)
+            if (e.isUniqueViolation(PaymentConstraints.RESERVATION)) throw PaymentConflictException(cause = e)
             throw e
         }
 
