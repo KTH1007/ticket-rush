@@ -106,6 +106,30 @@ class ReservationRepositoryTest : IntegrationTest() {
     }
 
     @Test
+    fun `ck_reservation_amount 위반 시(음수 금액) 예외 발생`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+
+        // when & then
+        assertThatThrownBy {
+            reservationRepository.save(예약(eventId = event.id, amount = -1))
+        }.isInstanceOf(DataIntegrityViolationException::class.java)
+            .hasMessageContaining("ck_reservation_amount")
+    }
+
+    @Test
+    fun `ck_reservation_holding_expiry 위반 시(HOLDING인데 홀드 만료 시각이 없음) 예외 발생`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+
+        // when & then
+        assertThatThrownBy {
+            reservationRepository.save(예약(eventId = event.id, holdExpiresAt = null))
+        }.isInstanceOf(DataIntegrityViolationException::class.java)
+            .hasMessageContaining("ck_reservation_holding_expiry")
+    }
+
+    @Test
     fun `ck_reservation_status 위반 값 저장 시도 시 예외 발생`() {
         // given
         val event = eventRepository.공연_하나_저장()

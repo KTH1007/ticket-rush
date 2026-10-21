@@ -30,6 +30,7 @@ import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.testClientIp
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
+import com.ticketrush.support.유일한_예매번호
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -379,7 +380,7 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
                 holdToken = UUID.randomUUID(),
                 idempotencyKey = UUID.randomUUID(),
                 status = ReservationStatus.PAID,
-                reservationNo = "CANCEL" + System.nanoTime().toString().takeLast(6),
+                reservationNo = 유일한_예매번호(),
             ),
         )
 

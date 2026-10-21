@@ -18,6 +18,7 @@ import com.ticketrush.payment.domain.RefundIdempotencyKey
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.support.IntegrationTest
+import com.ticketrush.support.flushAndClear
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.예약_하나_저장
 import io.mockk.clearMocks
@@ -149,8 +150,7 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
 
         retryScheduler.retry(staleBefore())
 
-        entityManager.flush()
-        entityManager.clear()
+        entityManager.flushAndClear()
         val payment = 결제(reservation)
         assertThat(payment.status).isEqualTo(PaymentStatus.CANCELED)
         assertThat(payment.refundAttemptCount).isEqualTo(1)
@@ -170,8 +170,7 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
 
         retryScheduler.retry(staleBefore())
 
-        entityManager.flush()
-        entityManager.clear()
+        entityManager.flushAndClear()
         val payment = 결제(reservation)
         assertThat(payment.status).isEqualTo(PaymentStatus.CANCELED)
         assertThat(payment.refundAttemptCount).isEqualTo(1)
@@ -186,8 +185,7 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
 
         retryScheduler.retry(staleBefore())
 
-        entityManager.flush()
-        entityManager.clear()
+        entityManager.flushAndClear()
         val payment = 결제(reservation)
         assertThat(payment.status).isEqualTo(PaymentStatus.CANCELED)
         assertThat(payment.refundAttemptCount).isEqualTo(0)
@@ -233,8 +231,7 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
 
         retryScheduler.retry(staleBefore())
 
-        entityManager.flush()
-        entityManager.clear()
+        entityManager.flushAndClear()
         val payment = 결제(reservation)
         assertThat(payment.status).isEqualTo(PaymentStatus.CANCELED)
         assertThat(payment.refundAttemptCount).isEqualTo(0)
@@ -300,8 +297,7 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
 
         retryScheduler.retry(staleBefore())
 
-        entityManager.flush()
-        entityManager.clear()
+        entityManager.flushAndClear()
         assertThat(결제(reservation).refundAttemptCount).isEqualTo(policy.refundMaxAttempts)
         val alert = logs.list.single { it.level == Level.ERROR }.formattedMessage
         assertThat(alert).contains("수동 처리 필요").contains("paymentId=${payment.id}").contains("reservationId=${reservation.id}")
@@ -322,8 +318,7 @@ class PaymentRefundRetrySchedulerTest : IntegrationTest() {
 
         retryScheduler.retry(staleBefore())
 
-        entityManager.flush()
-        entityManager.clear()
+        entityManager.flushAndClear()
         val payment = 결제(reservation)
         assertThat(payment.refundAttemptCount).isEqualTo(1)
         assertThat(paymentHistoryRepository.findAllByPaymentId(payment.id).single().reason).hasSize(200)

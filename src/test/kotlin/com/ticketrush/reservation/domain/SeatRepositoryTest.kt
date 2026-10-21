@@ -118,6 +118,50 @@ class SeatRepositoryTest : IntegrationTest() {
     }
 
     @Test
+    fun `ck_seat_assignment 위반 시(AVAILABLE인데 예약이 배정됨) 예외 발생`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+
+        // when & then
+        // ck_seat_lifecycle도 같이 걸리지만 이름순으로 먼저 평가되는 이 제약이 보고된다
+        assertThatThrownBy {
+            jdbcTemplate.update(
+                """
+                INSERT INTO seat (event_id, grade_id, section, row_label, seat_no, ordinal, status, reservation_id, created_at, updated_at)
+                VALUES (?, ?, 'A', '1', 1, 0, 'AVAILABLE', 1, now(), now())
+                """.trimIndent(),
+                event.id,
+                grade.id,
+            )
+        }.isInstanceOf(DataIntegrityViolationException::class.java)
+            .hasMessageContaining("ck_seat_assignment")
+    }
+
+    @Test
+    fun `ck_seat_slot_no 위반 시(slot이 1이나 2가 아님) 예외 발생`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+        val grade = gradeRepository.등급_하나_저장(event)
+
+        // when & then
+        // 나머지 제약은 모두 만족하는 HELD 행이라 slot_no만 걸린다
+        assertThatThrownBy {
+            jdbcTemplate.update(
+                """
+                INSERT INTO seat (event_id, grade_id, section, row_label, seat_no, ordinal, status, reservation_id,
+                                  phone_hash, slot_no, hold_expires_at, created_at, updated_at)
+                VALUES (?, ?, 'A', '1', 1, 0, 'HELD', 1, ?, 3, now(), now(), now())
+                """.trimIndent(),
+                event.id,
+                grade.id,
+                ByteArray(32) { 1 },
+            )
+        }.isInstanceOf(DataIntegrityViolationException::class.java)
+            .hasMessageContaining("ck_seat_slot_no")
+    }
+
+    @Test
     fun `findAllByEventId로 좌석을 위치 순서로 조회`() {
         // given
         val event = eventRepository.공연_하나_저장()

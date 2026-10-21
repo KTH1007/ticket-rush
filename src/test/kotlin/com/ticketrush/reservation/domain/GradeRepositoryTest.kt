@@ -4,6 +4,7 @@ import com.ticketrush.event.domain.EventRepositoryPort
 import com.ticketrush.support.TransactionalIntegrationTest
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.등급_하나_저장
+import jakarta.persistence.EntityManager
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.springframework.beans.factory.annotation.Autowired
@@ -16,6 +17,9 @@ class GradeRepositoryTest : TransactionalIntegrationTest() {
 
     @Autowired
     lateinit var gradeRepository: GradeRepositoryPort
+
+    @Autowired
+    lateinit var entityManager: EntityManager
 
     @Test
     fun `Grade가 Event를 참조하며 저장됨`() {
@@ -41,6 +45,22 @@ class GradeRepositoryTest : TransactionalIntegrationTest() {
         assertThatThrownBy {
             gradeRepository.등급_하나_저장(event, price = 150_000)
         }.isInstanceOf(DataIntegrityViolationException::class.java)
+        // 실패한 엔티티가 세션에 남으면 롤백 직전 flush가 깨진다
+        entityManager.clear()
+    }
+
+    @Test
+    fun `ck_grade_price 위반 시(음수 가격) 예외 발생`() {
+        // given
+        val event = eventRepository.공연_하나_저장()
+
+        // when & then
+        assertThatThrownBy {
+            gradeRepository.등급_하나_저장(event, price = -1)
+        }.isInstanceOf(DataIntegrityViolationException::class.java)
+            .hasMessageContaining("ck_grade_price")
+        // 실패한 엔티티가 세션에 남으면 롤백 직전 flush가 깨진다
+        entityManager.clear()
     }
 
     @Test

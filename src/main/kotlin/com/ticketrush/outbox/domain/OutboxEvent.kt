@@ -89,8 +89,10 @@ class OutboxEvent(
 
     // 테스트에서 claim을 거치지 않고 PROCESSING 상태를 직접 만들기 위한 것. 프로덕션 경로는
     // 항상 리포지토리의 claimBatch(SKIP LOCKED)를 거쳐 PROCESSING이 된다.
-    internal fun markProcessingForTest() {
+    // claimedAt도 같이 채워야 ck_outbox_claim_state를 만족하는 상태가 된다.
+    internal fun markProcessingForTest(claimedAt: LocalDateTime) {
         status = OutboxStatus.PROCESSING
+        this.claimedAt = claimedAt
     }
 
     override fun equals(other: Any?): Boolean {

@@ -61,7 +61,7 @@ class OutboxEventTest {
         val event = 프로세싱_이벤트()
         repeat(4) {
             event.recordFailure(now, Duration.ofSeconds(30), maxAttempts = 5)
-            event.markProcessingForTest()
+            event.markProcessingForTest(now)
         }
 
         // when
@@ -70,6 +70,8 @@ class OutboxEventTest {
         // then
         assertThat(event.attemptCount).isEqualTo(5)
         assertThat(event.status).isEqualTo(OutboxStatus.FAILED)
+        // 제약상 FAILED는 claimed_at이 있어도 없어도 되지만 마지막 점유 시각을 남기는 게 의도라 못 박는다
+        assertThat(event.claimedAt).isEqualTo(now)
     }
 
     @Test
@@ -95,7 +97,7 @@ class OutboxEventTest {
             createdAt = now,
         )
 
-    private fun 프로세싱_이벤트(): OutboxEvent = 새_이벤트().also { it.markProcessingForTest() }
+    private fun 프로세싱_이벤트(): OutboxEvent = 새_이벤트().also { it.markProcessingForTest(now) }
 
     // 프로덕션 claim과 같이 PROCESSING이면서 claimedAt이 채워진 상태
     private fun claim된_이벤트(): OutboxEvent =
