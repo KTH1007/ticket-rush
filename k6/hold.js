@@ -118,7 +118,7 @@ export default function () {
   sleep(THINK);
   const pay = http.post(
     `${BASE}/api/reservations/${hold.reservationId}/payments`,
-    JSON.stringify({ holdToken: hold.holdToken, paymentKey: `pk-${index}`, orderId: hold.orderId, amount: hold.amount }),
+    JSON.stringify({ holdToken: hold.holdToken, paymentKey: `pk-${__ENV.PHONE_BASE || 0}-${index}`, orderId: hold.orderId, amount: hold.amount }),
     { headers: { 'Content-Type': 'application/json' }, timeout: TIMEOUT },
   );
   payMs.add(pay.timings.duration);
