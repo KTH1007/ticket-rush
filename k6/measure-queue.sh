@@ -13,6 +13,7 @@
 #   M2 속도 제한(limit_req)으로 조회나 줄서기가 앱 CPU를 다 쓰는 동안에도 홀드 몫이 남는지. A3 앱 2대에서 A2의 이유 모를 전면 실패를 다시 가림
 #   Q1 대기자 수만큼 줄 세운 뒤 서버가 알려주는 조회 간격으로 초당 조회 요청 수를 계산. M4 그 요청 수로 조회를 보내며 홀드를 같이 보냄
 #   F2 거절이 생기는 전체 흐름을 여러 번. D3 좌석 충돌이 몰릴 때 DB 연결 사용. PG 가짜 PG 응답 지연별 결제
+#   H1 승격 속도별 혼합 부하(홀드, 결제 포기, 좌석 지도 조회, 대기자 순번 조회를 한 앱에 같이). H2 매진까지 이어지는 긴 부하. H3 PG 장애 모드(Toss 스텁의 지연, 5xx, 장애 구간). H4 앱 2대. H5 최신 코드의 D1 재기준선
 #   N3A, N6A 변경 뒤 순번 조회(상한 250)와 줄서기(상한 500) 처리량 재측정
 #   M3 홀드 지연이 받아준 요청 때문인지 거절당하는 요청 폭주 때문인지 가림
 #   M1 순번 조회와 홀드, 결제가 같은 앱에서 동시에 오는 혼합 부하. A2 앱 2대 뒤에서 nginx 합계 상한 값
@@ -60,6 +61,8 @@ if [ "${QUICK:-0}" = "1" ]; then
   Q1_USERS=5000; Q1_SAMPLES=100; M4_FALLBACK_RATE=1500; F2_REPS=1
   D3_RATE=20; D3_SECONDS=5; D3_POOL=5; D3_REPS=1; PG_DELAYS="0 300"; PG_RATE=20; PG_SECONDS=5
   A3_REG_RATES="500"; A3_REPS=1
+  H_USERS=${H_USERS:-600}; H_RATES=${H_RATES:-"30 60"}; H_REPS=${H_REPS:-1}; H_POLL_RATE=${H_POLL_RATE:-300}; H_POLL_TOKENS=500; H_WIN=10
+  H2_USERS=1200; H2_RATE=40; H4_RATES="60"; H3_USERS=600; H3_RATE=30; H3_CASES="e503:0:503:- d4000:4000:200:- o4000:0:200:5:4000:200;12:0:200"
 else
   STEP=30; REG_RATES=500,1000,2000,4000,8000; POLL_RATES=1000,2000,5000,10000,15000
   BURST_RATE=10000; BURST_DURATION=20s
@@ -85,6 +88,11 @@ else
   D3_RATE=200; D3_SECONDS=15; D3_POOL=30; D3_REPS=2; PG_DELAYS="0 300 1000"; PG_RATE=100; PG_SECONDS=30
   M2_HOLD_RATE=100; M2_CASES="poll:10000:0:1500 poll:10000:0:2500 poll:10000:0:3500 register:12000:0:0 register:12000:3000:0 register:12000:5000:0"
   A3_REG_RATES="16000 24000"; A3_REPS=3
+  # 사용자 수는 승격 속도와 무관하게 같아야 좌석 사용률과 충돌 비율이 같다. 순번 조회는 대기자 50만 명이 서버가 알려준 간격으로 조회하는 속도
+  H_USERS=${H_USERS:-9000}; H_RATES=${H_RATES:-"50 100 150 200 300"}; H_REPS=${H_REPS:-1}; H_POLL_RATE=${H_POLL_RATE:-3000}; H_POLL_TOKENS=10000; H_WIN=30
+  H2_USERS=22000; H2_RATE=100; H4_RATES=${H4_RATES:-"200 300 400"}
+  # 케이스는 "이름:지연ms:상태:장애 구간". 장애 구간은 "시작초:지연ms:상태;끝초:0:200" 형식이고 -이면 없음
+  H3_USERS=9000; H3_RATE=100; H3_CASES=${H3_CASES:-"d0:0:200:- d2500:2500:200:- d4000:4000:200:- e503:0:503:- o4000:0:200:25:4000:200;55:0:200 o503:0:200:25:0:503;55:0:200"}
 fi
 GAP=5
 
@@ -96,6 +104,7 @@ cleanup() {
   [ -n "${STATS_PID:-}" ] && kill "$STATS_PID" 2>/dev/null
   [ -n "${APP_STATS_PID:-}" ] && kill "$APP_STATS_PID" 2>/dev/null
   [ -n "${DB_STATS_PID:-}" ] && kill "$DB_STATS_PID" 2>/dev/null
+  [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null
   if [ "${KEEP:-0}" != "1" ]; then
     $COMPOSE --profile two down -v --remove-orphans >/dev/null 2>&1
     docker rmi tr-measure-app >/dev/null 2>&1
@@ -982,6 +991,237 @@ stage_PG() {
   done
   export PG_DELAY=0ms
   up 1h || return 1
+}
+
+# ---- H 혼합 부하: 홀드, 결제 포기, 좌석 지도 조회, 대기자의 순번 조회를 한 앱(들)에 같이 보낸다 ----
+# 승격은 끄고 활성 토큰을 직접 만들어 홀드 도착 속도를 정한다(M1, D2와 같은 방식). 승격 자체가 도는 흐름은 H5(D1)가 본다
+# 포기한 홀드가 실행 안에 만료돼 스위퍼가 일하도록 홀드 TTL을 줄인다(운영 5분). 결제 실패 뒤 TTL은 홀드 TTL보다 짧아야 기동된다
+H_HOLD_TTL=45s
+H_FAILED_TTL=20s
+STUB_PORT=18090
+
+stub_start() {
+  python3 k6/toss-stub.py "$STUB_PORT" > "$OUT/toss-stub.log" 2>&1 &
+  STUB_PID=$!
+  for _ in $(seq 1 20); do
+    curl -s -m 1 "http://127.0.0.1:$STUB_PORT/__stats" > /dev/null && return 0
+    sleep 0.5
+  done
+  log "토스 스텁이 뜨지 않음"; return 1
+}
+stub_mode() { curl -s -m 2 -X POST "http://127.0.0.1:$STUB_PORT/__mode?delay_ms=$1&status=$2" > /dev/null; } # 지연ms 상태
+stub_reset() { curl -s -m 2 -X POST "http://127.0.0.1:$STUB_PORT/__reset" > /dev/null; stub_mode 0 200; }
+
+app_ready() { curl -s -m 2 "$1/actuator/health/readiness" | grep -q '"UP"'; }
+
+mix_up() { # 앱 대수 게이트웨이(fake|toss)
+  local apps=$1 gateway=$2 i
+  export APP_CPUS=${H_APP_CPUS:-2} SEAT_HOLD_TTL=$H_HOLD_TTL SEAT_PAYMENT_FAILED_HOLD_TTL=$H_FAILED_TTL
+  if [ "$gateway" = toss ]; then
+    export PAYMENT_GATEWAY=toss TOSS_BASE_URL="http://host.docker.internal:$STUB_PORT" TOSS_SECRET_KEY=test_sk_measure_stub
+  else
+    export PAYMENT_GATEWAY=fake TOSS_BASE_URL=https://api.tosspayments.com TOSS_SECRET_KEY=
+  fi
+  if [ "$apps" = 2 ]; then
+    two_apps_up || return 1
+  else
+    unset COMPOSE_PROFILES NGINX_UPSTREAM
+    up 1h || return 1
+  fi
+  CURRENT_PROMO=1h
+  nginx_shipped
+  # 앱을 껐다 켜서 JIT가 식은 상태로 시작한다(앞 실행의 영향도 지운다)
+  if [ "$apps" = 2 ]; then $COMPOSE restart app app2 >> "$OUT/compose.log" 2>&1; else $COMPOSE restart app >> "$OUT/compose.log" 2>&1; fi
+  for i in $(seq 1 120); do
+    if app_ready "$ACTUATOR" && { [ "$apps" = 1 ] || app_ready http://127.0.0.1:18082; }; then break; fi
+    sleep 1
+  done
+  restart_nginx
+}
+
+hikari_timeouts_of() { curl -s -m 3 "$1/actuator/prometheus" | awk '/^hikaricp_connections_timeout_total/{print $NF}' | head -1; }
+
+# 혼합 부하 한 번. 장애 계획은 "시작초:지연ms:상태;..." 이고 -이면 없음
+mixed_run() { # 태그 승격속도 사용자수 앱대수 게이트웨이 PG지연ms 장애모드(yes|no) 장애계획 라벨
+  local tag=$1 rate=$2 users=$3 apps=$4 gateway=$5 pgd=$6 failure=$7 plan=$8 label=$9
+  local secs=$(( users / rate )) polls warm holds seats alive poll_pid="" plan_pid="" pending_pid="" h2b="" h2a=""
+  log "$label"
+  mix_up "$apps" "$gateway" || return 1
+  reset_queue; seed; open_event
+  [ "$gateway" = toss ] && stub_reset
+  fill_to $(( H_POLL_TOKENS + D1_WARM_USERS + users + 50 ))
+  polls="$ABS_OUT/$tag-polls.txt"; warm="$ABS_OUT/$tag-warm.txt"; holds="$ABS_OUT/$tag-holds.txt"; seats="$ABS_OUT/$tag-seats.txt"
+  rcli ZRANGE "queue:$EVENT_ID:waiting" 0 $(( H_POLL_TOKENS - 1 )) > "$polls"
+  rcli ZRANGE "queue:$EVENT_ID:waiting" "$H_POLL_TOKENS" $(( H_POLL_TOKENS + D1_WARM_USERS - 1 )) > "$warm"
+  rcli ZRANGE "queue:$EVENT_ID:waiting" $(( H_POLL_TOKENS + D1_WARM_USERS )) $(( H_POLL_TOKENS + D1_WARM_USERS + users + 49 )) > "$holds"
+  cat "$warm" "$holds" | awk -v e="$EVENT_ID" '{print "SET queue:" e ":active:" $1 " 1 EX 3600"}' | rcli > /dev/null
+  psql_ -c "SELECT id FROM seat WHERE event_id=$EVENT_ID ORDER BY id" > "$seats"
+  K6_SCRIPT=k6/hold.js warmup -e MODE=rate -e RATE=30 -e DURATION=5 -e TOKENS_FILE="$warm" -e SEATS_FILE="$seats" -e THINK=1 -e PHONE_BASE=90000000
+  warmup -e SCENARIO=poll -e TOKENS_FILE="$polls" -e POLL_RATES=$([ "${QUICK:-0}" = "1" ] && echo 300 || echo 3000) -e STEP_SECONDS=$([ "${QUICK:-0}" = "1" ] && echo 3 || echo 15)
+  [ "$gateway" = toss ] && stub_reset
+  if [ "$H_POLL_RATE" -gt 0 ]; then
+    k6 run --quiet --summary-export="$OUT/$tag.load.summary.json" -e BASE=$BASE -e EVENT_ID="$EVENT_ID" -e SCENARIO=poll -e TOKENS_FILE="$polls" \
+      -e POLL_RATES=$H_POLL_RATE -e STEP_SECONDS=$(( secs + 25 )) k6/queue.js > "$OUT/$tag.load.k6.log" 2>&1 &
+    poll_pid=$!
+  fi
+  ( sleep $(( 8 + secs / 2 )); { echo "# $(date +%H:%M:%S) 호스트 CPU"; top -l 1 -n 0 | grep "CPU usage"; ps -Ao pcpu,comm -r | head -7; } > "$OUT/$tag.host.txt" 2>&1 ) &
+  if [ "$plan" != "-" ]; then
+    ( while [ ! -f "$OUT/$tag.t0" ]; do sleep 0.2; done
+      base=$(( $(cat "$OUT/$tag.t0") + 4 ))
+      IFS=';' read -ra steps <<< "$plan"
+      for st in "${steps[@]}"; do
+        IFS=: read -r at d code <<< "$st"
+        while [ "$(date +%s)" -lt $(( base + at )) ]; do sleep 0.3; done
+        stub_mode "$d" "$code"
+        echo "$(date +%s) 장애 계획: ${at}초에 지연 ${d}ms 상태 ${code}" >> "$OUT/$tag.plan.log"
+      done ) &
+    plan_pid=$!
+  fi
+  [ "$gateway" = toss ] && stub_mode "${MIX_STUB_DELAY:-0}" "${MIX_STUB_CODE:-200}"
+  sleep 8
+  [ "$apps" = 2 ] && h2b=$(hikari_timeouts_of http://127.0.0.1:18082)
+  if [ "$gateway" = toss ]; then
+    ( while true; do printf '%s\t%s\n' "$(date +%s)" "$(psql_ -c "SELECT count(*) FROM payment p JOIN reservation r ON r.id = p.reservation_id WHERE r.event_id=$EVENT_ID AND p.status='PENDING'" 2>/dev/null)" >> "$OUT/$tag.pending.tsv"; sleep 1; done ) &
+    pending_pid=$!
+  fi
+  DB_STATS=1 K6_SCRIPT=k6/mixed.js k6run "$tag" -e RATE=$rate -e DURATION=$secs -e TOKENS_FILE="$holds" -e SEATS_FILE="$seats" \
+    -e THINK=$D1_THINK -e PAY_PREFIX=m -e PHONE_BASE=0 -e WIN_S=$H_WIN -e ABANDON=${H_ABANDON:-0.05} -e STATUS=${H_STATUS:-1} -e LAYOUT=${H_LAYOUT:-1} -e PAY_WAIT=$([ "$gateway" = toss ] && echo 5 || echo 2)
+  [ -n "$poll_pid" ] && wait "$poll_pid"
+  [ -n "$plan_pid" ] && wait "$plan_pid"
+  [ "$apps" = 2 ] && h2a=$(hikari_timeouts_of http://127.0.0.1:18082)
+  [ -f "$OUT/$tag.crashed" ] && alive=no || alive=yes
+  mixed_extra "$tag" "$gateway" "$apps" "${h2b:-0}" "${h2a:-0}"
+  [ -n "$pending_pid" ] && { kill "$pending_pid" 2>/dev/null; wait "$pending_pid" 2>/dev/null; }
+  H_WIN=$H_WIN python3 k6/summarize-mixed.py row "$OUT" "$tag" "$label" "$rate" "$users" "$apps" "$pgd" "$failure" "$alive" "$H_POLL_RATE" | tee -a "$OUT/results.md"
+  echo "- 부하가 한창일 때 호스트: $(grep "CPU usage" "$OUT/$tag.host.txt" 2>/dev/null | sed -E "s/CPU usage: //"), 상위 프로세스 $(grep -vE "^#|CPU usage|%CPU" "$OUT/$tag.host.txt" 2>/dev/null | head -4 | awk '{n = split($2, a, "/"); printf "%s(%s%%) ", a[n], $1}')" | tee -a "$OUT/results.md"
+  echo | tee -a "$OUT/results.md" > /dev/null
+}
+
+# 실행이 끝난 뒤의 부가 지표를 $tag.extra.json에 남긴다: 앱 2의 Hikari 타임아웃, Toss일 때 서킷과 스텁 호출 수, 복구 시간, 마지막 DB 상태
+mixed_extra() { # 태그 게이트웨이 앱대수 앱2 before 앱2 after
+  local tag=$1 gateway=$2 apps=$3 h2b=$4 h2a=$5 pend recovery="" t_end i cb stats final_db
+  final_db=""
+  cb=""
+  if [ "$gateway" = toss ]; then
+    stub_mode 0 200
+    t_end=$(date +%s)
+    pend=$(psql_ -c "SELECT count(*) FROM payment p JOIN reservation r ON r.id = p.reservation_id WHERE r.event_id=$EVENT_ID AND p.status='PENDING'")
+    recovery="종료 시 PENDING ${pend}건"
+    for i in $(seq 1 30); do
+      [ "$pend" = 0 ] && break
+      sleep 5
+      pend=$(psql_ -c "SELECT count(*) FROM payment p JOIN reservation r ON r.id = p.reservation_id WHERE r.event_id=$EVENT_ID AND p.status='PENDING'")
+    done
+    if [ "$pend" = 0 ]; then recovery="$recovery, $(( $(date +%s) - t_end ))초 뒤 0"; else recovery="$recovery, 150초 뒤에도 ${pend}건"; fi
+    cb=$(curl -s -m 3 "$ACTUATOR/actuator/prometheus" | grep -E '^resilience4j_circuitbreaker_(not_permitted_calls_total|calls_seconds_count|state)' | grep paymentGateway | sed -E 's/\{[^}]*kind="([a-z_]+)"[^}]*\}/ \1/; s/\{[^}]*state="([a-z_]+)"[^}]*\}/ state_\1/' | awk '{printf "%s=%s ", $1 "_" $2, $NF}')
+    echo "$cb" > "$OUT/$tag.cb.txt"
+    curl -s -m 3 "http://127.0.0.1:$STUB_PORT/__stats" > "$OUT/$tag.stub.json"
+  fi
+  final_db="결제 $(psql_ -c "SELECT coalesce(string_agg(status || ' ' || n, ', '), '-') FROM (SELECT p.status, count(*) n FROM payment p JOIN reservation r ON r.id = p.reservation_id WHERE r.event_id=$EVENT_ID GROUP BY p.status ORDER BY p.status) t"); 예약 $(psql_ -c "SELECT coalesce(string_agg(status || ' ' || n, ', '), '-') FROM (SELECT status, count(*) n FROM reservation WHERE event_id=$EVENT_ID GROUP BY status ORDER BY status) t")"
+  python3 - "$OUT" "$tag" "$h2b" "$h2a" "$recovery" "$final_db" "$cb" <<'PY'
+import json, os, sys
+out, tag, h2b, h2a, recovery, final_db, cb = sys.argv[1:8]
+extra = {"hikari_timeout_app2": max(int(float(h2a or 0)) - int(float(h2b or 0)), 0), "final_db": final_db}
+if recovery:
+    extra["recovery"] = recovery
+pending = f"{out}/{tag}.pending.tsv"
+if os.path.exists(pending):
+    rows = []
+    for line in open(pending):
+        parts = line.strip().split("\t")
+        if len(parts) == 2 and parts[1].isdigit():
+            rows.append((int(parts[0]), int(parts[1])))
+    if rows:
+        peak_t, peak = max(rows, key=lambda r: r[1])
+        plan_log = f"{out}/{tag}.plan.log"
+        if os.path.exists(plan_log):
+            outage_end = int(open(plan_log).read().split("\n")[-2].split()[0])
+        else:
+            outage_end = int(json.load(open(f"{out}/{tag}.after.json"))["t"])
+        zero = next((t for t, n in rows if t >= max(outage_end, peak_t) and n == 0), None)
+        extra["pending_peak"] = peak
+        if peak == 0:
+            extra["recovery"] = "PENDING 없음"
+        elif zero is not None:
+            extra["recovery"] = f"PENDING 최대 {peak}건, 장애 종료 {max(zero - outage_end, 0)}초 뒤 0"
+        else:
+            extra["recovery"] = f"PENDING 최대 {peak}건, 끝까지 {rows[-1][1]}건 남음"
+stub = f"{out}/{tag}.stub.json"
+if os.path.exists(stub):
+    s = json.load(open(stub))
+    confirm = s.get("per_second", {}).get("confirm", {})
+    extra["stub_confirm_total"] = s.get("calls", {}).get("confirm", 0)
+    extra["stub_confirm_peak"] = max(confirm.values(), default=0)
+    extra["stub_inquire_total"] = s.get("calls", {}).get("inquire", 0)
+    extra["stub_approved"] = s.get("approved", 0)
+if cb.strip():
+    extra["cb"] = cb.strip()
+    for part in cb.split():
+        if part.startswith("resilience4j_circuitbreaker_not_permitted_calls_total"):
+            extra["cb_not_permitted"] = int(float(part.split("=")[-1]))
+json.dump(extra, open(f"{out}/{tag}.extra.json", "w"), ensure_ascii=False)
+PY
+}
+
+# H1 승격 속도별 혼합 부하(앱 1대, 가짜 PG). 사용자 수는 같고 속도만 바꾼다
+stage_H1() {
+  local rep rate
+  echo -e "\n### H1 승격 속도별 혼합 부하 (사용자 ${H_USERS}명이 속도만 바꿔 도착, 홀드 3초 뒤 95% 결제와 5% 포기, 활성 사용자의 좌석 상태 조회 15초 체류 2초 간격, 첫 방문 좌석 배치, 대기자 순번 조회 ${H_POLL_RATE}/s, 앱 1대 2코어, 가짜 PG, 홀드 TTL ${H_HOLD_TTL})" >> "$OUT/results.md"
+  for rep in $(seq 1 "$H_REPS"); do
+    for rate in $H_RATES; do
+      mixed_run "H1_${rate}_$rep" "$rate" "$H_USERS" 1 fake 0 no - "${H_TAG:+$H_TAG }조회 ${H_POLL_RATE}/s, 승격 ${rate}/s (${rep}번째)" || return 1
+    done
+  done
+  python3 k6/summarize-mixed.py table "$OUT" H1_ | tee -a "$OUT/results.md"
+  echo >> "$OUT/results.md"
+}
+
+# H2 매진까지 이어지는 긴 부하(좌석이 차 갈수록 충돌이 늘어나는 구간 포함)
+stage_H2() {
+  echo -e "\n### H2 매진까지 이어지는 긴 부하 (승격 ${H2_RATE}/s, 사용자 ${H2_USERS}명, 좌석 30,000석, 앱 1대, 가짜 PG)" >> "$OUT/results.md"
+  mixed_run "H2_${H2_RATE}" "$H2_RATE" "$H2_USERS" 1 fake 0 no - "매진까지 승격 ${H2_RATE}/s" || return 1
+  python3 k6/summarize-mixed.py table "$OUT" H2_ | tee -a "$OUT/results.md"
+  python3 k6/summarize-mixed.py windows "$OUT" "H2_${H2_RATE}" | tee -a "$OUT/results.md"
+  echo "- 좌석 상태: $(psql_ -c "SELECT string_agg(status || ' ' || n, ', ') FROM (SELECT status, count(*) n FROM seat WHERE event_id=$EVENT_ID GROUP BY status) t")" | tee -a "$OUT/results.md"
+  echo >> "$OUT/results.md"
+}
+
+# H3 PG 장애 모드. Toss 호환 스텁(호스트)으로 지연, 5xx, 장애 구간을 만든다. 결제는 서킷 차단기와 3초 타임아웃을 거친다
+stage_H3() {
+  local combo name delay code plan
+  H_HOLD_TTL=5m; H_FAILED_TTL=1m
+  stub_start || return 1
+  echo -e "\n### H3 PG 장애 모드 (승격 ${H3_RATE}/s, 사용자 ${H3_USERS}명, Toss 스텁, 타임아웃 3초, 서킷 20건 창 50%, 앱 1대 2코어, 홀드 TTL ${H_HOLD_TTL})" >> "$OUT/results.md"
+  for combo in $H3_CASES; do
+    IFS=: read -r name delay code plan <<< "$combo"
+    MIX_STUB_DELAY=$delay MIX_STUB_CODE=$code mixed_run "H3_$name" "$H3_RATE" "$H3_USERS" 1 toss "$delay" yes "$plan" "PG ${name} (지연 ${delay}ms, 상태 ${code}, 장애 계획 ${plan})" || return 1
+  done
+  MIX_STUB_DELAY=0; MIX_STUB_CODE=200
+  python3 k6/summarize-mixed.py failure "$OUT" H3_ | tee -a "$OUT/results.md"
+  python3 k6/summarize-mixed.py table "$OUT" H3_ | tee -a "$OUT/results.md"
+  echo >> "$OUT/results.md"
+  H_HOLD_TTL=45s; H_FAILED_TTL=20s
+}
+
+# H4 앱 2대(각 2코어). 같은 부하기 한도에서 1대와 비교한다
+stage_H4() {
+  local rate users
+  echo -e "\n### H4 앱 2대 승격 속도별 혼합 부하 (앱 각 2코어, 가짜 PG, 나머지는 H1과 같음)" >> "$OUT/results.md"
+  for rate in $H4_RATES; do
+    users=$(( rate * 30 > H_USERS ? rate * 30 : H_USERS ))
+    mixed_run "H4_${rate}" "$rate" "$users" 2 fake 0 no - "앱 2대 승격 ${rate}/s" || return 1
+  done
+  python3 k6/summarize-mixed.py table "$OUT" H4_ | tee -a "$OUT/results.md"
+  echo >> "$OUT/results.md"
+}
+
+# H5 최신 코드에서 대기열을 거치는 D1(승격 50, 100, 200/s)을 다시 잰다
+stage_H5() {
+  D1_CASES="50:wide 100:wide 200:wide"
+  export PAYMENT_GATEWAY=fake SEAT_HOLD_TTL=5m SEAT_PAYMENT_FAILED_HOLD_TTL=1m
+  unset COMPOSE_PROFILES NGINX_UPSTREAM
+  $COMPOSE --profile two stop app2 >> "$OUT/compose.log" 2>&1
+  stage_D1
 }
 
 stage_N3A() { stage_N3R; }
