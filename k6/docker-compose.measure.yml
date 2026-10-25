@@ -63,8 +63,13 @@ services:
     cpus: ${APP_CPUS:-2}
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      # 측정용 구성이라 가짜 PG를 명시한다. 프로필에는 기본값을 두지 않는다
-      TICKET_RUSH_PAYMENT_GATEWAY: fake
+      # 측정용 구성이라 PG를 명시한다(기본 가짜). 프로필에는 기본값을 두지 않는다
+      TICKET_RUSH_PAYMENT_GATEWAY: ${PAYMENT_GATEWAY:-fake}
+      # toss일 때만 쓰인다. PG 장애 모드는 호스트의 k6/toss-stub.py로 흉내 낸다
+      TICKET_RUSH_TOSS_BASE_URL: ${TOSS_BASE_URL:-https://api.tosspayments.com}
+      TOSS_SECRET_KEY: ${TOSS_SECRET_KEY:-}
+      TICKET_RUSH_SEAT_HOLD_TTL: ${SEAT_HOLD_TTL:-5m}
+      TICKET_RUSH_SEAT_PAYMENT_FAILED_HOLD_TTL: ${SEAT_PAYMENT_FAILED_HOLD_TTL:-1m}
       INSTANCE_ID: measure-1
       DB_PASSWORD: measurepw
       PHONE_HMAC_KEY: ${PHONE_HMAC_KEY}
@@ -100,7 +105,12 @@ services:
     cpus: ${APP_CPUS:-2}
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      TICKET_RUSH_PAYMENT_GATEWAY: fake
+      TICKET_RUSH_PAYMENT_GATEWAY: ${PAYMENT_GATEWAY:-fake}
+      # toss일 때만 쓰인다. PG 장애 모드는 호스트의 k6/toss-stub.py로 흉내 낸다
+      TICKET_RUSH_TOSS_BASE_URL: ${TOSS_BASE_URL:-https://api.tosspayments.com}
+      TOSS_SECRET_KEY: ${TOSS_SECRET_KEY:-}
+      TICKET_RUSH_SEAT_HOLD_TTL: ${SEAT_HOLD_TTL:-5m}
+      TICKET_RUSH_SEAT_PAYMENT_FAILED_HOLD_TTL: ${SEAT_PAYMENT_FAILED_HOLD_TTL:-1m}
       INSTANCE_ID: measure-2
       DB_PASSWORD: measurepw
       PHONE_HMAC_KEY: ${PHONE_HMAC_KEY}
