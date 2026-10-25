@@ -19,6 +19,8 @@ PAY_MARGIN_MS = 500
 STATUS_P95_MS = 100
 POLL_P99_MS = 100
 APP_CPU_MEAN = 170
+STATUS_PER_USER = 7.5  # 체류 15초 / 조회 간격 2초
+DROP_RATIO = 0.01
 
 
 def metric(s, name, key, default=float("nan")):
@@ -121,21 +123,43 @@ def build(out, tag, label, rate, users, apps, pg_delay, failure, alive, poll_rat
         "poll_busy_share": busy / reqs if reqs else float("nan"), "poll_reqs": reqs,
         "poll_failed": int(round(metric(poll, "http_req_failed", "value", 0) * reqs)),
         "windows": {}, "win_s": int(os.environ.get("H_WIN", 30)),
+        "status_on": os.environ.get("H_STATUS", "1") != "0", "layout_on": os.environ.get("H_LAYOUT", "1") != "0",
     }
     for w in range(0, 40):
         h, p = metric(s, f"hold_ms{{win:{w}}}", "p(95)"), metric(s, f"pay_ms{{win:{w}}}", "p(95)")
-        # 트렌드 서브메트릭에는 건수가 없다. 비어 있는 구간은 최댓값이 0이다
-        if metric(s, f"hold_ms{{win:{w}}}", "max", 0) > 0:
-            r["windows"][str(w)] = {"hold_p95": h, "hold_max": metric(s, f"hold_ms{{win:{w}}}", "max"), "pay_p95": p,
-                                    "hold_avg": metric(s, f"hold_ms{{win:{w}}}", "avg")}
+        # 트렌드 서브메트릭에는 건수가 없다. 비어 있는 구간은 최댓값이 0이다.
+        # 구간 경계 직전에 시작한 홀드의 결제가 다음 구간에 끝날 수 있어 결제 값만 있는 구간도 남긴다
+        hold_max = metric(s, f"hold_ms{{win:{w}}}", "max", 0)
+        pay_max = metric(s, f"pay_ms{{win:{w}}}", "max", 0)
+        if hold_max > 0 or pay_max > 0:
+            nan = float("nan")
+            r["windows"][str(w)] = {
+                "hold_p95": h if hold_max > 0 else nan, "hold_max": hold_max if hold_max > 0 else nan,
+                "hold_avg": metric(s, f"hold_ms{{win:{w}}}", "avg") if hold_max > 0 else nan,
+                "pay_p95": p if pay_max > 0 else nan,
+            }
     r.update({k: v for k, v in extra.items()})
     r["verdict"] = verdict(r)
     return r
 
 
+def missing(r):
+    """켠 시나리오인데 측정값이 없는 항목. 값이 없으면 NaN 비교가 거짓이라 조용히 통과하므로 따로 걸러낸다."""
+    need = [("홀드", r["hold_p95"]), ("홀드", r["hold_p99"])]
+    if r["hold_201"] > r["abandoned"]:
+        need.append(("결제", r["pay_p95"]))  # 전원 포기 실행은 결제가 없는 게 정상이다
+    if r["status_on"]:
+        need.append(("좌석 상태", r["status_p95"]))
+    if r["layout_on"]:
+        need.append(("좌석 배치", r["layout_p95"]))
+    if r["poll_rate"] > 0:
+        need.append(("순번 조회", r["poll_p99"]))
+    return sorted({name for name, value in need if math.isnan(value)})
+
+
 def verdict(r):
     """통과하지 못한 항목 이름 목록. 장애 모드는 결제 항목을 판정하지 않는다."""
-    fails = []
+    fails = [f"{name} 측정 없음" for name in missing(r)]
     if r["hold_p95"] > HOLD_P95_MS:
         fails.append("홀드 p95")
     if r["hold_p99"] > HOLD_P99_MS:
@@ -149,7 +173,9 @@ def verdict(r):
         fails.append(f"409 외 실패 {other}")
     # 부하기가 정한 속도를 못 맞춘 반복. 1%를 넘으면 이 실행의 속도를 이름 그대로 믿을 수 없다
     dropped = r["dropped_hold"] + r["dropped_status"] + r["dropped_layout"]
-    if r["dropped_hold"] > 0.01 * r["users"] or r["dropped_status"] > 0.01 * r["users"] * 7.5:
+    if (r["dropped_hold"] > DROP_RATIO * r["users"]
+            or r["dropped_status"] > DROP_RATIO * r["users"] * STATUS_PER_USER
+            or r["dropped_layout"] > DROP_RATIO * r["users"]):
         fails.append(f"부하기 드롭 {dropped}")
     if r["hikari_timeouts"] or (r["hikari_pending_mean"] >= 1):
         fails.append("Hikari")

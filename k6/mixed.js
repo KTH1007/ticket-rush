@@ -47,6 +47,14 @@ const TIMEOUT = '10s';
 const seats = new SharedArray('seats', () => open(__ENV.SEATS_FILE).split('\n').filter(Boolean).map(Number));
 const tokens = new SharedArray('tokens', () => open(__ENV.TOKENS_FILE).split('\n').filter(Boolean));
 
+// 모자란 채로 시작하면 부하가 목표보다 낮아도 드러나지 않거나 좌석 고르기가 끝나지 않는다
+if (seats.length === 0) {
+  throw new Error('SEATS_FILE에 좌석이 없습니다');
+}
+if (tokens.length < RATE * DURATION) {
+  throw new Error(`TOKENS_FILE이 모자랍니다: 필요 ${RATE * DURATION}개, 있음 ${tokens.length}개`);
+}
+
 const holdCreated = new Counter('hold_201');
 const holdConflict = new Counter('hold_409');
 const holdOther = new Counter('hold_other');
@@ -103,7 +111,7 @@ export const options = {
 };
 
 function pickSeats() {
-  const count = Math.random() < 0.5 ? 1 : 2;
+  const count = Math.min(Math.random() < 0.5 ? 1 : 2, seats.length);
   const picked = [];
   while (picked.length < count) {
     const id = seats[Math.floor(Math.random() * seats.length)];

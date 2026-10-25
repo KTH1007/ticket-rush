@@ -1026,6 +1026,8 @@ mix_up() { # 앱 대수 게이트웨이(fake|toss)
     two_apps_up || return 1
   else
     unset COMPOSE_PROFILES NGINX_UPSTREAM
+    # 앞 단계의 app2가 남으면 같은 DB와 Redis에 붙은 스케줄러와 CPU가 측정에 섞인다
+    $COMPOSE --profile two stop app2 >> "$OUT/compose.log" 2>&1
     up 1h || return 1
   fi
   CURRENT_PROMO=1h
@@ -1092,7 +1094,7 @@ mixed_run() { # 태그 승격속도 사용자수 앱대수 게이트웨이 PG지
   [ -f "$OUT/$tag.crashed" ] && alive=no || alive=yes
   mixed_extra "$tag" "$gateway" "$apps" "${h2b:-0}" "${h2a:-0}"
   [ -n "$pending_pid" ] && { kill "$pending_pid" 2>/dev/null; wait "$pending_pid" 2>/dev/null; }
-  H_WIN=$H_WIN python3 k6/summarize-mixed.py row "$OUT" "$tag" "$label" "$rate" "$users" "$apps" "$pgd" "$failure" "$alive" "$H_POLL_RATE" | tee -a "$OUT/results.md"
+  H_WIN=$H_WIN H_STATUS=${H_STATUS:-1} H_LAYOUT=${H_LAYOUT:-1} python3 k6/summarize-mixed.py row "$OUT" "$tag" "$label" "$rate" "$users" "$apps" "$pgd" "$failure" "$alive" "$H_POLL_RATE" | tee -a "$OUT/results.md"
   echo "- 부하가 한창일 때 호스트: $(grep "CPU usage" "$OUT/$tag.host.txt" 2>/dev/null | sed -E "s/CPU usage: //"), 상위 프로세스 $(grep -vE "^#|CPU usage|%CPU" "$OUT/$tag.host.txt" 2>/dev/null | head -4 | awk '{n = split($2, a, "/"); printf "%s(%s%%) ", a[n], $1}')" | tee -a "$OUT/results.md"
   echo | tee -a "$OUT/results.md" > /dev/null
 }
@@ -1188,8 +1190,8 @@ stage_H2() {
 
 # H3 PG 장애 모드. Toss 호환 스텁(호스트)으로 지연, 5xx, 장애 구간을 만든다. 결제는 서킷 차단기와 3초 타임아웃을 거친다
 stage_H3() {
-  local combo name delay code plan
-  H_HOLD_TTL=5m; H_FAILED_TTL=1m
+  # 장애 중에 홀드가 먼저 만료되지 않게 운영 기본값을 쓴다. local이라 중간에 실패해 반환해도 원래 값으로 돌아간다
+  local combo name delay code plan H_HOLD_TTL=5m H_FAILED_TTL=1m
   stub_start || return 1
   echo -e "\n### H3 PG 장애 모드 (승격 ${H3_RATE}/s, 사용자 ${H3_USERS}명, Toss 스텁, 타임아웃 3초, 서킷 20건 창 50%, 앱 1대 2코어, 홀드 TTL ${H_HOLD_TTL})" >> "$OUT/results.md"
   for combo in $H3_CASES; do
@@ -1200,7 +1202,6 @@ stage_H3() {
   python3 k6/summarize-mixed.py failure "$OUT" H3_ | tee -a "$OUT/results.md"
   python3 k6/summarize-mixed.py table "$OUT" H3_ | tee -a "$OUT/results.md"
   echo >> "$OUT/results.md"
-  H_HOLD_TTL=45s; H_FAILED_TTL=20s
 }
 
 # H4 앱 2대(각 2코어). 같은 부하기 한도에서 1대와 비교한다
