@@ -160,6 +160,22 @@ class SeatMarkLifecycleTest : IntegrationTest() {
         assertThat(sync.transactionActiveAtCall).isEmpty()
     }
 
+    @Test
+    fun `결제 실패 반영이 롤백되면 마크 동기화를 호출하지 않는다`() {
+        // given: 이미 FAILED인 결제를 다시 실패 처리하면 홀드를 줄인 뒤 예외로 롤백된다
+        val sync = RecordingSeatMarkSync()
+        val service = 동기화를_기록하는_서비스(sync)
+        val held = 마크가_있는_홀드()
+        val payment = 클레임(held.reservation).also { it.markFailed() }
+
+        // when
+        assertThatThrownBy { service.applyFailure(payment, held.reservation, LocalDateTime.now(clock), reason = "한도 초과") }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        // then
+        assertThat(sync.transactionActiveAtCall).isEmpty()
+    }
+
     private fun 동기화를_기록하는_서비스(sync: SeatMarkSyncPort) =
         PaymentClaimService(
             paymentRepository,
