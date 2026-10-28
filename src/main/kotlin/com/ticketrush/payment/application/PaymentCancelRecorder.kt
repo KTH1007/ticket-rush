@@ -11,12 +11,14 @@ import com.ticketrush.reservation.domain.ReservationLookupFailedException
 import com.ticketrush.reservation.domain.ReservationLookupRateLimiterPort
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
+import com.ticketrush.reservation.domain.SeatMarkSyncPort
+import com.ticketrush.reservation.domain.SeatsReturnedEvent
 import com.ticketrush.shared.ClientIp
 import com.ticketrush.shared.PhoneHasher
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
 import java.util.UUID
 
 // 환불을 요청할 때 필요한 값만 담는다. 환불 키는 예약 키에서 유도한다
@@ -36,16 +38,29 @@ class PaymentCancelRecorder(
     private val phoneHasher: PhoneHasher,
     private val historyRecorder: PaymentHistoryRecorder,
     private val eventPublisher: ApplicationEventPublisher,
+    private val transactionTemplate: TransactionTemplate,
+    private val seatMarkSync: SeatMarkSyncPort,
 ) {
-    @Transactional
+    // 트랜잭션을 여기서 끝낸 뒤에 Redis 마크를 맞춘다. 트랜잭션 안에서 부르면 Redis가 끝날 때까지 DB 연결을 쥔다
     fun confirmCancel(
         reservationNo: String,
         phone: String,
         clientIp: ClientIp,
     ): CanceledPayment {
+        val (canceled, returned) = checkNotNull(transactionTemplate.execute { confirmCancelInTransaction(reservationNo, phone, clientIp) })
+        seatMarkSync.onReturned(returned)
+        return canceled
+    }
+
+    private fun confirmCancelInTransaction(
+        reservationNo: String,
+        phone: String,
+        clientIp: ClientIp,
+    ): Pair<CanceledPayment, SeatsReturnedEvent> {
         val reservation = verifyOwnership(reservationNo, phone, clientIp)
         requireCancelable(reservation)
-        return CanceledPayment(markCanceled(reservation), reservation.idempotencyKey)
+        val (payment, returned) = markCanceled(reservation)
+        return CanceledPayment(payment, reservation.idempotencyKey) to returned
     }
 
     // #83과 같은 패턴: 확인은 DB 조회 전에 원자적으로 먼저(차단 여부), 실패해야만 기록,
@@ -79,11 +94,11 @@ class PaymentCancelRecorder(
     }
 
     // 정확히 동시에 들어온 취소 요청 중 진 쪽은 여기서 걸림(결제 확정과 같은 패턴)
-    private fun markCanceled(reservation: Reservation): Payment =
+    private fun markCanceled(reservation: Reservation): Pair<Payment, SeatsReturnedEvent> =
         try {
             reservation.cancel()
             reservationRepository.save(reservation)
-            seatUpdater.returnToAvailable(reservation)
+            val returned = seatUpdater.returnToAvailable(reservation)
 
             val payment =
                 requireNotNull(paymentRepository.findByReservationId(reservation.id)) {
@@ -94,7 +109,7 @@ class PaymentCancelRecorder(
             val canceled = paymentRepository.save(payment)
             historyRecorder.record(canceled.id, fromStatus, PaymentStatus.CANCELED, reason = "사용자 취소 요청")
             eventPublisher.publishEvent(ReservationCanceledEvent(reservation.id))
-            canceled
+            canceled to returned
         } catch (e: OptimisticLockingFailureException) {
             throw PaymentConflictException(cause = e)
         }

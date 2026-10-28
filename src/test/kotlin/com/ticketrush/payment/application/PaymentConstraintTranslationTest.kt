@@ -10,6 +10,7 @@ import com.ticketrush.payment.domain.PaymentStatus
 import com.ticketrush.reservation.SeatPolicyProperties
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
+import com.ticketrush.reservation.domain.SeatMarkSyncPort
 import com.ticketrush.support.IntegrationTest
 import com.ticketrush.support.공연_하나_저장
 import com.ticketrush.support.예약_하나_저장
@@ -19,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDateTime
 import java.util.UUID
 import kotlin.test.Test
@@ -57,6 +59,12 @@ class PaymentConstraintTranslationTest : IntegrationTest() {
 
     @Autowired
     lateinit var policy: PaymentPolicyProperties
+
+    @Autowired
+    lateinit var transactionTemplate: TransactionTemplate
+
+    @Autowired
+    lateinit var seatMarkSync: SeatMarkSyncPort
 
     @Autowired
     lateinit var jdbcTemplate: JdbcTemplate
@@ -132,6 +140,8 @@ class PaymentConstraintTranslationTest : IntegrationTest() {
             historyRecorder,
             eventPublisher,
             policy,
+            transactionTemplate,
+            seatMarkSync,
         )
     }
 

@@ -10,18 +10,22 @@ import com.ticketrush.payment.domain.ReservationPaidEvent
 import com.ticketrush.reservation.SeatPolicyProperties
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
+import com.ticketrush.reservation.domain.SeatHoldShortenedEvent
+import com.ticketrush.reservation.domain.SeatMarkSyncPort
+import com.ticketrush.reservation.domain.SeatsSoldEvent
 import com.ticketrush.shared.isUniqueViolation
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDateTime
 
 private val logger = KotlinLogging.logger {}
 
 // claim(트랜잭션 1)과 결과 반영(트랜잭션 2)을 PaymentCommandService와 분리된 빈으로 둔다.
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "TooManyFunctions")
 @Component
 class PaymentClaimService(
     private val paymentRepository: PaymentRepositoryPort,
@@ -32,6 +36,8 @@ class PaymentClaimService(
     private val historyRecorder: PaymentHistoryRecorder,
     private val eventPublisher: ApplicationEventPublisher,
     private val policy: PaymentPolicyProperties,
+    private val transactionTemplate: TransactionTemplate,
+    private val seatMarkSync: SeatMarkSyncPort,
 ) {
     @Transactional
     fun claimOrTakeOver(
@@ -96,46 +102,68 @@ class PaymentClaimService(
             throw e
         }
 
-    // 번호부터 확정한 뒤 상태 전이와 번호 배정을 한 번에 한다. 순서를 바꾸면 PAID인데
-    // 번호는 없는 중간 상태로 flush될 수 있어 제약 위반이 난다.
-    @Transactional
+    // 트랜잭션을 여기서 끝낸 뒤에 Redis 마크를 맞춘다. 트랜잭션 안에서 부르면 Redis가 끝날 때까지 DB 연결을 쥔다
     fun applySuccess(
         payment: Payment,
         reservation: Reservation,
         pgTransactionId: String,
         paidAt: LocalDateTime,
     ): PaymentConfirmationResult {
-        val reservationNo = findUnusedReservationNo()
-        reservation.confirmPayment()
-        reservation.assignReservationNo(reservationNo)
-        reservationRepository.save(reservation)
-        seatUpdater.markSold(reservation)
-
-        val fromStatus = payment.status
-        payment.markSuccess(pgTransactionId, paidAt)
-        val saved = paymentRepository.save(payment)
-        historyRecorder.record(saved.id, fromStatus, PaymentStatus.SUCCESS)
-        eventPublisher.publishEvent(ReservationPaidEvent(reservation.id))
-        return PaymentConfirmationResult(saved, reservationNo)
+        val (result, sold) =
+            checkNotNull(transactionTemplate.execute { applySuccessInTransaction(payment, reservation, pgTransactionId, paidAt) })
+        seatMarkSync.onSold(sold)
+        return result
     }
 
-    @Transactional
     fun applyFailure(
         payment: Payment,
         reservation: Reservation,
         now: LocalDateTime,
         reason: String,
     ) {
+        val shortened = checkNotNull(transactionTemplate.execute { applyFailureInTransaction(payment, reservation, now, reason) })
+        seatMarkSync.onHoldShortened(shortened)
+    }
+
+    // 번호부터 확정한 뒤 상태 전이와 번호 배정을 한 번에 한다. 순서를 바꾸면 PAID인데
+    // 번호는 없는 중간 상태로 flush될 수 있어 제약 위반이 난다.
+    private fun applySuccessInTransaction(
+        payment: Payment,
+        reservation: Reservation,
+        pgTransactionId: String,
+        paidAt: LocalDateTime,
+    ): Pair<PaymentConfirmationResult, SeatsSoldEvent> {
+        val reservationNo = findUnusedReservationNo()
+        reservation.confirmPayment()
+        reservation.assignReservationNo(reservationNo)
+        reservationRepository.save(reservation)
+        val sold = seatUpdater.markSold(reservation)
+
+        val fromStatus = payment.status
+        payment.markSuccess(pgTransactionId, paidAt)
+        val saved = paymentRepository.save(payment)
+        historyRecorder.record(saved.id, fromStatus, PaymentStatus.SUCCESS)
+        eventPublisher.publishEvent(ReservationPaidEvent(reservation.id))
+        return PaymentConfirmationResult(saved, reservationNo) to sold
+    }
+
+    private fun applyFailureInTransaction(
+        payment: Payment,
+        reservation: Reservation,
+        now: LocalDateTime,
+        reason: String,
+    ): SeatHoldShortenedEvent {
         val shortened = now.plus(seatPolicy.paymentFailedHoldTtl)
         reservation.shortenHoldOnPaymentFailure(shortened)
         reservationRepository.save(reservation)
-        seatUpdater.shortenHold(reservation, shortened)
+        val shortenedHold = seatUpdater.shortenHold(reservation, shortened)
 
         val fromStatus = payment.status
         payment.markFailed()
         payment.recordChargeFailure()
         val saved = paymentRepository.save(payment)
         historyRecorder.record(saved.id, fromStatus, PaymentStatus.FAILED, reason = reason)
+        return shortenedHold
     }
 
     // 예약이 이미 쓸 수 없는 상태라 applyFailure처럼 홀드를 단축하지 않고 결제 상태만 닫는다
