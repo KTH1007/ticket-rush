@@ -4,7 +4,7 @@ Redis의 동시성과 장애 상황을 일회용 컨테이너에서 재현하는
 
 ## 안전 장치
 
-- 모든 컨테이너는 `tr-lab-` 접두어와 전용 네트워크 `tr-lab-net`만 쓴다. `common.sh`가 그 밖의 컨테이너 이름을 거부하므로 개발 스택(`tr-redis`, `tr-postgres`)을 건드리지 않는다
+- `exp5-oom-http.sh`를 뺀 모든 컨테이너는 `tr-lab-` 접두어와 전용 네트워크 `tr-lab-net`만 쓴다. `exp5-oom-http.sh`는 앱이 필요해 측정 스택(`tr-measure-*`)을 쓰며, 이미 같은 이름의 컨테이너가 있으면 거부하고 끝날 때 `down -v`로 지운다. 둘 다 개발 스택과는 별개다 `common.sh`가 그 밖의 컨테이너 이름을 거부하므로 개발 스택(`tr-redis`, `tr-postgres`)을 건드리지 않는다
 - 각 스크립트는 종료할 때 자기가 만든 컨테이너와 네트워크를 지운다(`trap`). Redis 이미지는 `VOLUME`이 없어 볼륨이 남지 않는다
 - 분단 실험만 `iptables`가 든 작은 이미지 `tr-lab-nettools`를 빌드하고, 끝나면 지운다
 
@@ -24,6 +24,7 @@ Redis의 동시성과 장애 상황을 일회용 컨테이너에서 재현하는
 | `exp3-bigkey.sh`, `exp3-scale.sh` | 큰 ZSET을 `DEL`과 `UNLINK`로 지울 때 다른 연결의 지연, 크기별 확장 | 6분, 6분 |
 | `exp4-pipeline.sh` | `redis-benchmark`로 파이프라인 크기별 처리량 | 1분 |
 | `exp5-oom.sh` | `noeviction`에서 메모리가 가득 찼을 때 앱의 Lua 스크립트 동작 | 1분 |
+| `exp5-oom-http.sh` | 같은 OOM 상태에서 **실제 앱의 HTTP 응답**: 등록, 승격된 사용자의 홀드, 상태 조회, 헬스, 한도를 푼 뒤 회복. 앱 이미지를 빌드해 약 5분 | 5분 |
 | `exp6-rdb.sh` | 앱의 Redis 플래그에서 SIGKILL, SIGTERM, 재생성 뒤 복원되는 상태 | 3분 |
 
 환경변수로 규모를 바꾼다. 예: `N=1000000 REPS=5 ./exp3-bigkey.sh`, `CONFIGS="5000:plain 5000:wait" REPS=3 ./exp2-sentinel.sh`, `CONFIGS="plain minrep wait" PART_S=20 RUN_S=48 ./exp2-partition.sh`
