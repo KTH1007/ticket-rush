@@ -18,10 +18,12 @@ import com.ticketrush.reservation.domain.GradeRepositoryPort
 import com.ticketrush.reservation.domain.Reservation
 import com.ticketrush.reservation.domain.ReservationAlreadyCanceledException
 import com.ticketrush.reservation.domain.ReservationLookupFailedException
+import com.ticketrush.reservation.domain.ReservationLookupRateLimiterPort
 import com.ticketrush.reservation.domain.ReservationRepositoryPort
 import com.ticketrush.reservation.domain.ReservationStatus
 import com.ticketrush.reservation.domain.Seat
 import com.ticketrush.reservation.domain.SeatHoldFilterPort
+import com.ticketrush.reservation.domain.SeatMarkSyncPort
 import com.ticketrush.reservation.domain.SeatRepositoryPort
 import com.ticketrush.reservation.domain.SeatStatus
 import com.ticketrush.shared.PhoneHash
@@ -41,9 +43,12 @@ import org.junit.jupiter.api.BeforeEach
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import org.springframework.transaction.support.TransactionSynchronizationManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.sql.Connection
 import java.time.LocalDateTime
 import java.util.UUID
@@ -84,6 +89,21 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
 
     @Autowired
     lateinit var dataSource: DataSource
+
+    @Autowired
+    lateinit var seatUpdater: PaymentSeatUpdater
+
+    @Autowired
+    lateinit var rateLimiter: ReservationLookupRateLimiterPort
+
+    @Autowired
+    lateinit var historyRecorder: PaymentHistoryRecorder
+
+    @Autowired
+    lateinit var eventPublisher: ApplicationEventPublisher
+
+    @Autowired
+    lateinit var transactionTemplate: TransactionTemplate
 
     @TestConfiguration
     class MockConfig {
@@ -341,6 +361,40 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         assertThat(history).extracting("toStatus").containsExactlyInAnyOrder(PaymentStatus.CANCELED, PaymentStatus.REFUNDED)
     }
 
+    @Test
+    fun `취소의 마크 동기화는 트랜잭션이 끝난 뒤에 호출된다`() {
+        // given
+        val reservation = 결제완료_예약_준비()
+        val sync = mockk<SeatMarkSyncPort>(relaxed = true)
+        val transactionActiveAtCall = mutableListOf<Boolean>()
+        every { sync.onReturned(any()) } answers {
+            transactionActiveAtCall += TransactionSynchronizationManager.isActualTransactionActive()
+        }
+
+        // when
+        취소_기록기(sync).confirmCancel(reservation.reservationNo!!, PHONE, testClientIp)
+
+        // then: 호출 횟수와 시점을 모두 본다. 트랜잭션 안에서도 불렀다면 true가 섞인다
+        assertThat(transactionActiveAtCall).containsExactly(false)
+    }
+
+    @Test
+    fun `취소가 롤백되면 마크 동기화를 호출하지 않는다`() {
+        // given: 좌석을 되돌린 뒤 이력 기록에서 실패해 롤백된다
+        val reservation = 결제완료_예약_준비()
+        val sync = mockk<SeatMarkSyncPort>(relaxed = true)
+        val failingHistory = mockk<PaymentHistoryRecorder>()
+        every { failingHistory.record(any(), any(), any(), any()) } throws IllegalStateException("롤백 유도")
+
+        // when
+        assertThatThrownBy { 취소_기록기(sync, failingHistory).confirmCancel(reservation.reservationNo!!, PHONE, testClientIp) }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        // then
+        verify(exactly = 0) { sync.onReturned(any()) }
+        assertThat(committedStatus("SELECT status FROM reservation WHERE id = ?", reservation.id)).isEqualTo("PAID")
+    }
+
     // JdbcTemplate은 진행 중인 스프링 트랜잭션의 커넥션을 같이 써서 커밋 안 된 변경도 읽는다. DataSource에서 새 커넥션을 직접 얻어야 커밋된 값만 보인다
     private fun committedStatus(
         sql: String,
@@ -356,6 +410,21 @@ class PaymentCancelCommandServiceTest : IntegrationTest() {
         statement.setLong(1, id)
         return statement.use { it.executeQuery().use { rows -> if (rows.next()) rows.getString(1) else null } }
     }
+
+    private fun 취소_기록기(
+        sync: SeatMarkSyncPort,
+        history: PaymentHistoryRecorder = historyRecorder,
+    ) = PaymentCancelRecorder(
+        reservationRepository,
+        seatUpdater,
+        paymentRepository,
+        rateLimiter,
+        phoneHasher,
+        history,
+        eventPublisher,
+        transactionTemplate,
+        sync,
+    )
 
     private fun 결제완료_예약_준비(): Reservation {
         val event = eventRepository.공연_하나_저장()
