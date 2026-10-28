@@ -1,8 +1,8 @@
 [versions]
 kotlin = "2.4.10"
-springBoot = "4.1.1"
+springBoot = "4.1.2"
 springDependencyManagement = "1.1.7"
-springModulith = "2.1.1"
+springModulith = "2.1.2"
 querydsl = "7.7"
 resilience4j = "2.4.0"
 kotlinLogging = "8.0.4"
