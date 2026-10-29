@@ -85,11 +85,10 @@ def writer(idx):
             if MODE == "wait" and conn.cmd("WAIT", 1, 100) < 1:
                 with lock:
                     unacked_ids[idx].add(n)
-            else:
-                with lock:
-                    acked_ids[idx].add(n)
-                    ack_times.append(time.time())
+                continue
             with lock:
+                acked_ids[idx].add(n)
+                ack_times.append(time.time())
                 successes.append(time.time())
         except Exception as e:
             with lock:

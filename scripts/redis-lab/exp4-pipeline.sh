@@ -7,6 +7,7 @@ lab_net_up; lab_rm $NAME
 docker run -d --name $NAME --network $LAB_NET --cpus 1 "$LAB_REDIS_IMAGE" redis-server --save "" --appendonly no > /dev/null
 for i in $(seq 1 50); do [ "$(rcli $NAME PING 2> /dev/null)" = PONG ] && break; sleep 0.2; done
 log "Redis $(rcli $NAME INFO server | grep -m1 redis_version | tr -d '\r'), CPU 1코어, 요청 ${REQS}개, 연결 50개"
+log "지연은 묶음을 보낸 뒤 첫 응답까지의 시간이며 같은 묶음의 모든 명령에 같은 값이 기록됨(-P가 크면 마지막 명령의 완료는 이보다 늦음)"
 echo "파이프라인,회차,SET rps,SET p50 ms,SET p95 ms,GET rps,GET p50 ms,GET p95 ms"
 for p in 1 4 16 64; do
   for ((r = 1; r <= REPS; r++)); do
