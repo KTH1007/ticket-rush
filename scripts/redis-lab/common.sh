@@ -56,6 +56,6 @@ lab_sentinel_cluster() { # down-after-milliseconds, 이어서 세 Redis 노드�
 lab_partition() { # IP들
   local rules="" ip
   for ip in "$@"; do rules="$rules iptables -A INPUT -s $ip -j DROP; iptables -A OUTPUT -d $ip -j DROP;"; done
-  docker run --rm --net container:tr-lab-s-master --cap-add NET_ADMIN tr-lab-nettools sh -c "$rules date -u +%Y-%m-%dT%H:%M:%S.000Z"
+  docker run --rm --net container:tr-lab-s-master --cap-add NET_ADMIN tr-lab-nettools sh -ec "$rules date -u +%Y-%m-%dT%H:%M:%S.000Z"
 }
-lab_heal() { docker run --rm --net container:tr-lab-s-master --cap-add NET_ADMIN tr-lab-nettools sh -c "iptables -F; date -u +%Y-%m-%dT%H:%M:%S.000Z"; }
+lab_heal() { docker run --rm --net container:tr-lab-s-master --cap-add NET_ADMIN tr-lab-nettools sh -ec "iptables -F; date -u +%Y-%m-%dT%H:%M:%S.000Z"; }

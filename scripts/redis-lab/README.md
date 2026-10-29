@@ -5,7 +5,7 @@ Redis의 동시성과 장애 상황을 일회용 컨테이너에서 재현하는
 ## 안전 장치
 
 - `exp5-oom-http.sh`를 뺀 모든 컨테이너는 `tr-lab-` 접두어와 전용 네트워크 `tr-lab-net`만 쓴다. `exp5-oom-http.sh`는 앱이 필요해 측정 스택(`tr-measure-*`)을 쓰며, 이미 같은 이름의 컨테이너가 있으면 거부하고 끝날 때 `down -v`로 지운다. 둘 다 개발 스택과는 별개다 `common.sh`가 그 밖의 컨테이너 이름을 거부하므로 개발 스택(`tr-redis`, `tr-postgres`)을 건드리지 않는다
-- 각 스크립트는 종료할 때 자기가 만든 컨테이너와 네트워크를 지운다(`trap`). Redis 이미지는 `VOLUME`이 없어 볼륨이 남지 않는다
+- 각 스크립트는 종료할 때 자기가 만든 컨테이너와 네트워크를 지운다(`trap`). 컨테이너는 `docker rm -fv`로 지워 익명 볼륨도 함께 지운다. `redis:8-alpine` 이미지는 `docker image inspect`로 확인한 결과 `VOLUME`을 선언하지 않지만, `LAB_REDIS_IMAGE`로 다른 이미지를 쓰면 생길 수 있다. 스크립트가 강제 종료되어 정리가 안 되면 `docker rm -fv $(docker ps -aq --filter name=tr-lab-)`와 `docker network rm tr-lab-net`으로 직접 지운다
 - 분단 실험만 `iptables`가 든 작은 이미지 `tr-lab-nettools`를 빌드하고, 끝나면 지운다
 
 ## 준비

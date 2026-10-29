@@ -10,15 +10,16 @@ run_rep() { # 설정 down-after 모드 회차
   local label=$1 down=$2 mode=$3 rep=$4 d="$OUTDIR/$1-$4" i
   mkdir -p "$d"
   lab_sentinel_cluster "$down" || return 1
-  docker run --rm -i --network $LAB_NET python:3-alpine python -u - "$SENTINELS" "$mode" "$WRITERS" < "$LAB_DIR/failover_client.py" > "$d/client.out" 2>&1 &
+  lab_rm tr-lab-client
+  docker run --rm -i --name tr-lab-client --network $LAB_NET python:3-alpine python -u - "$SENTINELS" "$mode" "$WRITERS" < "$LAB_DIR/failover_client.py" > "$d/client.out" 2>&1 &
   local cpid=$!
-  wait_for 120 "grep -q '^READY' '$d/client.out'" || { echo "클라이언트가 준비되지 않음" >&2; kill $cpid; return 1; }
+  wait_for 120 "grep -q '^READY' '$d/client.out'" || { echo "클라이언트가 준비되지 않음" >&2; lab_rm tr-lab-client; return 1; }
   docker kill tr-lab-s-master > /dev/null
   local kill_at; kill_at=$(docker inspect -f '{{.State.FinishedAt}}' tr-lab-s-master)
   wait $cpid
   for i in 1 2 3; do docker logs -t tr-lab-s-sent$i > "$d/sent$i.log" 2>&1; done
   python3 "$LAB_DIR/sentinel_timeline.py" "$kill_at" "$d"/sent*.log > "$d/timeline.tsv"
-  local client; client=$(grep '^{' "$d/client.out" | tail -1)
+  local client; client=$(grep '^{' "$d/client.out" | tail -1); client=${client:-null}
   echo "{\"config\":\"$label\",\"rep\":$rep,\"client\":$client}" >> "$OUTDIR/summary.jsonl"
   log "$label 회차$rep: $client"
   sed 's/^/    /' "$d/timeline.tsv"

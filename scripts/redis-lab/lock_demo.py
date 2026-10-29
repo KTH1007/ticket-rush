@@ -140,11 +140,23 @@ def worker(sec, who, key, ttl_ms, work_s, release, start_delay=0.0, watchdog=Fal
 
 
 def run(threads):
-    ts = [threading.Thread(target=t) for t in threads]
+    failures = []
+
+    def guarded(fn):
+        def inner():
+            try:
+                fn()
+            except Exception as e:  # 작업 스레드의 실패가 join에서 사라지지 않게 모았다가 다시 던진다
+                failures.append(e)
+        return inner
+
+    ts = [threading.Thread(target=guarded(t)) for t in threads]
     for t in ts:
         t.start()
     for t in ts:
         t.join()
+    if failures:
+        raise failures[0]
 
 
 def scenario(name, build):

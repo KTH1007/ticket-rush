@@ -19,18 +19,21 @@ run_rep() { # 설정 회차
     wait) mode=wait ;;
   esac
   lab_sentinel_cluster 5000 "${extra[@]}" || return 1
-  docker run --rm -i --network $LAB_NET python:3-alpine python -u - "$SENTINELS" "$mode" "$WRITERS" "$RUN_S" "$RATE" < "$LAB_DIR/partition_client.py" > "$d/client.out" 2>&1 &
+  lab_rm tr-lab-client
+  docker run --rm -i --name tr-lab-client --network $LAB_NET python:3-alpine python -u - "$SENTINELS" "$mode" "$WRITERS" "$RUN_S" "$RATE" < "$LAB_DIR/partition_client.py" > "$d/client.out" 2>&1 &
   local cpid=$!
-  wait_for 120 "grep -q '^READY' '$d/client.out'" || { echo "클라이언트가 준비되지 않음" >&2; kill $cpid; return 1; }
+  wait_for 120 "grep -q '^READY' '$d/client.out'" || { echo "클라이언트가 준비되지 않음" >&2; lab_rm tr-lab-client; return 1; }
   sleep 2
   local part_at heal_at
-  part_at=$(lab_partition "$R1" "$R2" $(echo "$SENTINELS" | tr ',' ' ') | tail -1)
+  part_at=$(lab_partition "$R1" "$R2" $(echo "$SENTINELS" | tr ',' ' ')) || { echo "분단을 걸지 못함(iptables 실패)" >&2; lab_rm tr-lab-client; return 1; }
+  part_at=$(echo "$part_at" | tail -1)
   sleep "$PART_S"
-  heal_at=$(lab_heal | tail -1)
+  heal_at=$(lab_heal) || { echo "분단을 풀지 못함(iptables 실패)" >&2; lab_rm tr-lab-client; return 1; }
+  heal_at=$(echo "$heal_at" | tail -1)
   wait $cpid
   for i in 1 2 3; do docker logs -t tr-lab-s-sent$i > "$d/sent$i.log" 2>&1; done
   python3 "$LAB_DIR/sentinel_timeline.py" "$part_at" "$d"/sent*.log > "$d/timeline.tsv"
-  local client; client=$(grep '^{' "$d/client.out" | tail -1)
+  local client; client=$(grep '^{' "$d/client.out" | tail -1); client=${client:-null}
   echo "{\"config\":\"$cfg\",\"rep\":$rep,\"part_at\":\"$part_at\",\"heal_at\":\"$heal_at\",\"client\":$client}" >> "$OUTDIR/summary.jsonl"
   log "$cfg 회차$rep 끝"
   sed 's/^/    /' "$d/timeline.tsv"
