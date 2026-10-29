@@ -215,4 +215,38 @@ class GlobalExceptionHandlerTest {
         assertThat(result.response.status).isEqualTo(503)
         assertThat(result.response.getHeader("Retry-After")).isEqualTo("10")
     }
+
+    @Test
+    fun `Redis 메모리 한도 오류는 503과 Retry-After를 반환하고 원인을 노출하지 않는다`() {
+        // when
+        val result = mockMvc.perform(post("/test/redis-oom")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(503)
+        val body = objectMapper.readValue(result.response.contentAsString, ProblemDetail::class.java)
+        assertThat(body.title).isEqualTo("Service Unavailable")
+        assertThat(body.properties?.get("code")).isEqualTo("TEMPORARILY_UNAVAILABLE")
+        assertThat(result.response.contentAsString).doesNotContain("Redis", "OOM", "maxmemory")
+        assertThat(result.response.getHeader("Retry-After")!!.toLong()).isBetween(5L, 10L)
+    }
+
+    @Test
+    fun `Redis 연결 실패도 503을 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/redis-connection-failure")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(503)
+        assertThat(result.response.getHeader("Retry-After")).isNotNull()
+    }
+
+    @Test
+    fun `일시적이지 않은 Redis 오류는 그대로 500을 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/redis-wrong-type")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(500)
+        assertThat(result.response.getHeader("Retry-After")).isNull()
+    }
 }

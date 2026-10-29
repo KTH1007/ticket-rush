@@ -1,7 +1,10 @@
 package com.ticketrush.shared.exception
 
+import io.lettuce.core.RedisCommandExecutionException
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
+import org.springframework.data.redis.RedisConnectionFailureException
+import org.springframework.data.redis.RedisSystemException
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -44,6 +47,23 @@ class ExceptionTestController {
     fun serviceUnavailable(
         @RequestParam(required = false) millis: Long?,
     ): Nothing = throw SampleServiceUnavailableException(millis?.let(Duration::ofMillis))
+
+    @PostMapping("/redis-oom")
+    fun redisOom(): Nothing =
+        throw RedisSystemException(
+            "Error in execution",
+            RedisCommandExecutionException("OOM command not allowed when used memory > 'maxmemory'. script: abc, on @user_script:30."),
+        )
+
+    @PostMapping("/redis-connection-failure")
+    fun redisConnectionFailure(): Nothing = throw RedisConnectionFailureException("Unable to connect to Redis")
+
+    @PostMapping("/redis-wrong-type")
+    fun redisWrongType(): Nothing =
+        throw RedisSystemException(
+            "Error in execution",
+            RedisCommandExecutionException("WRONGTYPE Operation against a key holding the wrong kind of value"),
+        )
 
     @PostMapping("/too-many-requests/retry-after")
     fun tooManyRequestsWithRetryAfter(

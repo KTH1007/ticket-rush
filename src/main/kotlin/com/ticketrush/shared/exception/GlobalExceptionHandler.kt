@@ -15,10 +15,13 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.context.request.WebRequest
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler
 import java.time.Duration
+import java.util.concurrent.ThreadLocalRandom
 
 private val appLogger = KotlinLogging.logger {}
 
 private const val MILLIS_ROUNDING = 999L
+private const val RETRY_AFTER_MIN_SECONDS = 5L
+private const val RETRY_AFTER_MAX_SECONDS = 10L
 
 // 에러 응답은 RFC 9457(Problem Details for HTTP APIs) 표준을 따른다. 성공 응답은
 // 감싸지 않고 DTO를 그대로 반환한다.
@@ -26,6 +29,7 @@ private const val MILLIS_ROUNDING = 999L
 // ResponseEntityExceptionHandler를 상속해 스프링 표준 MVC 예외(405/404/400 등)는 부모의
 // 기본 처리에 맡기고, 우리 도메인 예외/검증 실패만 오버라이드/핸들러로 다룬다. Exception
 // catch-all만 두면 이 표준 예외들까지 전부 500으로 뭉개진다(실제로 재현해서 확인함).
+@Suppress("TooManyFunctions") // 예외 종류마다 핸들러를 하나씩 두는 구조라 함수가 늘어난다
 @Order(Ordered.HIGHEST_PRECEDENCE) // 순서 미지정 내부 ControllerAdvice보다 항상 먼저 걸리게
 @RestControllerAdvice
 class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
@@ -63,6 +67,7 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
     // 예상 못한 예외까지 표준 포맷으로 감싼다. 원인 추적을 위해 반드시 로그를 남긴다.
     @ExceptionHandler(Exception::class)
     fun handleUnexpected(e: Exception): ResponseEntity<ProblemDetail> {
+        if (RedisFailures.isTransient(e)) return redisUnavailable(e)
         appLogger.error(e) { "처리되지 않은 예외 발생" }
         val problem = problemDetail(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_SERVER_ERROR", "일시적인 오류가 발생했습니다")
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(problem)
@@ -93,6 +98,14 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
     @ExceptionHandler(ServiceUnavailableException::class)
     fun handleServiceUnavailable(e: ServiceUnavailableException): ResponseEntity<ProblemDetail> =
         respond(HttpStatus.SERVICE_UNAVAILABLE, e.code, e.message ?: e.code, e.retryAfter)
+
+    // Redis가 일시적으로 요청을 받지 못한다(메모리 한도, 연결 끊김, 타임아웃). 요청마다 스택 트레이스를 남기면 로그가 폭증하므로 한 줄만 남기고,
+    // 한꺼번에 재시도가 몰리지 않게 Retry-After를 흩뜨린다
+    private fun redisUnavailable(e: Exception): ResponseEntity<ProblemDetail> {
+        appLogger.warn { "Redis를 일시적으로 쓸 수 없어 503으로 응답합니다: ${RedisFailures.summary(e)}" }
+        val retryAfter = Duration.ofSeconds(ThreadLocalRandom.current().nextLong(RETRY_AFTER_MIN_SECONDS, RETRY_AFTER_MAX_SECONDS + 1))
+        return respond(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE", "일시적으로 요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요", retryAfter)
+    }
 
     // 초 단위로 올리고 최소 1초를 준다. 0초를 주면 클라이언트가 바로 다시 보낸다
     private fun respond(
