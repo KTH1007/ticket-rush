@@ -27,4 +27,4 @@ for f in sorted(glob.glob(f"{d}/*.csv")):
 print("| 워크로드 | 설정 | 회차 | benchmark rps | p50 ms | p99 ms | 서버가 본 EVALSHA/s | 호출당 us | 메인 스레드 CPU | 명령 실행이 차지한 CPU | PING p99 ms | PING max ms | SLOWLOG(1ms 초과) | 호스트 유휴 % |")
 print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 for r in rows:
-    print(f"| {r['wl']} | {r['mode']} | {r['rep']} | {r['rps']:,} | {r['p50']} | {r['p99']} | {r['srv_per_s']:,} | {r['us_per_call']} | {r['main_cpu']} | {r['cmd_share']} | {r['ping_p99']} | {r['ping_max']} | {r['slowlog']} | {r['idle']} |")
+    print(f"| {r['wl']} | {r['mode']} | {r['rep']} | {r['rps']:,} | {r['p50']} | {r['p99']} | {'-' if r['srv_per_s'] is None else format(r['srv_per_s'], ',')} | {r['us_per_call']} | {r['main_cpu']} | {r['cmd_share']} | {r['ping_p99']} | {r['ping_max']} | {r['slowlog']} | {r['idle']} |")

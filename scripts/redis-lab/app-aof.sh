@@ -54,7 +54,7 @@ scenario() { # 라벨
   log "Redis 복귀 | 상태: $(state) | 기동 로그: $($C logs redis 2>&1 | grep -E 'DB loaded from|Ready to accept' | tail -2 | sed 's/^.*\* //' | paste -sd'/' -)"
   for i in $(seq 1 60); do res=$(status "$T1"); case "$res" in 200*|401*) break ;; esac; sleep 1; done
   t1=$(date +%s)
-  log "crash 후 조회(복귀 후 ${t1}-${t0}초 이내 안정): 앞=[$res] 중간=[$(status "$TM")] 뒤=[$(status "$TL")]"
+  log "crash 후 조회(복귀 후 $((t1 - t0))초 이내 안정): 앞=[$res] 중간=[$(status "$TM")] 뒤=[$(status "$TL")]"
   log "crash 후 새 등록 1명: 토큰 $(curl -s -m 5 -D - -o /dev/null -X POST "$A/api/events/$E/queues" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-queue-token"{print "발급됨"}') | 이후 상태: $(state)"
 }
 

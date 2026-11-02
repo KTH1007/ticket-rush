@@ -61,7 +61,7 @@ def prober():
         time.sleep(0.001)
 
 
-th = threading.Thread(target=prober)
+th = threading.Thread(target=prober, daemon=True)
 th.start()
 time.sleep(PRE)
 t0 = time.perf_counter()

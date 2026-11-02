@@ -21,7 +21,7 @@ for n in $SIZES; do for ((rep = 1; rep <= REPS; rep++)); do
   u1=$(usage); t1=$(python3 -c 'import time;print(time.time())')
   docker stop -t 2 tr-lab-sampler > /dev/null; docker logs tr-lab-sampler 2> /dev/null | grep '^{' > "$OUTDIR/$n-$rep.samples"; docker rm -fv tr-lab-sampler > /dev/null
   cg=$(python3 -c "print(round(($u1-$u0)/1e6/($t1-$t0),4))")
-  echo "$n,$rep,$out,$cg" >> "$OUTDIR/runs.csv"
+  printf '%s,%s,"%s",%s\n' "$n" "$rep" "${out//\"/\"\"}" "$cg" >> "$OUTDIR/runs.csv"
   log "대기자 $n 회차$rep: $out, 컨테이너 전체 CPU=$cg"
   lab_rm tr-lab-bench
 done; done
