@@ -36,7 +36,7 @@ class TossPaymentGatewayAdapterTest {
     companion object {
         @JvmField
         @RegisterExtension
-        val wireMock: WireMockExtension = WireMockExtension.newInstance().build()
+        val wireMock: WireMockExtension = loopbackWireMock()
     }
 
     private val logs = ListAppender<ILoggingEvent>()
@@ -55,7 +55,7 @@ class TossPaymentGatewayAdapterTest {
     }
 
     private fun adapter(): TossPaymentGatewayAdapter {
-        val properties = TossProperties(baseUrl = wireMock.baseUrl(), secretKey = "test-secret-key")
+        val properties = TossProperties(baseUrl = wireMock.loopbackUrl(), secretKey = "test-secret-key")
         return TossPaymentGatewayAdapter(RestClient.create(), properties)
     }
 
@@ -185,7 +185,7 @@ class TossPaymentGatewayAdapterTest {
     @Test
     fun `시크릿 키가 비어 있으면 어댑터를 만들 때 실패한다`() {
         assertThatThrownBy {
-            TossPaymentGatewayAdapter(RestClient.create(), TossProperties(baseUrl = wireMock.baseUrl(), secretKey = " "))
+            TossPaymentGatewayAdapter(RestClient.create(), TossProperties(baseUrl = wireMock.loopbackUrl(), secretKey = " "))
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
 

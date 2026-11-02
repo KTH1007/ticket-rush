@@ -21,7 +21,7 @@ class TossPaymentGatewayAdapterIdempotencyTest {
     companion object {
         @JvmField
         @RegisterExtension
-        val wireMock: WireMockExtension = WireMockExtension.newInstance().build()
+        val wireMock: WireMockExtension = loopbackWireMock()
 
         private const val PROCESSING_BODY = """{"code":"IDEMPOTENT_REQUEST_PROCESSING","message":"이전 멱등 요청이 처리중입니다."}"""
     }
@@ -29,7 +29,7 @@ class TossPaymentGatewayAdapterIdempotencyTest {
     private val adapter =
         TossPaymentGatewayAdapter(
             RestClient.create(),
-            TossProperties(baseUrl = wireMock.baseUrl(), secretKey = "test-secret-key"),
+            TossProperties(baseUrl = wireMock.loopbackUrl(), secretKey = "test-secret-key"),
         )
 
     @Test

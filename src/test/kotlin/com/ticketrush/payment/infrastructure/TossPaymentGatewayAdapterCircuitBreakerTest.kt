@@ -45,12 +45,12 @@ class TossPaymentGatewayAdapterCircuitBreakerTest {
 
         @JvmField
         @RegisterExtension
-        val wireMock: WireMockExtension = WireMockExtension.newInstance().build()
+        val wireMock: WireMockExtension = loopbackWireMock()
 
         @JvmStatic
         @DynamicPropertySource
         fun props(registry: DynamicPropertyRegistry) {
-            registry.add("ticket-rush.toss.base-url") { wireMock.baseUrl() }
+            registry.add("ticket-rush.toss.base-url") { wireMock.loopbackUrl() }
             registry.add("ticket-rush.toss.secret-key") { "test-secret-key" }
         }
     }
