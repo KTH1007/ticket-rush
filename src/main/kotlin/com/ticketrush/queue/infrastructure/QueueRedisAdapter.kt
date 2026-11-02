@@ -17,6 +17,8 @@ import java.time.Duration
 import java.time.Instant
 import java.util.HexFormat
 
+// 포트 메서드마다 Lua 호출과 키 목록 만들기가 짝이라 함수가 많다
+@Suppress("TooManyFunctions")
 @Repository
 class QueueRedisAdapter(
     private val redisTemplate: StringRedisTemplate,
@@ -45,6 +47,7 @@ class QueueRedisAdapter(
                 policy.registerLimit.window
                     .toSeconds()
                     .toString(),
+                policy.maxWaiting.toString(),
             ) as? List<Long> ?: error("대기열 등록 실패 : 반환값 없음")
         return toRegisterResult(result)
     }
@@ -64,6 +67,8 @@ class QueueRedisAdapter(
         "queue:$eventId:opensAt",
         "queue:$eventId:startsAt",
         "queue:$eventId:register-ip:${clientIp.value}",
+        "queue:$eventId:lastPromotedSeq",
+        cleanedKey(eventId),
     )
 
     private fun toRegisterResult(result: List<Long>): RegisterResult =
@@ -72,6 +77,7 @@ class QueueRedisAdapter(
             NOT_OPEN -> RegisterResult.NotOpen(Instant.ofEpochMilli(result[1]))
             CLOSED -> RegisterResult.Closed(Instant.ofEpochMilli(result[1]))
             RATE_LIMITED -> RegisterResult.RateLimited(retryAfterOf(result[1]))
+            FULL -> RegisterResult.Full
             else -> RegisterResult.ScheduleUnknown
         }
 
@@ -93,6 +99,9 @@ class QueueRedisAdapter(
                 policy.promotionBudgetPerSecond.toString(),
                 BUDGET_KEY_TTL_SECONDS,
                 budgetKeyPrefix,
+                policy.cleanup.retention
+                    .toSeconds()
+                    .toString(),
             )
         @Suppress("UNCHECKED_CAST")
         return (result as? List<String>).orEmpty()
@@ -103,6 +112,7 @@ class QueueRedisAdapter(
             "queue:$eventId:waiting",
             "queue:$eventId:lastPromotedSeq",
             ACTIVE_EVENT_IDS_KEY,
+            "queue:$eventId:seq",
         )
 
     override fun findStatus(
@@ -114,6 +124,7 @@ class QueueRedisAdapter(
                 "queue:$eventId:token:$token",
                 activeKey(eventId, token),
                 "queue:$eventId:lastPromotedSeq",
+                cleanedKey(eventId),
             )
 
         @Suppress("UNCHECKED_CAST")
@@ -142,6 +153,34 @@ class QueueRedisAdapter(
         token: String,
     ) = "queue:$eventId:active:$token"
 
+    private fun cleanedKey(eventId: Long) = "queue:$eventId:cleaned"
+
+    override fun cleanup(
+        eventId: Long,
+        notBefore: Instant,
+    ): Boolean {
+        val removed =
+            redisTemplate.execute(
+                cleanupScript,
+                cleanupKeys(eventId),
+                eventId.toString(),
+                notBefore.toEpochMilli().toString(),
+                policy.cleanup.retention
+                    .toSeconds()
+                    .toString(),
+            ) ?: error("대기열 정리 실패 : 반환값 없음")
+        return removed > 0
+    }
+
+    private fun cleanupKeys(eventId: Long) =
+        listOf(
+            "queue:$eventId:waiting",
+            "queue:$eventId:seq",
+            "queue:$eventId:lastPromotedSeq",
+            ACTIVE_EVENT_IDS_KEY,
+            cleanedKey(eventId),
+        )
+
     override fun activeEventIds(): Set<Long> =
         redisTemplate
             .opsForSet()
@@ -167,6 +206,7 @@ class QueueRedisAdapter(
         private const val NOT_OPEN = 0L
         private const val CLOSED = -2L
         private const val RATE_LIMITED = -3L
+        private const val FULL = -4L
 
         private val registerScript: RedisScript<List<*>> =
             DefaultRedisScript<List<*>>().apply {
@@ -178,6 +218,12 @@ class QueueRedisAdapter(
             DefaultRedisScript<List<*>>().apply {
                 setLocation(ClassPathResource("scripts/queue-promote.lua"))
                 resultType = List::class.java
+            }
+
+        private val cleanupScript: RedisScript<Long> =
+            DefaultRedisScript<Long>().apply {
+                setLocation(ClassPathResource("scripts/queue-cleanup.lua"))
+                resultType = Long::class.java
             }
 
         // queue-bind.lua의 반환 코드

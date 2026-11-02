@@ -19,6 +19,8 @@ ticket-rush:
     poll-interval: { jitter-ratio: 0.0 }   # 지터를 끈다
     # 캐시된 컨텍스트의 스케줄러가 같은 Redis의 대기열과 초당 예산을 같이 써서 테스트가 흔들린다. 승격은 테스트가 직접 부른다
     promotion-interval: 1h
+    # 캐시된 컨텍스트의 정리 스케줄러가 다른 테스트의 대기열을 지우지 않게 한다. 정리는 테스트가 직접 부른다
+    cleanup: { interval: 1h }
     promotion-budget-per-second: 100000   # 일반 테스트가 같은 초에 몰려 승격해도 예산에 걸리지 않게 한다. 예산 테스트는 따로 만든 어댑터를 쓴다
     broadcast-cache-ttl: 0s
     register-limit: { max-per-ip: 1000000 }   # 테스트가 같은 IP로 토큰을 많이 만들고 Redis가 테스트 간에 공유된다. 한도 테스트는 작은 한도의 어댑터를 따로 만든다

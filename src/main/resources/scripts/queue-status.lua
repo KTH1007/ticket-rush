@@ -1,10 +1,14 @@
 -- src/main/resources/scripts/queue-status.lua
--- KEYS[1] = token 키, KEYS[2] = active 키, KEYS[3] = lastPromotedSeq 키
+-- KEYS[1] = token 키, KEYS[2] = active 키, KEYS[3] = lastPromotedSeq 키, KEYS[4] = 정리 표시 키
 -- ARGV[1] = token TTL(초). 승격된 적 없는 대기자가 조회하면 이만큼으로 다시 늘려 조회가 생존 신호가 되게 한다
 local sequence = redis.call('GET', KEYS[1])
 local active = redis.call('EXISTS', KEYS[2])
 -- 승격 뒤에는 token 키가 먼저 만료돼도 active 키가 살아 있는 동안은 활성으로 본다
 if sequence == false and active == 0 then
+    return {0, 0, 0, 0}
+end
+-- 정리된 공연의 대기자는 token 키가 남아 있어도 무효로 본다. 두면 조회가 토큰 TTL을 계속 늘려 줄어들지 않는 순번을 보게 된다
+if active == 0 and redis.call('EXISTS', KEYS[4]) == 1 then
     return {0, 0, 0, 0}
 end
 local lastPromoted = redis.call('GET', KEYS[3])

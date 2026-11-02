@@ -22,6 +22,9 @@ sealed interface RegisterResult {
         val retryAfter: Duration,
     ) : RegisterResult
 
+    // 대기열이 상한에 닿아 새로 줄을 세우지 않는다
+    data object Full : RegisterResult
+
     // Redis에 공연 일정이 없다. 호출 측이 DB에서 읽어 힌트로 다시 등록한다
     data object ScheduleUnknown : RegisterResult
 }
