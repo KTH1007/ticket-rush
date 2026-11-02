@@ -77,7 +77,17 @@ services:
       - --maxmemory-policy
       - noeviction           # evict되면 좌석 홀드가 조용히 사라진다. 차라리 쓰기를 실패시킨다
       - --appendonly
-      - "no"                 # 캐시와 휘발성 상태만 담는다. 영구 기록은 DB에 있다
+      - "yes"                # 대기열 순번과 토큰은 DB에 없고 Redis에만 있다. crash 뒤에도 줄이 남게 한다
+      - --appendfsync
+      - everysec             # 초당 한 번 디스크에 반영한다. always는 쓰기마다라 처리량이 크게 떨어진다
+      - --save
+      - ""                   # AOF가 있으면 시작 때 RDB는 복원에 쓰이지 않는다. 쓸모없는 fork와 쓰기를 없앤다
+      - --lazyfree-lazy-user-del
+      - "yes"                # 큰 키를 DEL로 지워도 서버가 멈추지 않게 한다
+      - --lazyfree-lazy-expire
+      - "yes"                # 큰 키가 TTL로 만료돼도 서버가 멈추지 않게 한다
+    volumes:
+      - redis-data:/data     # 컨테이너를 다시 만들어도 AOF가 남게 한다
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -127,6 +137,7 @@ services:
 
 volumes:
   postgres-data:
+  redis-data:
   prometheus-data:
   grafana-data:
   redisinsight-data:

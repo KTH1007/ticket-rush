@@ -9,6 +9,7 @@ import com.ticketrush.queue.domain.QueueRegisterRateLimitedException
 import com.ticketrush.queue.domain.QueueRepositoryPort
 import com.ticketrush.queue.domain.RegisterResult
 import com.ticketrush.support.testClientIp
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -23,7 +24,7 @@ import kotlin.test.Test
 class QueueCommandServiceEventCheckTest {
     private val queueRepository = mockk<QueueRepositoryPort>()
     private val eventSchedule = mockk<EventSchedulePort>()
-    private val service = QueueCommandService(queueRepository, eventSchedule)
+    private val service = QueueCommandService(queueRepository, eventSchedule, SimpleMeterRegistry())
 
     // 인증이 없는 등록이 몰릴 때 DB를 두드리지 않게, 공연 일정이 캐시돼 있으면 DB를 보지 않는다
     @Test

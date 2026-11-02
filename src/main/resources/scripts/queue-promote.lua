@@ -1,7 +1,7 @@
 -- src/main/resources/scripts/queue-promote.lua
--- KEYS[1] = waiting ZSET, KEYS[2] = lastPromotedSeq 키, KEYS[3] = 활성 이벤트 집합 키
+-- KEYS[1] = waiting ZSET, KEYS[2] = lastPromotedSeq 키, KEYS[3] = 활성 이벤트 집합 키, KEYS[4] = seq 키
 -- ARGV[1] = 이번 호출의 최대 승격 수, ARGV[2] = active TTL(초), ARGV[3] = eventId
--- ARGV[4] = 초당 예산, ARGV[5] = 예산 키 TTL(초), ARGV[6] = 예산 키 접두사
+-- ARGV[4] = 초당 예산, ARGV[5] = 예산 키 TTL(초), ARGV[6] = 예산 키 접두사, ARGV[7] = 대기열이 비면 순번 키에 거는 만료(초)
 -- 인스턴스마다 다른 초를 쓰면 같은 순간에 예산이 겹쳐 쓰이므로 초를 Redis 시계로 만들고, 실제로 승격한 수만큼만 차감한다
 local now = redis.call('TIME')
 local budgetKey = ARGV[6] .. now[1]
@@ -51,6 +51,9 @@ end
 
 if redis.call('ZCARD', KEYS[1]) == 0 then
     redis.call('SREM', KEYS[3], ARGV[3])
+    -- 비어 활성 집합에서 빠진 공연은 정리 스케줄러가 찾지 못하므로 순번 키가 스스로 사라지게 한다. 등록이 다시 오면 등록 스크립트가 만료를 없앤다
+    redis.call('EXPIRE', KEYS[4], ARGV[7])
+    redis.call('EXPIRE', KEYS[2], ARGV[7])
 end
 
 return tokens

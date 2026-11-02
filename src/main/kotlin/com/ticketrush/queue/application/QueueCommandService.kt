@@ -7,6 +7,7 @@ import com.ticketrush.queue.domain.InvalidQueueTokenException
 import com.ticketrush.queue.domain.QueueActiveExpiredException
 import com.ticketrush.queue.domain.QueueClosedException
 import com.ticketrush.queue.domain.QueueEventNotFoundException
+import com.ticketrush.queue.domain.QueueFullException
 import com.ticketrush.queue.domain.QueueNotActiveException
 import com.ticketrush.queue.domain.QueueNotOpenException
 import com.ticketrush.queue.domain.QueuePhoneMismatchException
@@ -17,15 +18,32 @@ import com.ticketrush.shared.AppTimeZone
 import com.ticketrush.shared.ClientIp
 import com.ticketrush.shared.PhoneHash
 import com.ticketrush.shared.exception.BusinessException
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Service
+import java.time.Duration
 import java.time.LocalDateTime
 import java.util.UUID
+import java.util.concurrent.ThreadLocalRandom
+
+// 한꺼번에 재시도가 몰리지 않게 Retry-After를 흩뜨린다
+private const val FULL_RETRY_AFTER_MIN_SECONDS = 5L
+private const val FULL_RETRY_AFTER_MAX_SECONDS = 10L
 
 @Service
 class QueueCommandService(
     private val queueRepository: QueueRepositoryPort,
     private val eventSchedule: EventSchedulePort,
+    meterRegistry: MeterRegistry,
 ) {
+    // 장애로 인한 503과 구분해 의도된 거절 횟수를 따로 센다
+    private val fullRejections =
+        Counter
+            .builder("queue.register.rejected")
+            .tag("reason", "full")
+            .description("대기열이 상한에 닿아 거절한 등록 수")
+            .register(meterRegistry)
+
     fun register(
         eventId: Long,
         clientIp: ClientIp,
@@ -37,9 +55,16 @@ class QueueCommandService(
                 is RegisterResult.NotOpen -> QueueNotOpenException(eventId, LocalDateTime.ofInstant(result.opensAt, AppTimeZone.ID))
                 is RegisterResult.Closed -> QueueClosedException(eventId, LocalDateTime.ofInstant(result.startsAt, AppTimeZone.ID))
                 is RegisterResult.RateLimited -> QueueRegisterRateLimitedException(result.retryAfter)
+                RegisterResult.Full -> queueFull()
                 RegisterResult.ScheduleUnknown -> IllegalStateException("공연 일정을 저장했는데도 찾지 못했습니다: eventId=$eventId")
             }
         throw rejection
+    }
+
+    private fun queueFull(): QueueFullException {
+        fullRejections.increment()
+        val seconds = ThreadLocalRandom.current().nextLong(FULL_RETRY_AFTER_MIN_SECONDS, FULL_RETRY_AFTER_MAX_SECONDS + 1)
+        return QueueFullException(Duration.ofSeconds(seconds))
     }
 
     // 첫 호출이 ScheduleUnknown이면 스크립트가 아무것도 쓰지 않아서 같은 토큰으로 다시 불러도 된다

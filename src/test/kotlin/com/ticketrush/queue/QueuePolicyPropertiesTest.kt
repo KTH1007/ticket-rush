@@ -18,6 +18,8 @@ class QueuePolicyPropertiesTest {
         nearRankThreshold: Long = 100,
         scheduleCacheTtl: Duration = Duration.ofMinutes(10),
         registerLimit: QueuePolicyProperties.RegisterLimit = QueuePolicyProperties.RegisterLimit(),
+        cleanup: QueuePolicyProperties.Cleanup = QueuePolicyProperties.Cleanup(),
+        maxWaiting: Long = 500_000L,
     ) = QueuePolicyProperties(
         tokenTtl = tokenTtl,
         activeTtl = activeTtl,
@@ -26,6 +28,8 @@ class QueuePolicyPropertiesTest {
         nearRankThreshold = nearRankThreshold,
         scheduleCacheTtl = scheduleCacheTtl,
         registerLimit = registerLimit,
+        cleanup = cleanup,
+        maxWaiting = maxWaiting,
     )
 
     private fun assertRejected(
@@ -172,6 +176,44 @@ class QueuePolicyPropertiesTest {
     @Test
     fun `IP별 발급 상한이 0 이하면 거부한다`() {
         assertRejected("registerLimit.maxPerIp") { properties(registerLimit = QueuePolicyProperties.RegisterLimit(maxPerIp = 0)) }
+    }
+
+    @Test
+    fun `정리 설정은 기본값이 주기 1분, 시작 뒤 유예 1시간, 보관 24시간이다`() {
+        val cleanup = properties().cleanup
+
+        assertThat(cleanup.interval).isEqualTo(Duration.ofMinutes(1))
+        assertThat(cleanup.graceAfterStart).isEqualTo(Duration.ofHours(1))
+        assertThat(cleanup.retention).isEqualTo(Duration.ofHours(24))
+    }
+
+    @Test
+    fun `대기열 길이 상한은 기본값이 공연당 50만이다`() {
+        assertThat(properties().maxWaiting).isEqualTo(500_000L)
+    }
+
+    @Test
+    fun `대기열 길이 상한이 0 이하면 거부한다`() {
+        assertRejected("maxWaiting") { properties(maxWaiting = 0) }
+        assertRejected("maxWaiting") { properties(maxWaiting = -1) }
+    }
+
+    @Test
+    fun `정리 주기가 1초 미만이면 거부한다`() {
+        assertRejected("cleanup.interval") { properties(cleanup = QueuePolicyProperties.Cleanup(interval = Duration.ofMillis(999))) }
+    }
+
+    @Test
+    fun `정리 유예가 음수면 거부한다`() {
+        assertRejected("cleanup.graceAfterStart") {
+            properties(cleanup = QueuePolicyProperties.Cleanup(graceAfterStart = Duration.ofSeconds(-1)))
+        }
+    }
+
+    // 정리 표시가 토큰보다 먼저 사라지면 정리된 공연의 토큰이 다시 조회된다
+    @Test
+    fun `보관 시간이 토큰 TTL보다 길지 않으면 거부한다`() {
+        assertRejected("cleanup.retention") { properties(cleanup = QueuePolicyProperties.Cleanup(retention = Duration.ofMinutes(15))) }
     }
 
     @Test

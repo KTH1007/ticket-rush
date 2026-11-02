@@ -2,6 +2,7 @@ package com.ticketrush.queue.domain
 
 import com.ticketrush.shared.ClientIp
 import com.ticketrush.shared.PhoneHash
+import java.time.Instant
 
 interface QueueRepositoryPort {
     // 오픈, 시작 판정과 IP별 발급 상한 확인, 순번 부여를 한 번에 한다. scheduleHint는 Redis에 공연 일정이 없을 때만 저장된다
@@ -31,4 +32,10 @@ interface QueueRepositoryPort {
     ): BindResult
 
     fun activeEventIds(): Set<Long>
+
+    // notBefore(Redis 시계 기준) 이전이면 지우지 않는다. 지운 키가 있으면 true
+    fun cleanup(
+        eventId: Long,
+        notBefore: Instant,
+    ): Boolean
 }

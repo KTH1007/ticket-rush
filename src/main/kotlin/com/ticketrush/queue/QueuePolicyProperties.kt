@@ -18,6 +18,10 @@ data class QueuePolicyProperties(
     val broadcastCacheTtl: Duration = Duration.ofSeconds(1),
     // 한 IP가 한 공연의 대기열에 받을 수 있는 토큰 수
     val registerLimit: RegisterLimit = RegisterLimit(),
+    // 공연이 끝난 뒤 남은 대기열 키를 정리하는 정책
+    val cleanup: Cleanup = Cleanup(),
+    // 공연 하나의 대기열 길이 상한. 닿으면 새 등록을 거절한다
+    val maxWaiting: Long = DEFAULT_MAX_WAITING,
 ) {
     data class PollInterval(
         val far: Duration,
@@ -31,6 +35,15 @@ data class QueuePolicyProperties(
     data class RegisterLimit(
         val maxPerIp: Int = DEFAULT_MAX_PER_IP,
         val window: Duration = Duration.ofMinutes(1),
+    )
+
+    data class Cleanup(
+        // 정리 대상을 찾는 주기
+        val interval: Duration = Duration.ofMinutes(1),
+        // 공연 시작 뒤 이 시간이 지나야 남은 대기열을 지운다
+        val graceAfterStart: Duration = Duration.ofHours(1),
+        // 대기열이 비거나 정리된 뒤 순번 키와 정리 표시를 남겨 두는 시간
+        val retention: Duration = Duration.ofHours(24),
     )
 
     init {
@@ -55,11 +68,19 @@ data class QueuePolicyProperties(
         require(!broadcastCacheTtl.isNegative) { "broadcastCacheTtl은 음수일 수 없습니다: $broadcastCacheTtl" }
         require(registerLimit.maxPerIp > 0) { "registerLimit.maxPerIp는 양수여야 합니다: ${registerLimit.maxPerIp}" }
         require(registerLimit.window.isAtLeastOneSecond()) { "registerLimit.window는 1초 이상이어야 합니다: ${registerLimit.window}" }
+        require(maxWaiting > 0) { "maxWaiting은 양수여야 합니다: $maxWaiting" }
+        require(cleanup.interval.isAtLeastOneSecond()) { "cleanup.interval은 1초 이상이어야 합니다: ${cleanup.interval}" }
+        require(!cleanup.graceAfterStart.isNegative) { "cleanup.graceAfterStart는 음수일 수 없습니다: ${cleanup.graceAfterStart}" }
+        // 정리 표시가 토큰보다 먼저 사라지면 정리된 공연의 토큰이 다시 살아난다
+        require(
+            cleanup.retention > tokenTtl,
+        ) { "cleanup.retention은 tokenTtl보다 길어야 합니다: retention=${cleanup.retention}, tokenTtl=$tokenTtl" }
     }
 }
 
 private const val MILLIS_PER_SECOND = 1_000L
 private const val DEFAULT_MAX_PER_IP = 100
+private const val DEFAULT_MAX_WAITING = 500_000L
 
 private fun Duration.isPositive(): Boolean = !isNegative && !isZero
 

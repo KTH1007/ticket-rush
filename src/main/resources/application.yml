@@ -111,6 +111,11 @@ ticket-rush:
     register-limit: # IP 기준 줄서기 제한. 공유 IP 사용자가 막히지 않게 넉넉히 둔 잠정값
       max-per-ip: 100 # 한 IP가 한 공연의 대기열에 윈도우 동안 받을 수 있는 토큰 수
       window: 1m
+    max-waiting: 500000 # 공연 하나의 대기열 길이 상한. 닿으면 새 등록을 QUEUE_FULL 503으로 거절한다
+    cleanup:
+      interval: 1m # 정리 대상을 찾는 주기
+      grace-after-start: 1h # 공연 시작 뒤 이 시간이 지나면 남은 대기열을 지운다. 잠정값
+      retention: 24h # 대기열이 비거나 정리된 뒤 순번 키와 정리 표시를 남기는 시간. token-ttl보다 길어야 한다
   seat:
     hold-ttl: 5m
     payment-failed-hold-ttl: 1m

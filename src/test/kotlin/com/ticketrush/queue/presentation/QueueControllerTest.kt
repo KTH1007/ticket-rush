@@ -7,6 +7,7 @@ import com.ticketrush.queue.domain.InvalidQueueTokenException
 import com.ticketrush.queue.domain.QueueActiveExpiredException
 import com.ticketrush.queue.domain.QueueClosedException
 import com.ticketrush.queue.domain.QueueEventNotFoundException
+import com.ticketrush.queue.domain.QueueFullException
 import com.ticketrush.queue.domain.QueueNotOpenException
 import com.ticketrush.queue.domain.QueueRegisterRateLimitedException
 import com.ticketrush.shared.ClientIp
@@ -72,7 +73,8 @@ class QueueControllerTest {
                     description =
                         "공연 대기열에 등록하고 토큰을 발급받는다. " +
                             "입구가 혼잡하면 503과 Retry-After(3 ~ 10초)가 오며, 그 시간 뒤에 다시 등록한다(처음 누른 순서는 보장되지 않는다). " +
-                            "한 IP가 윈도우 안에 받을 수 있는 토큰을 다 받으면 429와 Retry-After가 온다.",
+                            "한 IP가 윈도우 안에 받을 수 있는 토큰을 다 받으면 429와 Retry-After가 온다. " +
+                            "공연의 대기열이 상한에 닿아도 503과 Retry-After(5 ~ 10초)가 오며 code가 QUEUE_FULL이다.",
                     snippets = arrayOf(queueRegisterPathParameters, queueRegisterResponseHeaders),
                 ),
             )
@@ -118,6 +120,17 @@ class QueueControllerTest {
             .andExpect(status().isTooManyRequests)
             .andExpect(header().string("Retry-After", "42"))
             .andExpect(jsonPath("$.code").value("QUEUE_REGISTER_RATE_LIMITED"))
+    }
+
+    @Test
+    fun `대기열이 가득 차면 503과 Retry-After와 QUEUE_FULL을 반환한다`() {
+        every { queueCommandService.register(40L, any()) } throws QueueFullException(Duration.ofSeconds(7))
+
+        mockMvc
+            .perform(post("/api/events/{eventId}/queues", 40L))
+            .andExpect(status().isServiceUnavailable)
+            .andExpect(header().string("Retry-After", "7"))
+            .andExpect(jsonPath("$.code").value("QUEUE_FULL"))
     }
 
     @Test
