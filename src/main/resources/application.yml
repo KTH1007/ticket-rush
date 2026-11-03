@@ -64,6 +64,12 @@ management:
   metrics:
     tags:
       instance: ${INSTANCE_ID:local}
+    distribution:
+      # p95, p99를 계산하려면 버킷이 필요하다. 버킷 경계는 SLO 지연 임계값(100ms, 200ms, 300ms, 500ms, 1s, 3s)에 맞춘다
+      percentiles-histogram:
+        http.server.requests: true
+      slo:
+        http.server.requests: 50ms, 100ms, 200ms, 300ms, 500ms, 1s, 3s
   info:
     env:
       enabled: true   # 아래 info 설정을 /actuator/info로 노출한다

@@ -175,7 +175,7 @@ tasks.named<Test>("test") {
     useJUnitPlatform {
         // 동시성 테스트는 스레드를 여러 개 띄워 느리고 CPU를 많이 쓴다.
         // 매 빌드에 넣으면 피드백 주기가 길어진다.
-        excludeTags("concurrency")
+        excludeTags("concurrency", "e2e")
     }
 }
 
@@ -183,6 +183,19 @@ tasks.named<Test>("test") {
 // 별도 컴파일 없이 ./gradlew concurrencyTest로 실행된다.
 tasks.register<Test>("concurrencyTest") {
     useJUnitPlatform { includeTags("concurrency") }
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    shouldRunAfter(tasks.test)
+
+    testLogging {
+        events("passed", "failed", "skipped")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+// 앱 전체를 실제 HTTP로 거치는 e2e 테스트만 돌린다. 컨테이너와 앱을 따로 띄워 느리므로 기본 build에는 넣지 않는다.
+tasks.register<Test>("e2eTest") {
+    useJUnitPlatform { includeTags("e2e") }
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
     shouldRunAfter(tasks.test)
