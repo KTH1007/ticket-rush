@@ -24,11 +24,11 @@ class TossPaymentGatewayAdapterInquiryTest {
     companion object {
         @JvmField
         @RegisterExtension
-        val wireMock: WireMockExtension = WireMockExtension.newInstance().build()
+        val wireMock: WireMockExtension = loopbackWireMock()
     }
 
     private fun adapter(): TossPaymentGatewayAdapter {
-        val properties = TossProperties(baseUrl = wireMock.baseUrl(), secretKey = "test-secret-key")
+        val properties = TossProperties(baseUrl = wireMock.loopbackUrl(), secretKey = "test-secret-key")
         return TossPaymentGatewayAdapter(RestClient.create(), properties)
     }
 

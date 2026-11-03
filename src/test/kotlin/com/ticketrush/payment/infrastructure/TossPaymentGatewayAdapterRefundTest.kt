@@ -29,13 +29,13 @@ class TossPaymentGatewayAdapterRefundTest {
 
         @JvmField
         @RegisterExtension
-        val wireMock: WireMockExtension = WireMockExtension.newInstance().build()
+        val wireMock: WireMockExtension = loopbackWireMock()
     }
 
     private val adapter =
         TossPaymentGatewayAdapter(
             RestClient.create(),
-            TossProperties(baseUrl = wireMock.baseUrl(), secretKey = "test-secret-key"),
+            TossProperties(baseUrl = wireMock.loopbackUrl(), secretKey = "test-secret-key"),
         )
 
     @Test
