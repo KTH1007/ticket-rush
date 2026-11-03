@@ -27,6 +27,8 @@ const TIMEOUT = '5s';
 
 // nginx 상한이 거절한 503은 실패가 아니라 설계된 응답이라 따로 센다. 받아준 요청과 거절된 요청의 지연도 나눠서 본다
 const busy = new Counter('busy_503');
+// 503 중 앱이 대기열이 가득 차서 일부러 돌려준 것(QUEUE_FULL). nginx 상한이나 장애로 인한 503과 나눠 센다
+const queueFull = new Counter('queue_full_503');
 const accepted = new Counter('accepted_count');
 const acceptedMs = new Trend('accepted_ms', true);
 const busyMs = new Trend('busy_ms', true);
@@ -35,6 +37,7 @@ function record(res, okStatus) {
   if (res.status === 503) {
     busy.add(1);
     busyMs.add(res.timings.duration);
+    if (typeof res.body === 'string' && res.body.includes('QUEUE_FULL')) queueFull.add(1);
   } else if (res.status === okStatus) {
     accepted.add(1);
     acceptedMs.add(res.timings.duration);
@@ -70,6 +73,7 @@ function arrivalSteps(prefix, execName, rates) {
     thresholds[`http_reqs{scenario:${name}}`] = ['count>=0'];
     thresholds[`dropped_iterations{scenario:${name}}`] = ['count>=0'];
     thresholds[`busy_503{scenario:${name}}`] = ['count>=0'];
+    thresholds[`queue_full_503{scenario:${name}}`] = ['count>=0'];
     thresholds[`accepted_ms{scenario:${name}}`] = ['max>=0'];
     thresholds[`busy_ms{scenario:${name}}`] = ['max>=0'];
   });

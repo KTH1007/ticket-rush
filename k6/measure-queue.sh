@@ -14,6 +14,8 @@
 #   Q1 대기자 수만큼 줄 세운 뒤 서버가 알려주는 조회 간격으로 초당 조회 요청 수를 계산. M4 그 요청 수로 조회를 보내며 홀드를 같이 보냄
 #   F2 거절이 생기는 전체 흐름을 여러 번. D3 좌석 충돌이 몰릴 때 DB 연결 사용. PG 가짜 PG 응답 지연별 결제
 #   H1 승격 속도별 혼합 부하(홀드, 결제 포기, 좌석 지도 조회, 대기자 순번 조회를 한 앱에 같이). H2 매진까지 이어지는 긴 부하. H3 PG 장애 모드(Toss 스텁의 지연, 5xx, 장애 구간). H4 앱 2대. H5 최신 코드의 D1 재기준선
+#   V1 전체 API SLO 확인(docs/slo.md). 줄서기와 순번 조회를 목표 도착률로, 흐름(줄서기부터 취소까지)과 읽기 API를 목표 규모로 돌려 한 표로 판정하고 정합성을 점검
+#   V2 README 목표 규모 전체 SLO 확인. 줄서기 2,000/s로 대기열을 50만 명 상한까지 채운 뒤, 가득 찬 대기열에서 순번 조회, 줄서기(거절), 승격된 사용자의 홀드와 결제(매진까지), 읽기를 동시에
 #   N3A, N6A 변경 뒤 순번 조회(상한 250)와 줄서기(상한 500) 처리량 재측정
 #   M3 홀드 지연이 받아준 요청 때문인지 거절당하는 요청 폭주 때문인지 가림
 #   M1 순번 조회와 홀드, 결제가 같은 앱에서 동시에 오는 혼합 부하. A2 앱 2대 뒤에서 nginx 합계 상한 값
@@ -62,6 +64,8 @@ if [ "${QUICK:-0}" = "1" ]; then
   D3_RATE=20; D3_SECONDS=5; D3_POOL=5; D3_REPS=1; PG_DELAYS="0 300"; PG_RATE=20; PG_SECONDS=5
   A3_REG_RATES="500"; A3_REPS=1
   H_USERS=${H_USERS:-600}; H_RATES=${H_RATES:-"30 60"}; H_REPS=${H_REPS:-1}; H_POLL_RATE=${H_POLL_RATE:-300}; H_POLL_TOKENS=500; H_WIN=10
+  V1_REG_RATE=300; V1_POLL_RATE=500; V1_TOKENS=3000; V1_STEP=5; V1_FLOW_RATES=${V1_FLOW_RATES:-"10 20"}; V1_TWO_APPS_RATE=${V1_TWO_APPS_RATE:-20}; V1_BROWSE_RATE=50; V1_FLOW_SECONDS=10
+  V2_FILL_RATE=500; V2_FILL_SECONDS=30; V2_CAP=12000; V2_POLL_RATE=${V2_POLL_RATE:-300}; V2_POLL_STRIDE=2; V2_REG_RATE=${V2_REG_RATE:-500}; V2_FLOW_RATE=20; V2_USERS=400; V2_BROWSE_RATE=50; V2_WARM_USERS=${V2_WARM_USERS:-500}; V2_WARM_RATE=${V2_WARM_RATE:-25}; V2_WARM_SECONDS=${V2_WARM_SECONDS:-0}
   H2_USERS=1200; H2_RATE=40; H4_RATES="60"; H3_USERS=600; H3_RATE=30; H3_CASES="e503:0:503:- d4000:4000:200:- o4000:0:200:5:4000:200;12:0:200"
 else
   STEP=30; REG_RATES=500,1000,2000,4000,8000; POLL_RATES=1000,2000,5000,10000,15000
@@ -90,6 +94,12 @@ else
   A3_REG_RATES="16000 24000"; A3_REPS=3
   # 사용자 수는 승격 속도와 무관하게 같아야 좌석 사용률과 충돌 비율이 같다. 순번 조회는 대기자 50만 명이 서버가 알려준 간격으로 조회하는 속도
   H_USERS=${H_USERS:-9000}; H_RATES=${H_RATES:-"50 100 150 200 300"}; H_REPS=${H_REPS:-1}; H_POLL_RATE=${H_POLL_RATE:-3000}; H_POLL_TOKENS=10000; H_WIN=30
+  # 목표 규모(README): 줄서기 2,000/s, 순번 조회는 대기자 50만 명이 서버가 알려준 간격으로 조회하는 속도(약 3,000/s), 승격 100/s보다 낮은 새 사용자 80/s
+  V1_REG_RATE=2000; V1_POLL_RATE=3000; V1_TOKENS=100000; V1_STEP=30; V1_FLOW_RATES=${V1_FLOW_RATES:-"40 80 120"}; V1_TWO_APPS_RATE=${V1_TWO_APPS_RATE:-120}; V1_BROWSE_RATE=300; V1_FLOW_SECONDS=60
+  # V2는 README 목표 규모 그대로다: 대기열 최대 50만 명(상한까지 채우려 260초 x 2,000/s), 줄서기 2,000/s, 승격 100/s 규모의 홀드와 결제(22,000명, 좌석 30,000석이 매진되는 길이),
+  # 순번 조회는 대기자 50만 명이 서버가 알려준 간격으로 조회하는 속도(계산 약 3,158/s)보다 약간 높게
+  V2_FILL_RATE=2000; V2_FILL_SECONDS=260; V2_CAP=500000; V2_POLL_RATE=${V2_POLL_RATE:-3200}; V2_POLL_STRIDE=5; V2_REG_RATE=${V2_REG_RATE:-2000}; V2_FLOW_RATE=100; V2_USERS=22000; V2_BROWSE_RATE=300
+  V2_WARM_USERS=${V2_WARM_USERS:-500}; V2_WARM_RATE=${V2_WARM_RATE:-25}; V2_WARM_SECONDS=${V2_WARM_SECONDS:-0}
   H2_USERS=22000; H2_RATE=100; H4_RATES=${H4_RATES:-"200 300 400"}
   # 케이스는 "이름:지연ms:상태:장애 구간". 장애 구간은 "시작초:지연ms:상태;끝초:0:200" 형식이고 -이면 없음
   H3_USERS=9000; H3_RATE=100; H3_CASES=${H3_CASES:-"d0:0:200:- d2500:2500:200:- d4000:4000:200:- e503:0:503:- o4000:0:200:25:4000:200;55:0:200 o503:0:200:25:0:503;55:0:200"}
@@ -97,6 +107,18 @@ fi
 GAP=5
 
 log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$OUT/run.log"; }
+
+# K6_DOCKER=1이면 부하기를 앱과 같은 Docker 네트워크의 컨테이너로 돌려 nginx에 직접 보낸다.
+# 호스트의 127.0.0.1:18080은 Docker Desktop의 포트 전달을 거치는데, 큰 응답(좌석 배치 gzip 250KB)을 초당 40~60건 넘게 받으면 이 경로가 먼저 한계가 되어 서버와 무관하게 느려 보인다
+K6_IMAGE=${K6_IMAGE:-grafana/k6:1.7.1}
+k6x() {
+  if [ "${K6_DOCKER:-0}" = "1" ]; then
+    docker run --rm --network tr-measure_default -v "$(pwd):$(pwd)" -w "$(pwd)" "$K6_IMAGE" "$@"
+  else
+    k6 "$@"
+  fi
+}
+k6_base() { if [ "${K6_DOCKER:-0}" = "1" ]; then echo "http://nginx:80"; else echo "$BASE"; fi; }
 rcli() { $COMPOSE exec -T redis redis-cli "$@" | tr -d '\r'; }
 psql_() { $COMPOSE exec -T postgres psql -U ticketrush -d ticketrush -tA "$@"; }
 
@@ -160,7 +182,7 @@ seed() {
 }
 
 warmup() { # 결과에 넣지 않는 짧은 예열. JVM이 식기 전의 첫 단계가 느리게 나오는 것을 막는다
-  k6 run --quiet -e BASE=$BASE -e EVENT_ID="$EVENT_ID" "$@" "${K6_SCRIPT:-k6/queue.js}" > /dev/null 2>&1
+  k6x run --quiet -e BASE="$(k6_base)" -e EVENT_ID="$EVENT_ID" "$@" "${K6_SCRIPT:-k6/queue.js}" > /dev/null 2>&1
 }
 
 reset_queue() { rcli FLUSHALL > /dev/null; }
@@ -263,8 +285,8 @@ k6run() { # 이름 [--out 인자들은 K6_EXTRA] -e 환경변수들
   start_app_stats "$OUT/$name.app.tsv"
   [ "${DB_STATS:-0}" = "1" ] && start_db_stats "$OUT/$name.db.tsv"
   # shellcheck disable=SC2086
-  k6 run --quiet --summary-export="$OUT/$name.summary.json" ${K6_EXTRA:-} \
-    -e BASE=$BASE -e EVENT_ID="$EVENT_ID" "$@" "${K6_SCRIPT:-k6/queue.js}" > "$OUT/$name.k6.log" 2>&1
+  k6x run --quiet --summary-export="$OUT/$name.summary.json" ${K6_EXTRA:-} \
+    -e BASE="$(k6_base)" -e EVENT_ID="$EVENT_ID" "$@" "${K6_SCRIPT:-k6/queue.js}" > "$OUT/$name.k6.log" 2>&1
   log "$name k6 종료 코드 $?"
   stop_stats
   stop_app_stats
@@ -326,13 +348,13 @@ env_info() {
   {
     echo "- 호스트: $(sysctl -n machdep.cpu.brand_string), $(sysctl -n hw.ncpu)코어, $(( $(sysctl -n hw.memsize) / 1073741824 ))GB, macOS $(sw_vers -productVersion)"
     echo "- Docker $(docker version --format '{{.Server.Version}}'), VM $(docker info --format 'CPU {{.NCPU}}개, 메모리 {{.MemTotal}}바이트')"
-    echo "- k6 $(k6 version | head -1 | awk '{print $2}'), 부하기는 호스트에서 실행(Docker 포트 포워딩 경유)"
+    echo "- 부하기: k6 $(k6 version | head -1 | awk '{print $2}')를 기본은 호스트에서 실행(Docker 포트 포워딩 경유), V1 단계는 Docker 네트워크 안의 컨테이너($K6_IMAGE)로 nginx에 직접 보냄. 큰 응답은 호스트 경로가 먼저 한계가 된다"
     echo "- 코드: $(git rev-parse --short HEAD) ($(git branch --show-current))"
     echo "- 앱 컨테이너 한도: CPU $(docker inspect -f '{{.HostConfig.NanoCpus}}' "$app" | awk '{print $1 / 1e9}')코어, 메모리 $(docker inspect -f '{{.HostConfig.Memory}}' "$app" | awk '{print $1 / 1073741824}')GiB"
     echo "- 앱 JVM: $($COMPOSE exec -T app java -XX:+PrintFlagsFinal -version 2>/dev/null | awk '/ MaxHeapSize |UseG1GC |ParallelGCThreads |ConcGCThreads /{printf "%s=%s ", $2, $4}')"
-    echo "- nginx $($COMPOSE exec -T nginx nginx -v 2>&1 | awk -F/ '{print $2}'), 앱 1대 upstream, 설정은 docker/nginx/nginx.conf(줄서기 상한 숫자만 단계별로 바꿈, 기본은 꺼 둠)"
-    echo "- Redis $(rcli INFO server | awk -F: '/^redis_version:/{print $2}'), maxmemory $(rcli CONFIG GET maxmemory | tail -1) ($(rcli CONFIG GET maxmemory-policy | tail -1)), CPU 1코어"
-    echo "- Postgres $(psql_ -c 'SHOW server_version'), CPU 2코어, 메모리 1GiB"
+    echo "- nginx $($COMPOSE exec -T nginx nginx -v 2>&1 | awk -F/ '{print $2}'), 앱 1대 upstream, 설정은 docker/nginx/nginx.conf(좌석 배치 proxy_cache 포함, 줄서기 상한 숫자만 단계별로 바꿈, 기본은 꺼 둠). 캐시 없는 설정과 비교하려면 V1_NGINX_CONF로 바꾼다"
+    echo "- Redis $(rcli INFO server | awk -F: '/^redis_version:/{print $2}'), maxmemory $(rcli CONFIG GET maxmemory | tail -1) ($(rcli CONFIG GET maxmemory-policy | tail -1)), AOF $(rcli CONFIG GET appendfsync | tail -1), CPU $(docker inspect -f '{{.HostConfig.NanoCpus}}' "$($COMPOSE ps -q redis)" | awk '{print $1 / 1e9}')코어"
+    echo "- Postgres $(psql_ -c 'SHOW server_version'), CPU $(docker inspect -f '{{.HostConfig.NanoCpus}}' "$($COMPOSE ps -q postgres)" | awk '{print $1 / 1e9}')코어, 메모리 $(docker inspect -f '{{.HostConfig.Memory}}' "$($COMPOSE ps -q postgres)" | awk '{print $1 / 1073741824}')GiB, 풀 20"
     echo "- 토큰 TTL 2시간(측정이 15분을 넘겨도 미리 등록한 토큰이 만료되지 않게 함), 승격은 S4를 뺀 단계에서 끔"
   } > "$OUT/env.md"
   { echo "## 환경"; cat "$OUT/env.md"; echo; echo "## 결과"; echo; } >> "$OUT/results.md"
@@ -617,7 +639,7 @@ stage_D2() {
 
 # 저장소에 올라간 nginx.conf를 숫자 변경 없이 그대로 쓴다(출고 설정이 실제로 도는지 보는 단계용)
 nginx_shipped() {
-  export NGINX_CONF="$(pwd)/docker/nginx/nginx.conf"
+  export NGINX_CONF="${V1_NGINX_CONF:-$(pwd)/docker/nginx/nginx.conf}"
   restart_nginx || { log "nginx를 띄우지 못해 측정을 멈춤"; exit 1; }
   log "nginx 상한: 저장소 설정 그대로(줄서기 $(grep -oE 'limit_conn queue_register [0-9]+' docker/nginx/nginx.conf | awk '{print $3}'), 순번 조회 $(grep -oE 'limit_conn queue_poll [0-9]+' docker/nginx/nginx.conf | awk '{print $3}'))"
 }
@@ -758,9 +780,9 @@ stage_M1() {
 }
 
 # A2 앱 2대(각 2코어) 뒤에서 상한을 nginx 합계로 걸 때의 값. 설정 파일 주석의 "앱이 2대면 대략 두 배"를 확인한다
-two_apps_up() {
+two_apps_up() { # [승격 주기, 기본 1h]
   export COMPOSE_PROFILES=two NGINX_UPSTREAM=./nginx-upstream-2.conf
-  export QUEUE_PROMOTION_INTERVAL=1h
+  export QUEUE_PROMOTION_INTERVAL=${1:-1h}
   $COMPOSE up -d --build app app2 >> "$OUT/compose.log" 2>&1
   for _ in $(seq 1 120); do
     if curl -s -m 2 "$ACTUATOR/actuator/health/readiness" | grep -q '"UP"' && curl -s -m 2 "http://127.0.0.1:18082/actuator/health/readiness" | grep -q '"UP"'; then restart_nginx; return 0; fi
@@ -1223,6 +1245,197 @@ stage_H5() {
   unset COMPOSE_PROFILES NGINX_UPSTREAM
   $COMPOSE --profile two stop app2 >> "$OUT/compose.log" 2>&1
   stage_D1
+}
+
+# 정합성 점검: 결제 확정 예약의 좌석 수가 맞는지, 오래 남은 PENDING 결제가 없는지
+integrity_check() {
+  local mismatch stuck paid canceled
+  mismatch=$(psql_ -c "SELECT count(*) FROM reservation r WHERE r.status='PAID' AND r.quantity <> (SELECT count(*) FROM seat s WHERE s.reservation_id=r.id AND s.status='SOLD')")
+  stuck=$(psql_ -c "SELECT count(*) FROM payment WHERE status='PENDING' AND created_at < now() - interval '1 minute'")
+  paid=$(psql_ -c "SELECT count(*) FROM reservation WHERE status='PAID'")
+  canceled=$(psql_ -c "SELECT count(*) FROM reservation WHERE status='CANCELED'")
+  echo "- 정합성: 확정 예약 ${paid}건, 취소 ${canceled}건, 좌석 수가 어긋난 확정 예약 ${mismatch}건, 1분 넘게 PENDING인 결제 ${stuck}건" | tee -a "$OUT/results.md"
+}
+
+# 한 실행이 끝난 직후 그 구간의 로그를 모아 느린 요청을 분석한다: nginx의 느린 요청, 앱의 WARN과 ERROR와 느린 요청, Postgres의 느린 쿼리
+collect_logs() { # 이름 [slow-requests.py nginx에 넘길 --k6, --queue 인자들]
+  local name=$1 since cid
+  shift
+  since=$(cat "$OUT/$name.t0")
+  docker logs --since "$since" "$($COMPOSE ps -q nginx)" 2> /dev/null > "$OUT/$name.nginx.log"
+  : > "$OUT/$name.app.log"
+  for cid in $($COMPOSE --profile two ps -q app app2); do
+    docker logs --since "$since" "$cid" >> "$OUT/$name.app.log" 2>&1
+  done
+  docker logs --since "$since" "$($COMPOSE ps -q postgres)" > "$OUT/$name.pg.log" 2>&1
+  {
+    echo -e "\n느린 요청 분석 ($name)"
+    python3 k6/slow-requests.py nginx "$OUT/$name.nginx.log" --app "$OUT/$name.app.log" "$@"
+    python3 k6/slow-requests.py app "$OUT/$name.app.log"
+    python3 k6/slow-requests.py pg "$OUT/$name.pg.log"
+  } | tee -a "$OUT/results.md"
+}
+
+# 흐름 한 번: 새 공연을 시드하고 slo-flow.js를 돌려 판정하고 자원 요약과 정합성까지 낸다
+v1_flow_run() { # 라벨 흐름속도
+  local label=$1 rate=$2 seats="$ABS_OUT/v1-seats-$1.txt"
+  reset_queue; seed; open_event
+  psql_ -c "SELECT id FROM seat WHERE event_id=$EVENT_ID ORDER BY id" > "$seats"
+  DB_STATS=1 K6_SCRIPT=k6/slo-flow.js k6run "V1_flow_$label" -e SEATS_FILE="$seats" -e FLOW_RATE="$rate" -e BROWSE_RATE=$V1_BROWSE_RATE -e DURATION=$V1_FLOW_SECONDS -e PHONE_BASE=10000000
+  echo -e "\n#### 흐름 ${rate}명/s + 읽기 ${V1_BROWSE_RATE}/s ($label)" | tee -a "$OUT/results.md"
+  python3 k6/slo-check.py flow "$OUT/V1_flow_$label.summary.json" | tee -a "$OUT/results.md"
+  python3 k6/slo-check.py resources "$OUT/V1_flow_$label.stats.tsv" "$OUT/V1_flow_$label.db.tsv" "$OUT/V1_flow_$label.app.tsv" | tee -a "$OUT/results.md"
+  integrity_check
+  collect_logs "V1_flow_$label" --k6 "$OUT/V1_flow_$label.summary.json"
+}
+
+# V1 전체 API SLO 확인. 줄서기와 순번 조회는 높은 도착률이 필요해 queue.js로, 흐름과 읽기는 slo-flow.js로 따로 돌린다.
+# 흐름은 승격이 FIFO라 대기자 토큰과 섞이면 흐름 사용자가 뒤로 밀려서 순번 조회 시험과 단계를 나눈다.
+# V1_PARTS로 부분만 돌릴 수 있다(reg poll flow two). 흐름은 속도 목록(V1_FLOW_RATES)으로 경계를 찾고, two는 앱 2대에서 V1_TWO_APPS_RATE를 다시 건다
+stage_V1() {
+  local tokens="$ABS_OUT/v1-tokens.txt" parts="${V1_PARTS:-reg poll flow two}" rate
+  export K6_DOCKER=${K6_DOCKER:-1}
+  echo -e "\n### V1 전체 API SLO 확인 (docs/slo.md 기준, 앱 2코어, 가짜 PG, 출고 nginx 상한, 부하기 $([ "$K6_DOCKER" = "1" ] && echo "Docker 네트워크 안" || echo "호스트"), nginx 설정 ${V1_NGINX_CONF:-저장소 그대로})" >> "$OUT/results.md"
+  export APP_CPUS=2
+  if [[ " $parts " == *" reg "* ]]; then
+    log "V1 줄서기 ${V1_REG_RATE}/s"
+    up 1h || return 1
+    nginx_shipped; cold_restart
+    reset_queue; seed; open_event
+    warmup -e SCENARIO=register -e RATES=500 -e STEP_SECONDS=10
+    reset_queue
+    k6run V1_reg -e SCENARIO=register -e RATES=$V1_REG_RATE -e STEP_SECONDS=$V1_STEP
+    python3 k6/slo-check.py queue "$OUT/V1_reg.summary.json" register "reg_$V1_REG_RATE" | tee -a "$OUT/results.md"
+    collect_logs V1_reg --queue "$OUT/V1_reg.summary.json:register=reg_$V1_REG_RATE"
+  fi
+  if [[ " $parts " == *" poll "* ]]; then
+    log "V1 순번 조회 ${V1_POLL_RATE}/s (대기자 ${V1_TOKENS}명)"
+    up 1h || return 1
+    nginx_shipped; cold_restart
+    reset_queue; seed; open_event
+    fill_to "$V1_TOKENS"
+    dump_tokens "$V1_TOKENS" "$tokens"
+    warmup -e SCENARIO=poll -e TOKENS_FILE="$tokens" -e POLL_RATES=1000 -e STEP_SECONDS=10
+    k6run V1_poll -e SCENARIO=poll -e TOKENS_FILE="$tokens" -e POLL_RATES=$V1_POLL_RATE -e STEP_SECONDS=$V1_STEP
+    python3 k6/slo-check.py queue "$OUT/V1_poll.summary.json" poll "poll_$V1_POLL_RATE" | tee -a "$OUT/results.md"
+    collect_logs V1_poll --queue "$OUT/V1_poll.summary.json:poll=poll_$V1_POLL_RATE"
+  fi
+  if [[ " $parts " == *" flow "* ]]; then
+    up 1s || return 1
+    nginx_shipped; cold_restart
+    reset_queue; seed; open_event
+    psql_ -c "SELECT id FROM seat WHERE event_id=$EVENT_ID ORDER BY id" > "$ABS_OUT/v1-seats-warm.txt"
+    if [ -z "${V1_NGINX_CONF:-}" ]; then
+      echo -e "\n#### nginx 좌석 배치 캐시 점검" | tee -a "$OUT/results.md"
+      EVENT_ID=$EVENT_ID BASE=$BASE ACTUATOR=$ACTUATOR bash k6/check-layout-cache.sh | tee -a "$OUT/results.md"
+    fi
+    K6_SCRIPT=k6/slo-flow.js warmup -e SEATS_FILE="$ABS_OUT/v1-seats-warm.txt" -e FLOW_RATE=40 -e BROWSE_RATE=150 -e DURATION=20 -e PHONE_BASE=90000000
+    for rate in $V1_FLOW_RATES; do
+      log "V1 흐름 ${rate}명/s + 읽기 ${V1_BROWSE_RATE}/s (앱 1대)"
+      v1_flow_run "1app_${rate}" "$rate"
+    done
+  fi
+  if [[ " $parts " == *" two "* ]]; then
+    log "V1 흐름 ${V1_TWO_APPS_RATE}명/s + 읽기 ${V1_BROWSE_RATE}/s (앱 2대)"
+    two_apps_up 1s || return 1
+    nginx_shipped; restart_nginx
+    reset_queue
+    K6_SCRIPT=k6/slo-flow.js warmup -e SEATS_FILE="$ABS_OUT/v1-seats-warm.txt" -e FLOW_RATE=40 -e BROWSE_RATE=150 -e DURATION=20 -e PHONE_BASE=90000000
+    v1_flow_run "2app_${V1_TWO_APPS_RATE}" "$V1_TWO_APPS_RATE"
+    unset COMPOSE_PROFILES NGINX_UPSTREAM
+  fi
+  echo | tee -a "$OUT/results.md" > /dev/null
+}
+
+# V2 README 목표 규모(대기열 최대 50만 명, 줄서기 2,000/s, 승격 100/s, 좌석 30,000석)를 한 번에 건다.
+# 1) 승격을 끈 채 줄서기 2,000/s로 대기열을 상한까지 채운다. 2) 가득 찬 대기열에서 순번 조회, 줄서기(상한 거절), 줄 앞에서 승격된 사용자의 홀드와 결제(매진까지), 읽기를 동시에 건다.
+# 승격은 줄 앞쪽 토큰을 미리 활성으로 만들어 홀드가 승격 속도로 도착하는 것을 흉내 낸다(승격 스케줄러 자체는 V1이 잰다).
+# 원인을 가르려고 다음을 바꿀 수 있다: V2_POLL_RATE=0 또는 V2_REG_RATE=0(그 배경 부하를 끔), V2_FILL_MODE=fast(채우기를 최대 속도로, 채우기 SLO는 보지 않음),
+# V2_WARM_SECONDS=N(본 측정 전에 같은 부하를 N초 먼저 걸어 JVM을 충분히 데움. 예열 사용자는 V2_WARM_RATE로 도착)
+V2_BG_PIDS=()
+v2_background() { # 요약 파일 접두어(비면 결과를 남기지 않음) 초
+  local prefix=$1 secs=$2 poll_out=/dev/null flood_out=/dev/null poll_log=/dev/null flood_log=/dev/null
+  V2_BG_PIDS=()
+  [ -n "$prefix" ] && { poll_out="$OUT/${prefix}_poll.summary.json"; flood_out="$OUT/${prefix}_flood.summary.json"; poll_log="$OUT/${prefix}_poll.k6.log"; flood_log="$OUT/${prefix}_flood.k6.log"; }
+  if [ "$V2_POLL_RATE" -gt 0 ]; then
+    k6x run --quiet --summary-export="$poll_out" -e BASE="$(k6_base)" -e EVENT_ID="$EVENT_ID" -e SCENARIO=poll -e TOKENS_FILE="$ABS_OUT/v2-polls.txt" \
+      -e POLL_RATES="$V2_POLL_RATE" -e STEP_SECONDS=$(( secs + 20 )) k6/queue.js > "$poll_log" 2>&1 &
+    V2_BG_PIDS+=($!)
+  fi
+  if [ "$V2_REG_RATE" -gt 0 ]; then
+    k6x run --quiet --summary-export="$flood_out" -e BASE="$(k6_base)" -e EVENT_ID="$EVENT_ID" -e SCENARIO=register \
+      -e RATES="$V2_REG_RATE" -e STEP_SECONDS=$(( secs + 20 )) k6/queue.js > "$flood_log" 2>&1 &
+    V2_BG_PIDS+=($!)
+  fi
+}
+
+stage_V2() {
+  local all="$ABS_OUT/v2-all.txt" polls="$ABS_OUT/v2-polls.txt" cohort="$ABS_OUT/v2-cohort.txt" warm="$ABS_OUT/v2-warm.txt" seats="$ABS_OUT/v2-seats.txt"
+  local secs=$(( V2_USERS / V2_FLOW_RATE )) warm_n=$(( V2_WARM_USERS )) warm_rate=$V2_WARM_RATE queue_specs=() note=""
+  export K6_DOCKER=${K6_DOCKER:-1}
+  export APP_CPUS=2 QUEUE_MAX_WAITING=$V2_CAP
+  [ "$V2_POLL_RATE" -eq 0 ] && note="$note, 순번 조회 끔"
+  [ "$V2_REG_RATE" -eq 0 ] && note="$note, 줄서기 폭주 끔"
+  [ "$V2_WARM_SECONDS" -gt 0 ] && note="$note, 본 측정 전 같은 부하 ${V2_WARM_SECONDS}초 예열"
+  echo -e "\n### V2 README 목표 규모 (대기열 상한 ${V2_CAP}명, 앱 1대 2코어, 가짜 PG, 부하기 Docker 네트워크 안, nginx 설정 ${V1_NGINX_CONF:-저장소 그대로}${note})" >> "$OUT/results.md"
+  up 1h || return 1
+  nginx_shipped; cold_restart
+  reset_queue; seed; open_event
+  psql_ -c "SELECT id FROM seat WHERE event_id=$EVENT_ID ORDER BY id" > "$seats"
+  warmup -e SCENARIO=register -e RATES=500 -e STEP_SECONDS=10
+  reset_queue
+  if [ "${V2_FILL_MODE:-rate}" = "fast" ]; then
+    log "V2 1단계 대기열을 최대 속도로 ${V2_CAP}명까지 채움"
+    fill_to "$V2_CAP"
+  else
+    log "V2 1단계 줄서기 ${V2_FILL_RATE}/s로 ${V2_FILL_SECONDS}초 (상한 ${V2_CAP})"
+    k6run V2_fill -e SCENARIO=register -e RATES=$V2_FILL_RATE -e STEP_SECONDS=$V2_FILL_SECONDS
+    echo -e "\n#### 1단계 줄서기 ${V2_FILL_RATE}/s로 대기열 채우기" | tee -a "$OUT/results.md"
+    python3 k6/slo-check.py queue "$OUT/V2_fill.summary.json" register "reg_$V2_FILL_RATE" | tee -a "$OUT/results.md"
+    collect_logs V2_fill --queue "$OUT/V2_fill.summary.json:register=reg_$V2_FILL_RATE"
+  fi
+  echo "- 대기자 $(rcli ZCARD "queue:$EVENT_ID:waiting")명, Redis used_memory $(( $(rcli INFO memory | awk -F: '/^used_memory:/{print $2}') / 1048576 ))MiB" | tee -a "$OUT/results.md"
+  rcli ZRANGE "queue:$EVENT_ID:waiting" 0 -1 > "$all"
+  head -n $warm_n "$all" > "$warm"
+  sed -n "$(( warm_n + 1 )),$(( warm_n + V2_USERS ))p" "$all" > "$cohort"
+  awk -v skip=$(( warm_n + V2_USERS )) -v every="$V2_POLL_STRIDE" 'NR > skip && (NR - skip) % every == 0' "$all" > "$polls"
+  log "V2 토큰: 예열 $(wc -l < "$warm" | tr -d " "), 승격된 사용자 $(wc -l < "$cohort" | tr -d " "), 순번 조회용 $(wc -l < "$polls" | tr -d " ") (대기자 전체에서 고르게)"
+  cat "$warm" "$cohort" | awk -v e="$EVENT_ID" '{print "SET queue:" e ":active:" $1 " 1 EX 3600"}' | rcli > /dev/null
+  warmup -e SCENARIO=poll -e TOKENS_FILE="$polls" -e POLL_RATES=1000 -e STEP_SECONDS=10
+  if [ "$V2_WARM_SECONDS" -gt 0 ]; then
+    log "V2 예열: 본 측정과 같은 부하를 ${V2_WARM_SECONDS}초 (결과에 넣지 않음)"
+    v2_background "" "$V2_WARM_SECONDS"
+    K6_SCRIPT=k6/slo-flow.js warmup -e SEATS_FILE="$seats" -e TOKENS_FILE="$warm" -e FLOW_RATE="$warm_rate" -e BROWSE_RATE="$V2_BROWSE_RATE" -e DURATION=$(( warm_n / warm_rate )) -e PHONE_BASE=90000000
+    [ "${#V2_BG_PIDS[@]}" -gt 0 ] && wait "${V2_BG_PIDS[@]}"
+    sleep 5
+  else
+    K6_SCRIPT=k6/slo-flow.js warmup -e SEATS_FILE="$seats" -e TOKENS_FILE="$warm" -e FLOW_RATE="$warm_rate" -e BROWSE_RATE=100 -e DURATION=$(( warm_n / warm_rate )) -e PHONE_BASE=90000000
+  fi
+  log "V2 2단계 가득 찬 대기열에서 순번 조회 ${V2_POLL_RATE}/s + 줄서기 ${V2_REG_RATE}/s + 승격 ${V2_FLOW_RATE}/s 홀드와 결제 + 읽기 ${V2_BROWSE_RATE}/s (${secs}초)"
+  v2_background V2 "$secs"
+  sleep 5
+  DB_STATS=1 K6_SCRIPT=k6/slo-flow.js k6run V2_flow -e SEATS_FILE="$seats" -e TOKENS_FILE="$cohort" -e FLOW_RATE="$V2_FLOW_RATE" -e BROWSE_RATE="$V2_BROWSE_RATE" -e DURATION=$secs -e PHONE_BASE=10000000
+  [ "${#V2_BG_PIDS[@]}" -gt 0 ] && wait "${V2_BG_PIDS[@]}"
+  echo -e "\n#### 2단계 가득 찬 대기열에서 동시 부하" | tee -a "$OUT/results.md"
+  if [ "$V2_POLL_RATE" -gt 0 ]; then
+    echo "순번 조회 ${V2_POLL_RATE}/s (대기자 $(rcli ZCARD "queue:$EVENT_ID:waiting")명 중 $(wc -l < "$polls" | tr -d " ")개 토큰)" | tee -a "$OUT/results.md"
+    python3 k6/slo-check.py queue "$OUT/V2_poll.summary.json" poll "poll_$V2_POLL_RATE" | tee -a "$OUT/results.md"
+    queue_specs+=(--queue "$OUT/V2_poll.summary.json:poll=poll_$V2_POLL_RATE")
+  fi
+  if [ "$V2_REG_RATE" -gt 0 ]; then
+    echo "줄서기 ${V2_REG_RATE}/s (대기열이 가득 차 거절되는 요청, QUEUE_FULL은 제외 열)" | tee -a "$OUT/results.md"
+    python3 k6/slo-check.py queue "$OUT/V2_flood.summary.json" register "reg_$V2_REG_RATE" | tee -a "$OUT/results.md"
+    queue_specs+=(--queue "$OUT/V2_flood.summary.json:register=reg_$V2_REG_RATE")
+  fi
+  echo "승격된 사용자 ${V2_FLOW_RATE}명/s의 홀드와 결제 + 읽기 ${V2_BROWSE_RATE}/s" | tee -a "$OUT/results.md"
+  python3 k6/slo-check.py flow "$OUT/V2_flow.summary.json" | tee -a "$OUT/results.md"
+  python3 k6/slo-check.py resources "$OUT/V2_flow.stats.tsv" "$OUT/V2_flow.db.tsv" "$OUT/V2_flow.app.tsv" | tee -a "$OUT/results.md"
+  echo "- 홀드 성공이 DB에 생긴 속도(초 단위 집계): $(psql_ -c "SELECT 'peak ' || max(c) || '건/s, 평균 ' || round(avg(c)) || '건/s (' || count(*) || '초)' FROM (SELECT date_trunc('second', created_at) s, count(*) c FROM reservation WHERE event_id=$EVENT_ID GROUP BY 1) t")" | tee -a "$OUT/results.md"
+  echo "- 좌석 상태: $(psql_ -c "SELECT string_agg(status || ' ' || n, ', ') FROM (SELECT status, count(*) n FROM seat WHERE event_id=$EVENT_ID GROUP BY status) t")" | tee -a "$OUT/results.md"
+  echo "- 대기자 $(rcli ZCARD "queue:$EVENT_ID:waiting")명, Redis used_memory $(( $(rcli INFO memory | awk -F: '/^used_memory:/{print $2}') / 1048576 ))MiB" | tee -a "$OUT/results.md"
+  integrity_check
+  collect_logs V2_flow --k6 "$OUT/V2_flow.summary.json" "${queue_specs[@]}"
+  export QUEUE_MAX_WAITING=500000
 }
 
 stage_N3A() { stage_N3R; }
