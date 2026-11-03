@@ -83,16 +83,22 @@ def queue(path, api, scenario):
 def resources(stats_path, db_path, app_path):
     import statistics
     cpu = {}
+    app_total = {}
     for line in open(stats_path):
         cols = line.rstrip("\n").split("\t")
         if len(cols) >= 3:
             try:
-                cpu.setdefault(cols[1], []).append(float(cols[2].rstrip("%")))
+                value = float(cols[2].rstrip("%"))
             except ValueError:
-                pass
+                continue
+            cpu.setdefault(cols[1], []).append(value)
+            if cols[1] in ("app", "app2"):
+                app_total[cols[0]] = app_total.get(cols[0], 0) + value
     db = [list(map(float, l.split("\t"))) for l in open(db_path) if l.strip()]
     heap = [float(l.split("\t")[1]) for l in open(app_path) if l.strip()]
     parts = [f"{role} CPU 평균 {statistics.mean(v):.0f}% 최대 {max(v):.0f}%" for role, v in sorted(cpu.items())]
+    if "app2" in cpu:
+        parts.append(f"앱 두 대 합계 평균 {statistics.mean(app_total.values()):.0f}% 최대 {max(app_total.values()):.0f}%")
     parts.append(f"Hikari 사용 중 최대 {max(r[1] for r in db):.0f}, 연결을 기다린 스레드 최대 {max(r[2] for r in db):.0f}")
     parts.append(f"힙 최대 {max(heap):.0f}MiB")
     print("- 자원: " + ", ".join(parts))

@@ -117,6 +117,29 @@ QUICK=1 STAGES=V2 ./k6/measure-queue.sh      # 규모를 줄여 스크립트만 
 
 V1과 V2는 단계가 끝날 때마다 그 구간의 nginx 로그(느린 요청과 서버 오류만 남음), 앱 로그(WARN, ERROR, 느린 요청), Postgres 느린 쿼리를 모아 `slow-requests.py`로 분석하고 결과 폴더에 `<단계>.nginx.log`, `.app.log`, `.pg.log`로 남긴다. 표 읽는 법, 요청 id로 로그를 잇는 법, nginx와 ALB 필드 대응은 `docs/slow-requests.md`에 있다.
 
+## 원인 가르기용 옵션
+
+느려진 원인을 추측하지 않고 가르려고 하나씩 바꿔 볼 수 있게 한 옵션들이다. 실행마다 쿼리별 누적 시간(`pg_stat_statements`), 컨테이너별 CPU 스로틀링과 CPU 대기(PSI), Hikari 연결을 기다리고 쥔 시간을 `results.md`에 남긴다.
+
+| 옵션 | 쓰임 |
+|---|---|
+| `WARMUP_ENABLED=true` | 앱의 기동 직후 예열(readiness가 UP이 되기 전에 읽기 경로를 자기 자신에게 호출)을 켠다. 측정은 기본으로 끈 채 돈다. `WARMUP_DURATION`으로 시간을 바꾼다 |
+| `PG_CPUS=4` | Postgres의 CPU 할당량을 바꿔 DB의 CPU 한도가 병목인지 본다 |
+| `HOG_THREADS=2` | 앱이 아닌 CPU 부하 컨테이너(바쁜 루프)를 함께 띄운다. 앱 대수가 아니라 같은 Mac의 CPU 사용량이 느려짐을 만드는지 가른다 |
+| `V1_TWO_IDLE=1` | 앱 2는 띄우되 트래픽은 앱 1에만 보낸다 |
+| `V2_POLL_RATE=0`, `V2_REG_RATE=0` | V2에서 순번 조회나 줄서기 폭주를 끈다 |
+| `V2_FILL_MODE=fast` | V2의 대기열 채우기를 최대 속도로 한다(채우기 SLO는 보지 않음) |
+| `V2_WARM_SECONDS=60` | V2 본 측정 전에 같은 부하를 먼저 걸어 앱을 충분히 데운다. 예열 사용자는 `V2_WARM_USERS`, `V2_WARM_RATE`로 정한다 |
+
+```
+WARMUP_ENABLED=true STAGES=V2 V2_FILL_MODE=fast ./k6/measure-queue.sh                # 예열을 켠 앱에 README 규모 부하
+HOG_THREADS=4 STAGES=V1 V1_PARTS="flow" V1_FLOW_RATES=120 ./k6/measure-queue.sh      # 앱 1대 + 바쁜 루프 4개
+PG_CPUS=4 STAGES=V1 V1_PARTS="flow two" V1_FLOW_RATES=120 ./k6/measure-queue.sh      # 앱 1대 대 2대, Postgres 4코어
+```
+
+- 한 번의 실행에서 값이 크게 흔들린다. 같은 조건을 번갈아 여러 번 돌려 비교한다.
+- 실행 중인 `measure-queue.sh`를 편집하면 bash가 파일을 읽던 위치가 어긋나 끝에서 문법 오류가 난다. 고치려면 새 파일을 만든 뒤 `mv`로 바꾼다.
+
 ## 측정 결과
 
 이슈 #127 본문에 기존 `/seats`와 새 구조의 비교, 갱신 주기 수정 전후 결과를 적었다.

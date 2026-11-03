@@ -123,6 +123,7 @@ rcli() { $COMPOSE exec -T redis redis-cli "$@" | tr -d '\r'; }
 psql_() { $COMPOSE exec -T postgres psql -U ticketrush -d ticketrush -tA "$@"; }
 
 cleanup() {
+  docker rm -f tr-measure-hog > /dev/null 2>&1
   [ -n "${STATS_PID:-}" ] && kill "$STATS_PID" 2>/dev/null
   [ -n "${APP_STATS_PID:-}" ] && kill "$APP_STATS_PID" 2>/dev/null
   [ -n "${DB_STATS_PID:-}" ] && kill "$DB_STATS_PID" 2>/dev/null
@@ -240,7 +241,7 @@ start_stats() { # 출력 파일
       now=$(date +%s)
       docker stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}' $($COMPOSE ps -q) 2>/dev/null | awk -F'|' -v t="$now" '{
         role = "other"
-        if ($1 ~ /nginx/) role = "nginx"; else if ($1 ~ /app/) role = "app"; else if ($1 ~ /redis/) role = "redis"; else if ($1 ~ /postgres/) role = "postgres"
+        if ($1 ~ /nginx/) role = "nginx"; else if ($1 ~ /app2/) role = "app2"; else if ($1 ~ /app/) role = "app"; else if ($1 ~ /redis/) role = "redis"; else if ($1 ~ /postgres/) role = "postgres"
         cpu = $2; gsub("%", "", cpu)
         split($3, a, " / "); v = a[1] + 0
         if (a[1] ~ /GiB/) v = v * 1024; else if (a[1] ~ /KiB/) v = v / 1024
@@ -644,12 +645,17 @@ nginx_shipped() {
   log "nginx 상한: 저장소 설정 그대로(줄서기 $(grep -oE 'limit_conn queue_register [0-9]+' docker/nginx/nginx.conf | awk '{print $3}'), 순번 조회 $(grep -oE 'limit_conn queue_poll [0-9]+' docker/nginx/nginx.conf | awk '{print $3}'))"
 }
 
-cold_restart() { # 앱을 껐다 켜서 JIT가 식은 상태로 바로 부하를 받게 한다
+cold_restart() { # 앱을 껐다 켜서 JIT가 식은 상태로 바로 부하를 받게 한다. 응답이 처음 오기까지와 readiness가 UP이 되기까지를 기록한다
+  local t0 first="" code
+  t0=$(date +%s)
   $COMPOSE restart app >> "$OUT/compose.log" 2>&1
-  for _ in $(seq 1 120); do
-    curl -s -m 2 "$ACTUATOR/actuator/health/readiness" | grep -q '"UP"' && break
+  for _ in $(seq 1 180); do
+    code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' "$ACTUATOR/actuator/health/readiness")
+    [ -z "$first" ] && [ "$code" != "000" ] && first="$(( $(date +%s) - t0 ))"
+    [ "$code" = "200" ] && break
     sleep 1
   done
+  log "앱 재시작: 첫 응답까지 ${first:--}초, readiness UP까지 $(( $(date +%s) - t0 ))초 (마지막 응답 $code)"
   restart_nginx
 }
 
@@ -1257,6 +1263,99 @@ integrity_check() {
   echo "- 정합성: 확정 예약 ${paid}건, 취소 ${canceled}건, 좌석 수가 어긋난 확정 예약 ${mismatch}건, 1분 넘게 PENDING인 결제 ${stuck}건" | tee -a "$OUT/results.md"
 }
 
+# 컨테이너별 CPU 스로틀링(할당량에 닿아 멈춘 횟수와 시간)과 CPU 대기 시간(PSI: 실행할 수 있는데 CPU를 기다린 시간).
+# 평균 CPU가 한도보다 낮아도 순간적으로 몰리면 멈추거나 기다린다. vm은 Docker VM 전체의 CPU 대기 시간이다
+cg_snapshot() { # 출력 파일
+  local cid name first=1
+  : > "$1"
+  for cid in $($COMPOSE --profile two ps -q); do
+    name=$(docker inspect -f '{{.Name}}' "$cid" | sed -E 's#^/tr-measure-##; s#-[0-9]+$##')
+    docker exec "$cid" sh -c 'cat /sys/fs/cgroup/cpu.stat; echo "pressure $(grep ^some /sys/fs/cgroup/cpu.pressure | sed -E "s/.*total=//")"; echo "vm $(grep ^some /proc/pressure/cpu | sed -E "s/.*total=//")"' 2> /dev/null \
+      | awk -v n="$name" '/^nr_periods/{p=$2} /^nr_throttled/{t=$2} /^throttled_usec/{u=$2} /^pressure/{c=$2} /^vm/{v=$2} END{if (p != "") print n, p, t, u, c, v}' >> "$1"
+    first=0
+  done
+}
+cg_report() { # 이름 (이름.cg.before, 이름.cg.after)
+  python3 - "$OUT/$1.cg.before" "$OUT/$1.cg.after" <<'PY' | tee -a "$OUT/results.md"
+import sys
+def load(p):
+    rows = {}
+    for line in open(p):
+        c = line.split()
+        if len(c) == 6:
+            rows[c[0]] = tuple(int(x) for x in c[1:])
+    return rows
+before, after = load(sys.argv[1]), load(sys.argv[2])
+parts, waits, vm = [], [], 0
+for name in sorted(after):
+    if name not in before:
+        continue
+    periods, throttled, usec, wait, vmtotal = (a - b for a, b in zip(after[name], before[name]))
+    vm = max(vm, vmtotal)
+    if periods > 0 and name in ("postgres", "app", "app2", "redis", "nginx"):
+        parts.append(f"{name} {throttled:,}/{periods:,}구간 {usec / 1000:,.0f}ms")
+        waits.append(f"{name} {wait / 1000:,.0f}ms")
+print("- CPU 스로틀링(멈춘 구간/전체 구간, 멈춘 시간): " + ", ".join(parts))
+print("- CPU 대기(실행할 수 있는데 CPU를 기다린 시간): " + ", ".join(waits) + f", VM 전체 {vm / 1000:,.0f}ms")
+PY
+}
+
+# 요청 하나가 DB 연결을 얼마나 기다리고(acquire) 얼마나 쥐고 있었는지(usage). 쿼리 실행 시간 밖에서 쓰인 시간을 가린다
+hk_snapshot() { # 출력 파일
+  local port name
+  : > "$1"
+  for port in 18081 18082; do
+    name=app; [ "$port" = 18082 ] && name=app2
+    curl -s -m 2 "http://127.0.0.1:$port/actuator/prometheus" 2> /dev/null \
+      | awk -v n="$name" '/^hikaricp_connections_acquire_seconds_count/{ac=$NF} /^hikaricp_connections_acquire_seconds_sum/{as=$NF} /^hikaricp_connections_usage_seconds_count/{uc=$NF} /^hikaricp_connections_usage_seconds_sum/{us=$NF} END{if (ac != "") print n, ac, as, uc, us}' >> "$1"
+  done
+}
+hk_report() { # 이름 (이름.hk.before, 이름.hk.after)
+  python3 - "$OUT/$1.hk.before" "$OUT/$1.hk.after" <<'PY' | tee -a "$OUT/results.md"
+import sys
+def load(p):
+    rows = {}
+    for line in open(p):
+        c = line.split()
+        if len(c) == 5:
+            rows[c[0]] = tuple(float(x) for x in c[1:])
+    return rows
+before, after = load(sys.argv[1]), load(sys.argv[2])
+parts = []
+for name in sorted(after):
+    if name not in before:
+        continue
+    ac, as_, uc, us = (a - b for a, b in zip(after[name], before[name]))
+    if ac > 0 and uc > 0:
+        parts.append(f"{name} 연결 {ac:,.0f}번 빌림, 기다린 시간 평균 {as_ / ac * 1000:.2f}ms, 쥔 시간 평균 {us / uc * 1000:.2f}ms, 연결을 쥔 총 시간 {us:,.1f}초")
+print("- DB 연결(Hikari): " + "; ".join(parts))
+PY
+}
+
+# 앱이 아닌 CPU 부하 컨테이너(바쁜 루프). 앱을 한 대 늘렸을 때의 느려짐이 앱 때문인지, 같은 Mac에서 CPU를 더 쓰는 것 때문인지 가린다
+hog_start() {
+  [ "${HOG_THREADS:-0}" -gt 0 ] || return 0
+  docker rm -f tr-measure-hog > /dev/null 2>&1
+  docker run -d --rm --name tr-measure-hog --cpus="$HOG_THREADS" alpine sh -c "i=0; while [ \$i -lt $HOG_THREADS ]; do (while :; do :; done) & i=\$((i+1)); done; wait" > /dev/null
+  echo "- 대조용 CPU 부하: 바쁜 루프 ${HOG_THREADS}개(별도 컨테이너)" | tee -a "$OUT/results.md"
+}
+hog_stop() { docker rm -f tr-measure-hog > /dev/null 2>&1; }
+
+# 쿼리별 누적 시간(pg_stat_statements). 구성끼리 DB가 하는 일이 어떻게 다른지 비교하려고 실행 전에 비우고 끝나면 상위를 남긴다
+pgss_reset() {
+  psql_ -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements" > /dev/null 2>&1
+  psql_ -c "SELECT pg_stat_statements_reset()" > /dev/null 2>&1
+}
+pgss_dump() { # 이름
+  {
+    echo -e "\nPostgres 쿼리별 누적 시간 상위 ($1)"
+    echo "| 호출 | 총 ms | 평균 ms | 쿼리(값은 가려짐) |"
+    echo "|---|---|---|---|"
+    psql_ -F '|' -c "SELECT '| ' || calls || ' | ' || round(total_exec_time) || ' | ' || round(mean_exec_time::numeric, 2) || ' | ' || left(regexp_replace(query, '\s+', ' ', 'g'), 90) || ' |' FROM pg_stat_statements WHERE query NOT LIKE '%pg_stat_statements%' ORDER BY total_exec_time DESC LIMIT 10" 2> /dev/null
+    echo "- 전체: 호출 $(psql_ -c "SELECT coalesce(sum(calls), 0) FROM pg_stat_statements WHERE query NOT LIKE '%pg_stat_statements%'" 2> /dev/null), 총 $(psql_ -c "SELECT coalesce(round(sum(total_exec_time)), 0) FROM pg_stat_statements WHERE query NOT LIKE '%pg_stat_statements%'" 2> /dev/null)ms"
+  } | tee -a "$OUT/results.md" > "$OUT/$1.pgss.md"
+}
+
 # 한 실행이 끝난 직후 그 구간의 로그를 모아 느린 요청을 분석한다: nginx의 느린 요청, 앱의 WARN과 ERROR와 느린 요청, Postgres의 느린 쿼리
 collect_logs() { # 이름 [slow-requests.py nginx에 넘길 --k6, --queue 인자들]
   local name=$1 since cid
@@ -1281,11 +1380,21 @@ v1_flow_run() { # 라벨 흐름속도
   local label=$1 rate=$2 seats="$ABS_OUT/v1-seats-$1.txt"
   reset_queue; seed; open_event
   psql_ -c "SELECT id FROM seat WHERE event_id=$EVENT_ID ORDER BY id" > "$seats"
+  pgss_reset
+  hog_start
+  cg_snapshot "$OUT/V1_flow_$label.cg.before"
+  hk_snapshot "$OUT/V1_flow_$label.hk.before"
   DB_STATS=1 K6_SCRIPT=k6/slo-flow.js k6run "V1_flow_$label" -e SEATS_FILE="$seats" -e FLOW_RATE="$rate" -e BROWSE_RATE=$V1_BROWSE_RATE -e DURATION=$V1_FLOW_SECONDS -e PHONE_BASE=10000000
   echo -e "\n#### 흐름 ${rate}명/s + 읽기 ${V1_BROWSE_RATE}/s ($label)" | tee -a "$OUT/results.md"
   python3 k6/slo-check.py flow "$OUT/V1_flow_$label.summary.json" | tee -a "$OUT/results.md"
   python3 k6/slo-check.py resources "$OUT/V1_flow_$label.stats.tsv" "$OUT/V1_flow_$label.db.tsv" "$OUT/V1_flow_$label.app.tsv" | tee -a "$OUT/results.md"
   integrity_check
+  cg_snapshot "$OUT/V1_flow_$label.cg.after"
+  hog_stop
+  cg_report "V1_flow_$label"
+  hk_snapshot "$OUT/V1_flow_$label.hk.after"
+  hk_report "V1_flow_$label"
+  pgss_dump "V1_flow_$label"
   collect_logs "V1_flow_$label" --k6 "$OUT/V1_flow_$label.summary.json"
 }
 
@@ -1336,12 +1445,16 @@ stage_V1() {
     done
   fi
   if [[ " $parts " == *" two "* ]]; then
-    log "V1 흐름 ${V1_TWO_APPS_RATE}명/s + 읽기 ${V1_BROWSE_RATE}/s (앱 2대)"
+    log "V1 흐름 ${V1_TWO_APPS_RATE}명/s + 읽기 ${V1_BROWSE_RATE}/s (앱 2대${V1_TWO_IDLE:+, 앱 2는 트래픽 없이 띄우기만})"
     two_apps_up 1s || return 1
+    # V1_TWO_IDLE=1이면 앱 2는 떠 있되 nginx는 앱 1에만 보낸다. 앱이 하나 더 있다는 사실만으로 느려지는지 가린다
+    [ -n "${V1_TWO_IDLE:-}" ] && export NGINX_UPSTREAM=./nginx-upstream-1.conf
     nginx_shipped; restart_nginx
-    reset_queue
-    K6_SCRIPT=k6/slo-flow.js warmup -e SEATS_FILE="$ABS_OUT/v1-seats-warm.txt" -e FLOW_RATE=40 -e BROWSE_RATE=150 -e DURATION=20 -e PHONE_BASE=90000000
-    v1_flow_run "2app_${V1_TWO_APPS_RATE}" "$V1_TWO_APPS_RATE"
+    # 예열은 지금 띄운 공연의 좌석으로 해야 홀드, 결제, 조회, 취소 경로까지 데워진다(앞 단계의 좌석 파일은 다른 공연 것이라 홀드가 실패한다)
+    reset_queue; seed; open_event
+    psql_ -c "SELECT id FROM seat WHERE event_id=$EVENT_ID ORDER BY id" > "$ABS_OUT/v1-seats-warm-two.txt"
+    K6_SCRIPT=k6/slo-flow.js warmup -e SEATS_FILE="$ABS_OUT/v1-seats-warm-two.txt" -e FLOW_RATE=40 -e BROWSE_RATE=150 -e DURATION=20 -e PHONE_BASE=90000000
+    v1_flow_run "2app${V1_TWO_IDLE:+idle}_${V1_TWO_APPS_RATE}" "$V1_TWO_APPS_RATE"
     unset COMPOSE_PROFILES NGINX_UPSTREAM
   fi
   echo | tee -a "$OUT/results.md" > /dev/null
