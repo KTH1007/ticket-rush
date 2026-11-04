@@ -35,6 +35,7 @@ Redis에는 대기열(순번, 토큰, 활성 키)과 좌석 선점의 1차 필�
 ### 3. 등록이 `QUEUE_FULL` 503으로 거절된다
 
 - 공연 하나의 대기열이 상한(`ticket-rush.queue.max-waiting`, 기본 50만)에 닿았다는 뜻이고 의도된 거절이다. 응답에 `Retry-After` 5~10초가 붙는다.
+- 응답에는 `Cache-Control: max-age=1`도 붙는다. nginx가 같은 공연의 줄서기 거절을 앱에 묻지 않고 그대로 돌려준다(응답 헤더 `X-Cache-Status: HIT`). nginx가 만료를 초 단위 시계로 판정해 실제로는 1~2초(실측 약 1.4초) 유지된다. 그래서 대기열에 자리가 나도 그만큼은 계속 거절될 수 있고, 거절 응답의 `Retry-After`는 그 시간 안의 요청이 모두 같은 값이다. nginx를 거치지 않는 구성(ALB만 있는 경우)에서는 이 재사용이 없다.
 - 거절 횟수는 Micrometer 카운터 `queue.register.rejected`(태그 `reason=full`)로 센다. 장애로 인한 503과 구분하려고 따로 두었다.
 - 상한은 설정 `ticket-rush.queue.max-waiting`(환경 변수 `TICKET_RUSH_QUEUE_MAX_WAITING`)이고 바꾸려면 재배포가 필요하다.
 - `waiting`에는 만료된 토큰이 승격 때까지 남아 `ZCARD`가 실제 대기자보다 클 수 있다. 상한이 예상보다 일찍 닿으면 이것을 의심한다(유령을 지우는 처리는 아직 없다).

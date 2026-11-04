@@ -10,10 +10,11 @@
 ```
 
 - `@Tag("e2e")`로 묶어 기본 `./gradlew build`에서는 뺀다(전체 약 1분).
+- CI는 `.github/workflows/e2e.yml`이 돌린다. main 병합, 야간(KST 03:30), 수동 실행, e2e 테스트나 이 워크플로를 고친 PR에서 돈다. 매 PR의 `build`에는 들어가지 않는다.
 - Testcontainers로 Postgres와 Redis를 띄우고, 앱은 실제 HTTP 포트로 기동한다. Toss는 `127.0.0.1`에만 바인드한 WireMock이 대신한다.
 - 스케줄러가 실제로 돌도록 `application-e2e.yml`이 주기를 짧게 되돌린다(승격 200ms, 홀드 만료 정리 500ms, 결제 회수 500ms, 환불 재시도 500ms). 홀드 TTL은 10초, Toss 타임아웃은 연결 300ms와 읽기 700ms다.
 - 테스트마다 새 공연과 새 사용자 IP(`X-Forwarded-For`)와 새 전화번호를 써서 서로의 상태(대기열, 좌석, IP 한도)에 끼지 않는다.
-- 설정이 달라야 하는 시나리오(대기열 상한과 IP 한도, 승격 끔, 활성 TTL 1초, 서킷브레이커 격리)는 `@TestPropertySource`로 컨텍스트를 나눈다.
+- 설정이 달라야 하는 시나리오(대기열 상한과 IP 한도, 승격 끔, 활성 TTL 1초, 연결 풀 2개, 서킷브레이커 격리)는 `@TestPropertySource`로 컨텍스트를 나눈다.
 
 ## 전제와 한계
 
@@ -21,6 +22,7 @@
 - 이 e2e가 생기기 전에는 줄서기, 홀드, 결제, 조회, 취소 중 둘 이상을 이어서 거치는 테스트 파일이 없었다.
 - 결제는 가짜 Toss(WireMock)라 실제 Toss의 지연과 오류 분포는 반영하지 못한다.
 - Redis 장애는 메모리 한도로 쓰기를 거부시키는 방식만 다룬다. 연결 끊김은 단위 테스트로만 확인한다.
+- DB 장애는 연결 풀을 바닥내는 방식만 다룬다. DB가 내려가거나 쿼리가 느려지는 경우는 다루지 않는다.
 
 
 ## 정상 흐름
@@ -40,7 +42,7 @@
 | E04 | 오픈 전 줄서기 | 409 `QUEUE_NOT_OPEN` | `QueueControllerTest` | `QueueE2eTest` |
 | E05 | 공연 시작 뒤 줄서기 | 409 `QUEUE_CLOSED` | `QueueControllerTest` | `QueueE2eTest` |
 | E06 | 없는 공연에 줄서기 | 404 `EVENT_NOT_FOUND` | `QueueControllerTest` | `QueueE2eTest` |
-| E07 | 대기열이 상한에 닿음 | 503 `QUEUE_FULL`과 `Retry-After` 5~10초, 이미 선 사람의 조회는 계속 200 | `QueueRegisterCapTest`, `QueueRegisterCapConcurrencyTest` | `QueueLimitsE2eTest` |
+| E07 | 대기열이 상한에 닿음 | 503 `QUEUE_FULL`과 `Retry-After` 5~10초와 `Cache-Control: max-age=1`(nginx가 1~2초 동안 같은 거절을 재사용), 이미 선 사람의 조회는 계속 200 | `QueueRegisterCapTest`, `QueueRegisterCapConcurrencyTest` | `QueueLimitsE2eTest` |
 | E08 | 같은 IP가 한도를 넘겨 줄서기 | 429 `QUEUE_REGISTER_RATE_LIMITED`와 `Retry-After` | `QueueRegisterIpLimitTest` | `QueueLimitsE2eTest` |
 | E09 | 없는 대기 토큰으로 순번 조회 | 401 `INVALID_QUEUE_TOKEN` | `QueueQueryServiceTest`, `QueueControllerTest` | `QueueE2eTest` |
 | E10 | 승격 전에 좌석 홀드 | 403 `QUEUE_NOT_ACTIVE` | `QueueCommandServiceAdmitTest`, `SeatHoldControllerTest` | `QueueLimitsE2eTest` |
@@ -82,3 +84,4 @@
 |---|---|---|---|---|
 | E26 | Redis가 메모리 한도에 닿아 쓰기를 거부 | 새 줄서기 503 `TEMPORARILY_UNAVAILABLE`과 `Retry-After`, 이미 선 사람의 조회는 200, 풀리면 바로 회복 | `GlobalExceptionHandlerTest`, `RedisFailuresTest`(단위) | `RedisFailureE2eTest` |
 | E27 | Redis가 재시작돼도 대기 순번이 유지됨 | 재시작 뒤 같은 토큰으로 조회 가능 | 수동 스크립트 `scripts/redis-lab/app-aof.sh` | 자동화하지 않음(볼륨이 있는 컨테이너 재시작을 Testcontainers로 흉내 내기 어려워 수동 스크립트 유지) |
+| E31 | DB 연결 풀이 바닥남(테스트가 풀의 연결을 모두 쥠) | 503 `TEMPORARILY_UNAVAILABLE`과 `Retry-After` 5~10초, 풀리면 바로 회복 | `GlobalExceptionHandlerTest`, `DatabaseFailuresTest`(단위) | `DbPoolExhaustionE2eTest` |
