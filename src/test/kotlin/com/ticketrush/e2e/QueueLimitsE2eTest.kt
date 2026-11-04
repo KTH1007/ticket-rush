@@ -5,9 +5,11 @@ import org.springframework.test.context.TestPropertySource
 import kotlin.test.Test
 
 // E07, E08, E10: 한도와 승격 전 상태를 만들려고 설정이 다른 컨텍스트를 쓴다.
-// 승격 스케줄러는 사실상 끄고(주기 1시간), 대기열 상한은 3, IP별 발급 한도는 2로 둔다
+// 승격 스케줄러는 사실상 끄고(주기 1시간), 대기열 상한은 3, IP별 발급 한도는 2로 둔다.
+// 다른 컨텍스트의 승격 스케줄러(200ms)가 같은 Redis의 대기열을 승격시키지 못하게 Redis DB를 따로 쓴다
 @TestPropertySource(
     properties = [
+        "spring.data.redis.database=1",
         "ticket-rush.queue.promotion-interval=1h",
         "ticket-rush.queue.max-waiting=3",
         "ticket-rush.queue.register-limit.max-per-ip=2",

@@ -4,8 +4,9 @@ import org.assertj.core.api.Assertions.assertThat
 import org.springframework.test.context.TestPropertySource
 import kotlin.test.Test
 
-// E11: 활성 시간이 지나는 상황을 만들려고 활성 TTL을 1초로 줄인 컨텍스트를 쓴다
-@TestPropertySource(properties = ["ticket-rush.queue.active-ttl=1s"])
+// E11: 활성 시간이 지나는 상황을 만들려고 활성 TTL을 1초로 줄인 컨텍스트를 쓴다.
+// 다른 컨텍스트의 승격 스케줄러가 기본 TTL로 활성 키를 만들지 못하게 Redis DB를 따로 쓴다
+@TestPropertySource(properties = ["ticket-rush.queue.active-ttl=1s", "spring.data.redis.database=2"])
 class QueueActiveExpiryE2eTest : E2eTest() {
     @Test
     fun `E11 활성 시간이 지난 뒤 홀드하면 403 QUEUE_ACTIVE_EXPIRED이다`() {
