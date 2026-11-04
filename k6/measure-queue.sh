@@ -16,6 +16,7 @@
 #   H1 승격 속도별 혼합 부하(홀드, 결제 포기, 좌석 지도 조회, 대기자 순번 조회를 한 앱에 같이). H2 매진까지 이어지는 긴 부하. H3 PG 장애 모드(Toss 스텁의 지연, 5xx, 장애 구간). H4 앱 2대. H5 최신 코드의 D1 재기준선
 #   V1 전체 API SLO 확인(docs/slo.md). 줄서기와 순번 조회를 목표 도착률로, 흐름(줄서기부터 취소까지)과 읽기 API를 목표 규모로 돌려 한 표로 판정하고 정합성을 점검
 #   V2 README 목표 규모 전체 SLO 확인. 줄서기 2,000/s로 대기열을 50만 명 상한까지 채운 뒤, 가득 찬 대기열에서 순번 조회, 줄서기(거절), 승격된 사용자의 홀드와 결제(매진까지), 읽기를 동시에
+#   R1 가득 찬 대기열에서 줄서기가 거절될 때 요청 하나당 앱과 nginx CPU(R1_TAG로 변형 이름을 붙여 코드나 nginx 설정을 바꾼 전후를 비교)
 #   N3A, N6A 변경 뒤 순번 조회(상한 250)와 줄서기(상한 500) 처리량 재측정
 #   M3 홀드 지연이 받아준 요청 때문인지 거절당하는 요청 폭주 때문인지 가림
 #   M1 순번 조회와 홀드, 결제가 같은 앱에서 동시에 오는 혼합 부하. A2 앱 2대 뒤에서 nginx 합계 상한 값
@@ -66,6 +67,7 @@ if [ "${QUICK:-0}" = "1" ]; then
   H_USERS=${H_USERS:-600}; H_RATES=${H_RATES:-"30 60"}; H_REPS=${H_REPS:-1}; H_POLL_RATE=${H_POLL_RATE:-300}; H_POLL_TOKENS=500; H_WIN=10
   V1_REG_RATE=300; V1_POLL_RATE=500; V1_TOKENS=3000; V1_STEP=5; V1_FLOW_RATES=${V1_FLOW_RATES:-"10 20"}; V1_TWO_APPS_RATE=${V1_TWO_APPS_RATE:-20}; V1_BROWSE_RATE=50; V1_FLOW_SECONDS=10
   V2_FILL_RATE=500; V2_FILL_SECONDS=30; V2_CAP=12000; V2_POLL_RATE=${V2_POLL_RATE:-300}; V2_POLL_STRIDE=2; V2_REG_RATE=${V2_REG_RATE:-500}; V2_FLOW_RATE=20; V2_USERS=400; V2_BROWSE_RATE=50; V2_WARM_USERS=${V2_WARM_USERS:-500}; V2_WARM_RATE=${V2_WARM_RATE:-25}; V2_WARM_SECONDS=${V2_WARM_SECONDS:-0}
+  R1_CAP=500; R1_RATES=200,400; R1_STEP=5; R1_WARM_RATE=300; R1_WARM_SECONDS=8
   H2_USERS=1200; H2_RATE=40; H4_RATES="60"; H3_USERS=600; H3_RATE=30; H3_CASES="e503:0:503:- d4000:4000:200:- o4000:0:200:5:4000:200;12:0:200"
 else
   STEP=30; REG_RATES=500,1000,2000,4000,8000; POLL_RATES=1000,2000,5000,10000,15000
@@ -100,6 +102,8 @@ else
   # 순번 조회는 대기자 50만 명이 서버가 알려준 간격으로 조회하는 속도(계산 약 3,158/s)보다 약간 높게
   V2_FILL_RATE=2000; V2_FILL_SECONDS=260; V2_CAP=500000; V2_POLL_RATE=${V2_POLL_RATE:-3200}; V2_POLL_STRIDE=5; V2_REG_RATE=${V2_REG_RATE:-2000}; V2_FLOW_RATE=100; V2_USERS=22000; V2_BROWSE_RATE=300
   V2_WARM_USERS=${V2_WARM_USERS:-500}; V2_WARM_RATE=${V2_WARM_RATE:-25}; V2_WARM_SECONDS=${V2_WARM_SECONDS:-0}
+  # R1은 대기열을 작은 상한(2,000명)까지 빨리 채운 뒤 거절만 되는 줄서기를 보낸다. 요청당 비용이라 대기열 크기와 무관하다
+  R1_CAP=2000; R1_RATES=${R1_RATES:-1000,2000,4000}; R1_STEP=30; R1_WARM_RATE=2000; R1_WARM_SECONDS=40
   H2_USERS=22000; H2_RATE=100; H4_RATES=${H4_RATES:-"200 300 400"}
   # 케이스는 "이름:지연ms:상태:장애 구간". 장애 구간은 "시작초:지연ms:상태;끝초:0:200" 형식이고 -이면 없음
   H3_USERS=9000; H3_RATE=100; H3_CASES=${H3_CASES:-"d0:0:200:- d2500:2500:200:- d4000:4000:200:- e503:0:503:- o4000:0:200:25:4000:200;55:0:200 o503:0:200:25:0:503;55:0:200"}
@@ -1552,6 +1556,35 @@ stage_V2() {
   integrity_check
   # 배경 부하의 요약(전체 요청 수)과 같은 구간의 로그를 모은다. 흐름이 시작된 때부터만 모으면 초기 요청이 분모에만 들어간다
   COLLECT_SINCE=$bg_started collect_logs V2_flow --k6 "$OUT/V2_flow.summary.json" "${queue_specs[@]}"
+  export QUEUE_MAX_WAITING=500000
+}
+
+rejected_full_count() { # 앱이 대기열 가득 참으로 거절한 등록 수(누적)
+  curl -s -m 5 "$ACTUATOR/actuator/prometheus" | awk '/^queue_register_rejected_total\{.*reason="full"/{s += $NF} END{printf "%d", s}'
+}
+
+stage_R1() {
+  local idle="$ABS_OUT/R1_idle.stats.tsv"
+  export K6_DOCKER=${K6_DOCKER:-1}
+  export APP_CPUS=2 QUEUE_MAX_WAITING=$R1_CAP
+  echo -e "\n### R1${R1_TAG:+ ($R1_TAG)} 가득 찬 대기열의 줄서기 거절 비용 (상한 ${R1_CAP}명, 앱 1대 2코어, 부하기 Docker 네트워크 안, nginx 설정 ${V1_NGINX_CONF:-저장소 그대로})" >> "$OUT/results.md"
+  up 1h || return 1
+  nginx_shipped; cold_restart
+  reset_queue; seed; open_event
+  fill_to "$R1_CAP"
+  log "R1 예열: 거절만 되는 줄서기 ${R1_WARM_RATE}/s를 ${R1_WARM_SECONDS}초 (결과에 넣지 않음)"
+  warmup -e SCENARIO=register -e RATES=$R1_WARM_RATE -e STEP_SECONDS=$R1_WARM_SECONDS
+  sleep 5
+  start_stats "$idle"; sleep 20; stop_stats
+  echo "#### nginx의 거절 재사용 점검(k6/check-full-queue-cache.sh)" | tee -a "$OUT/results.md"
+  EVENT_ID=$EVENT_ID ./k6/check-full-queue-cache.sh | tee -a "$OUT/results.md"
+  local full_before full_after sent
+  full_before=$(rejected_full_count)
+  k6run R1 -e SCENARIO=register -e RATES=$R1_RATES -e STEP_SECONDS=$R1_STEP
+  full_after=$(rejected_full_count)
+  sent=$(python3 -c "import json; m = json.load(open('$OUT/R1.summary.json'))['metrics']; print(sum(int(v['count']) for k, v in m.items() if k.startswith('http_reqs{scenario:')))")
+  echo "- 대기자 $(rcli ZCARD "queue:$EVENT_ID:waiting")명(상한 ${R1_CAP}). k6가 보낸 줄서기 ${sent}건 중 앱까지 닿아 QUEUE_FULL로 거절한 것 $(( full_after - full_before ))건" | tee -a "$OUT/results.md"
+  python3 k6/summarize-queue.py cost "$OUT/R1.summary.json" reg "$R1_RATES" "$R1_STEP" "$GAP" "$OUT/R1.stats.tsv" "$(cat "$OUT/R1.t0")" "$idle" | tee -a "$OUT/results.md"
   export QUEUE_MAX_WAITING=500000
 }
 

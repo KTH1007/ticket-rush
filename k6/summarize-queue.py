@@ -3,6 +3,7 @@
 
   steps    <summary.json> <접두사> <도착률,...> <단계초> <간격초> <stats.tsv> <시작epoch> [app.tsv]
   limit    <summary.json> <접두사> <도착률,...> <단계초> <간격초> <stats.tsv> <시작epoch> [app.tsv]   (nginx 상한 검증용, 503을 따로 센다)
+  cost     <summary.json> <접두사> <도착률,...> <단계초> <간격초> <stats.tsv> <시작epoch> <부하 없는 구간 stats.tsv>   (요청 하나당 앱과 nginx CPU)
   compare  <결과폴더> <이름 템플릿({limit},{rep})> <접두사> <도착률> <상한,...> <반복수> <단계초>   (상한 후보를 반복 측정한 결과를 한 표로)
   intervals <응답.jsonl> <대기자 수> <요청 수를 적을 파일>   (서버가 알려준 조회 간격으로 초당 순번 조회 요청 수 계산)
   totals   <summary.json>   (한 번의 실행 전체: 보낸 요청, 받아줌, 거절, 실패, 못 보낸 반복)
@@ -43,6 +44,11 @@ def window_max(rows, role, lo, hi, column):
     return max(values) if values else float("nan")
 
 
+def window_avg(rows, role, lo, hi, column):
+    values = [r[column] for r in rows if r[1] == role and lo <= r[0] <= hi]
+    return sum(values) / len(values) if values else float("nan")
+
+
 def read_app_stats(path):
     rows = []
     try:
@@ -80,6 +86,34 @@ def steps(summary_path, prefix, rates, step, gap, stats_path, t0, app_stats_path
             f"{d('avg'):.1f}ms | {d('med'):.1f}ms | {d('p(95)'):.1f}ms | {d('p(99)'):.1f}ms | {d('max'):.0f}ms | "
             f"{window_max(stats, 'app', lo, hi, 2):.0f}% | {window_max(stats, 'redis', lo, hi, 2):.0f}% | "
             f"{window_max(stats, 'app', lo, hi, 3):.0f}MiB | {app_max(app_stats, lo, hi, 1):.0f}MiB | {app_max(app_stats, lo, hi, 2):,.0f} |"
+        )
+
+
+def cost(summary_path, prefix, rates, step, gap, stats_path, t0, idle_path):
+    """부하 없는 구간의 평균 CPU를 빼고 단계 평균 CPU를 처리량으로 나눈다. docker stats의 100%는 코어 하나다."""
+    summary = json.load(open(summary_path))
+    stats = read_stats(stats_path)
+    idle = read_stats(idle_path)
+    idle_app = window_avg(idle, "app", 0, 10**12, 2)
+    idle_nginx = window_avg(idle, "nginx", 0, 10**12, 2)
+    print(f"- 부하 없는 구간 평균 CPU: 앱 {idle_app:.0f}%, nginx {idle_nginx:.0f}% (이 값을 빼서 요청당 비용을 계산)")
+    print("| 목표 도착률 | 처리량 | QUEUE_FULL 비율 | 앱 CPU 평균 | 요청당 앱 CPU | nginx CPU 평균 | 요청당 nginx CPU | 응답 p95 | 응답 p99 |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for i, rate in enumerate(rates):
+        name = f"{prefix}_{rate}"
+        count = metric(summary, f"http_reqs{{scenario:{name}}}", "count")
+        full = metric(summary, f"queue_full_503{{scenario:{name}}}", "count")
+        d = lambda key: metric(summary, f"http_req_duration{{scenario:{name}}}", key)
+        lo = t0 + i * (step + gap) + 3
+        hi = lo + step - 3
+        throughput = count / step
+        app = window_avg(stats, "app", lo, hi, 2)
+        nginx = window_avg(stats, "nginx", lo, hi, 2)
+        per_app = (app - idle_app) / 100 / throughput * 1000 if throughput else float("nan")
+        per_nginx = (nginx - idle_nginx) / 100 / throughput * 1000 if throughput else float("nan")
+        print(
+            f"| {rate:,}/s | {throughput:,.0f}/s | {full / count * 100 if count else 0:.1f}% | {app:.0f}% | {per_app:.3f}ms | "
+            f"{nginx:.0f}% | {per_nginx:.3f}ms | {d('p(95)'):.1f}ms | {d('p(99)'):.1f}ms |"
         )
 
 
@@ -252,6 +286,8 @@ def main(argv):
         steps(argv[2], argv[3], [int(x) for x in argv[4].split(",")], int(argv[5]), int(argv[6]), argv[7], int(argv[8]), argv[9] if len(argv) > 9 else None)
     elif command == "limit":
         limit_steps(argv[2], argv[3], [int(x) for x in argv[4].split(",")], int(argv[5]), int(argv[6]), argv[7], int(argv[8]), argv[9] if len(argv) > 9 else None)
+    elif command == "cost":
+        cost(argv[2], argv[3], [int(x) for x in argv[4].split(",")], int(argv[5]), int(argv[6]), argv[7], int(argv[8]), argv[9])
     elif command == "compare":
         compare(argv[2], argv[3], argv[4], int(argv[5]), [int(x) for x in argv[6].split(",")], int(argv[7]), int(argv[8]))
     elif command == "seconds":
