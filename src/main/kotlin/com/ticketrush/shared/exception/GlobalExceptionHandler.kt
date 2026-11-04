@@ -4,6 +4,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import org.slf4j.MDC
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
+import org.springframework.http.CacheControl
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.HttpStatusCode
@@ -66,8 +67,14 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
 
     // 예상 못한 예외까지 표준 포맷으로 감싼다. 원인 추적을 위해 반드시 로그를 남긴다.
     @ExceptionHandler(Exception::class)
-    fun handleUnexpected(e: Exception): ResponseEntity<ProblemDetail> {
-        if (RedisFailures.isTransient(e)) return redisUnavailable(e)
+    fun handleUnexpected(e: Exception): ResponseEntity<ProblemDetail> =
+        when {
+            RedisFailures.isTransient(e) -> unavailable("Redis를 일시적으로 쓸 수 없어", RedisFailures.summary(e))
+            DatabaseFailures.isConnectionUnavailable(e) -> unavailable("DB 연결을 얻지 못해", DatabaseFailures.summary(e))
+            else -> internalError(e)
+        }
+
+    private fun internalError(e: Exception): ResponseEntity<ProblemDetail> {
         appLogger.error(e) { "처리되지 않은 예외 발생" }
         val problem = problemDetail(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_SERVER_ERROR", "일시적인 오류가 발생했습니다")
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(problem)
@@ -97,12 +104,15 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
 
     @ExceptionHandler(ServiceUnavailableException::class)
     fun handleServiceUnavailable(e: ServiceUnavailableException): ResponseEntity<ProblemDetail> =
-        respond(HttpStatus.SERVICE_UNAVAILABLE, e.code, e.message ?: e.code, e.retryAfter)
+        respond(HttpStatus.SERVICE_UNAVAILABLE, e.code, e.message ?: e.code, e.retryAfter, e.reusableFor)
 
-    // Redis가 일시적으로 요청을 받지 못한다(메모리 한도, 연결 끊김, 타임아웃). 요청마다 스택 트레이스를 남기면 로그가 폭증하므로 한 줄만 남기고,
+    // Redis나 DB가 일시적으로 요청을 받지 못한다(메모리 한도, 연결 끊김, 타임아웃, 연결 풀 고갈). 요청마다 스택 트레이스를 남기면 로그가 폭증하므로 한 줄만 남기고,
     // 한꺼번에 재시도가 몰리지 않게 Retry-After를 흩뜨린다
-    private fun redisUnavailable(e: Exception): ResponseEntity<ProblemDetail> {
-        appLogger.warn { "Redis를 일시적으로 쓸 수 없어 503으로 응답합니다: ${RedisFailures.summary(e)}" }
+    private fun unavailable(
+        reason: String,
+        summary: String,
+    ): ResponseEntity<ProblemDetail> {
+        appLogger.warn { "$reason 503으로 응답합니다: $summary" }
         val retryAfter = Duration.ofSeconds(ThreadLocalRandom.current().nextLong(RETRY_AFTER_MIN_SECONDS, RETRY_AFTER_MAX_SECONDS + 1))
         return respond(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE", "일시적으로 요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요", retryAfter)
     }
@@ -113,8 +123,10 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
         code: String,
         detail: String,
         retryAfter: Duration?,
+        reusableFor: Duration? = null,
     ): ResponseEntity<ProblemDetail> {
         val response = ResponseEntity.status(status)
+        reusableFor?.let { response.cacheControl(CacheControl.maxAge(it)) }
         retryAfter?.let {
             response.header(
                 HttpHeaders.RETRY_AFTER,

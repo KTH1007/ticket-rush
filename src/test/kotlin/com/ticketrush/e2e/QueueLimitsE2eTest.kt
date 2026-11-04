@@ -32,6 +32,7 @@ class QueueLimitsE2eTest : E2eTest() {
         assertThat(full.status).`as`(full.body).isEqualTo(503)
         assertThat(full.code).isEqualTo("QUEUE_FULL")
         assertThat(full.header("Retry-After")?.toLong()).isBetween(5L, 10L)
+        assertThat(full.header("Cache-Control")).isEqualTo("max-age=1")
         tokens.forEach { (ip, token) ->
             val poll = api.poll(event.eventId, token, ip)
             assertThat(poll.status).`as`("이미 선 사람의 조회: ${poll.body}").isEqualTo(HTTP_OK)
@@ -51,6 +52,7 @@ class QueueLimitsE2eTest : E2eTest() {
         assertThat(limited.status).`as`(limited.body).isEqualTo(429)
         assertThat(limited.code).isEqualTo("QUEUE_REGISTER_RATE_LIMITED")
         assertThat(limited.header("Retry-After")).isNotNull()
+        assertThat(limited.header("Cache-Control")).isNull()
     }
 
     @Test

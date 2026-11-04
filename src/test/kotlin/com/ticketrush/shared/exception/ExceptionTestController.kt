@@ -3,13 +3,17 @@ package com.ticketrush.shared.exception
 import io.lettuce.core.RedisCommandExecutionException
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
+import org.hibernate.exception.JDBCConnectionException
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.redis.RedisConnectionFailureException
 import org.springframework.data.redis.RedisSystemException
+import org.springframework.transaction.CannotCreateTransactionException
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.sql.SQLTransientConnectionException
 import java.time.Duration
 
 // GlobalExceptionHandlerTest 전용. 실제 도메인 컨트롤러가 아직 없어(#43 이전) 예외 매핑만
@@ -46,7 +50,8 @@ class ExceptionTestController {
     @PostMapping("/service-unavailable")
     fun serviceUnavailable(
         @RequestParam(required = false) millis: Long?,
-    ): Nothing = throw SampleServiceUnavailableException(millis?.let(Duration::ofMillis))
+        @RequestParam(required = false) reusableMillis: Long?,
+    ): Nothing = throw SampleServiceUnavailableException(millis?.let(Duration::ofMillis), reusableMillis?.let(Duration::ofMillis))
 
     @PostMapping("/redis-oom")
     fun redisOom(): Nothing =
@@ -57,6 +62,22 @@ class ExceptionTestController {
 
     @PostMapping("/redis-connection-failure")
     fun redisConnectionFailure(): Nothing = throw RedisConnectionFailureException("Unable to connect to Redis")
+
+    @PostMapping("/db-pool-exhausted")
+    fun dbPoolExhausted(): Nothing =
+        throw CannotCreateTransactionException(
+            "Could not open JPA EntityManager for transaction",
+            JDBCConnectionException(
+                "Unable to acquire JDBC Connection",
+                SQLTransientConnectionException(
+                    "HikariPool-1 - Connection is not available, request timed out after 3037ms " +
+                        "(total=20, active=20, idle=0, waiting=200)",
+                ),
+            ),
+        )
+
+    @PostMapping("/db-constraint")
+    fun dbConstraint(): Nothing = throw DataIntegrityViolationException("duplicate key value violates unique constraint")
 
     @PostMapping("/redis-wrong-type")
     fun redisWrongType(): Nothing =
@@ -79,7 +100,13 @@ class SampleTooManyRequestsException(
 
 class SampleServiceUnavailableException(
     retryAfter: Duration? = null,
-) : ServiceUnavailableException(code = "SAMPLE_UNAVAILABLE", message = "샘플 서비스를 쓸 수 없습니다", retryAfter = retryAfter)
+    reusableFor: Duration? = null,
+) : ServiceUnavailableException(
+        code = "SAMPLE_UNAVAILABLE",
+        message = "샘플 서비스를 쓸 수 없습니다",
+        retryAfter = retryAfter,
+        reusableFor = reusableFor,
+    )
 
 class SampleNotFoundException : NotFoundException(code = "SAMPLE_NOT_FOUND", message = "샘플을 찾을 수 없습니다")
 
