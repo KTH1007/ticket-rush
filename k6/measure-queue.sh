@@ -646,7 +646,7 @@ stage_D2() {
 nginx_shipped() {
   export NGINX_CONF="${V1_NGINX_CONF:-$(pwd)/docker/nginx/nginx.conf}"
   restart_nginx || { log "nginx를 띄우지 못해 측정을 멈춤"; exit 1; }
-  log "nginx 상한: 저장소 설정 그대로(줄서기 $(grep -oE 'limit_conn queue_register [0-9]+' docker/nginx/nginx.conf | awk '{print $3}'), 순번 조회 $(grep -oE 'limit_conn queue_poll [0-9]+' docker/nginx/nginx.conf | awk '{print $3}'))"
+  log "nginx 상한: ${V1_NGINX_CONF:+지정한 설정(}${V1_NGINX_CONF:-저장소 설정 그대로}${V1_NGINX_CONF:+)} 줄서기 $(grep -oE 'limit_conn queue_register [0-9]+' "$NGINX_CONF" | awk '{print $3}'), 순번 조회 $(grep -oE 'limit_conn queue_poll [0-9]+' "$NGINX_CONF" | awk '{print $3}')"
 }
 
 cold_restart() { # 앱을 껐다 켜서 JIT가 식은 상태로 바로 부하를 받게 한다. 응답이 처음 오기까지와 readiness가 UP이 되기까지를 기록한다
