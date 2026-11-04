@@ -218,6 +218,17 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    fun `재사용되는 503의 본문에는 요청별 traceId를 넣지 않고 재사용하지 않는 503에는 넣는다`() {
+        // when
+        val reusable = mockMvc.perform(post("/test/service-unavailable").param("reusableMillis", "1000")).andReturn()
+        val plain = mockMvc.perform(post("/test/service-unavailable")).andReturn()
+
+        // then
+        assertThat(reusable.response.contentAsString).doesNotContain("traceId")
+        assertThat(plain.response.contentAsString).containsPattern("\"traceId\":\"[0-9a-f-]{36}\"")
+    }
+
+    @Test
     fun `일시적인 인프라 장애의 503에는 Cache-Control을 붙이지 않는다`() {
         // when
         val redis = mockMvc.perform(post("/test/redis-oom")).andReturn()

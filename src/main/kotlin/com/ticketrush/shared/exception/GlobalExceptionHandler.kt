@@ -137,7 +137,8 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
                     .toString(),
             )
         }
-        return response.body(problemDetail(status, code, detail))
+        // 앞단이 저장해 다른 요청에도 돌려줄 응답에는 요청별 traceId를 넣지 않는다(다른 요청의 로그를 가리키게 된다)
+        return response.body(problemDetail(status, code, detail, withTraceId = reusableFor == null))
     }
 
     // title은 RFC 9457 의미대로 사람이 읽는 문구(상태 코드의 reasonPhrase)로 둔다. code는
@@ -146,11 +147,12 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
         status: HttpStatus,
         code: String,
         detail: String,
+        withTraceId: Boolean = true,
     ): ProblemDetail {
         val problem = ProblemDetail.forStatusAndDetail(status, detail)
         problem.title = status.reasonPhrase
         problem.setProperty("code", code)
-        problem.setProperty("traceId", MDC.get("traceId"))
+        if (withTraceId) problem.setProperty("traceId", MDC.get("traceId"))
         return problem
     }
 }

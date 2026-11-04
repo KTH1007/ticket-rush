@@ -33,6 +33,7 @@ class QueueLimitsE2eTest : E2eTest() {
         assertThat(full.code).isEqualTo("QUEUE_FULL")
         assertThat(full.header("Retry-After")?.toLong()).isBetween(5L, 10L)
         assertThat(full.header("Cache-Control")).isEqualTo("max-age=1")
+        assertThat(full.json().has("traceId")).`as`("재사용되는 응답에는 요청별 traceId가 없다").isFalse()
         tokens.forEach { (ip, token) ->
             val poll = api.poll(event.eventId, token, ip)
             assertThat(poll.status).`as`("이미 선 사람의 조회: ${poll.body}").isEqualTo(HTTP_OK)
