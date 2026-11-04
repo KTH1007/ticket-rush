@@ -19,12 +19,28 @@ SLO = {
     "cancel": (1000, 3000, 0.995),
 }
 ORDER = list(SLO)
+# 흐름 판정에서 측정되지 않으면 SLO를 확인한 것이 아닌 API. 홀드가 실패하면 결제와 예약 조회는 아예 불리지 않는다.
+# 취소는 비율(CANCEL_RATIO)에 따라 정상적으로 비므로 제외하고, 줄서기와 순번 조회는 토큰 모드에서 일부러 뺀다
+REQUIRED_FLOW_APIS = ("seat_layout", "hold", "pay", "lookup")
 HEADER = "| API | 유효 요청 | 제외(의도된 거절) | 좋은 응답 | 목표 | p95 ms | 목표 | p99 ms | 목표 | 판정 | TTFB p95 ms | 받는 시간 p95 ms |"
 
 
-def row(api, valid, excluded, good, p95, p99, ttfb=None, recv=None):
+def row(api, valid, excluded, good, p95, p99, ttfb=None, recv=None, unintended_rate=None):
     t95, t99, tgood = SLO[api]
     violations = []
+    if valid == 0:
+        # 받아준 요청이 하나도 없다(전부 의도된 거절). 성공 SLO는 판정할 수 없어 "충족"이라고 하지 않는다.
+        # 거절 응답의 지연과 의도하지 않은 실패율만 같은 기준으로 본다
+        if p95 > t95:
+            violations.append("거절 p95")
+        if p99 > t99:
+            violations.append("거절 p99")
+        if unintended_rate is not None and unintended_rate > 1 - tgood:
+            violations.append("비의도 실패율")
+        verdict = "판정 불가(전부 의도된 거절)" if not violations else "위반(" + ", ".join(violations) + ")"
+        line = (f"| {api} | 0 | {excluded:,} | - | {tgood * 100:.1f}% | "
+                f"{p95:.0f} | {t95} | {p99:.0f} | {t99} | {verdict} | - | - |")
+        return line, violations
     if good < tgood:
         violations.append("가용성")
     if p95 > t95:
@@ -45,6 +61,9 @@ def flow(path):
         good_m = metrics.get(f"sli_good{{api:{api}}}")
         dur = metrics.get(f"http_req_duration{{api:{api}}}")
         if not good_m or not dur:
+            if api in REQUIRED_FLOW_APIS:
+                lines.append(f"| {api} | 미측정 | - | - | - | - | - | - | - | 미측정 | - | - |")
+                bad.append(f"{api}: 미측정")
             continue
         valid = good_m["passes"] + good_m["fails"]
         excluded = int(metrics.get(f"sli_excluded{{api:{api}}}", {}).get("count", 0))
@@ -74,7 +93,7 @@ def queue(path, api, scenario):
     else:
         dur = metrics.get(f"busy_ms{{scenario:{scenario}}}") or metrics[f"http_req_duration{{scenario:{scenario}}}"]
         good = 1.0
-    line, violations = row(api, valid, full, good, dur["p(95)"], dur["p(99)"])
+    line, violations = row(api, valid, full, good, dur["p(95)"], dur["p(99)"], unintended_rate=bad / reqs if reqs else 0)
     # 거의 전부 의도된 거절이면 분모(유효 요청)가 작아 비율이 흔들리므로, 전체 요청 대비 의도하지 않은 실패도 같이 낸다
     note = f"- 의도하지 않은 실패 {bad:,.0f}건 / 전체 {reqs:,.0f}건 ({bad / reqs * 100:.2f}%)"
     return [line], ([f"{api}: {', '.join(violations)}"] if violations else []), note

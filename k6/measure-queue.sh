@@ -1360,7 +1360,7 @@ pgss_dump() { # 이름
 collect_logs() { # 이름 [slow-requests.py nginx에 넘길 --k6, --queue 인자들]
   local name=$1 since cid
   shift
-  since=$(cat "$OUT/$name.t0")
+  since=${COLLECT_SINCE:-$(cat "$OUT/$name.t0")}
   docker logs --since "$since" "$($COMPOSE ps -q nginx)" 2> /dev/null > "$OUT/$name.nginx.log"
   : > "$OUT/$name.app.log"
   for cid in $($COMPOSE --profile two ps -q app app2); do
@@ -1455,6 +1455,8 @@ stage_V1() {
     psql_ -c "SELECT id FROM seat WHERE event_id=$EVENT_ID ORDER BY id" > "$ABS_OUT/v1-seats-warm-two.txt"
     K6_SCRIPT=k6/slo-flow.js warmup -e SEATS_FILE="$ABS_OUT/v1-seats-warm-two.txt" -e FLOW_RATE=40 -e BROWSE_RATE=150 -e DURATION=20 -e PHONE_BASE=90000000
     v1_flow_run "2app${V1_TWO_IDLE:+idle}_${V1_TWO_APPS_RATE}" "$V1_TWO_APPS_RATE"
+    # 앱 2를 남겨 두면 다음 단계에 앱 2의 스케줄러와 CPU 사용이 섞인다
+    $COMPOSE --profile two stop app2 >> "$OUT/compose.log" 2>&1
     unset COMPOSE_PROFILES NGINX_UPSTREAM
   fi
   echo | tee -a "$OUT/results.md" > /dev/null
@@ -1484,7 +1486,7 @@ v2_background() { # 요약 파일 접두어(비면 결과를 남기지 않음) �
 
 stage_V2() {
   local all="$ABS_OUT/v2-all.txt" polls="$ABS_OUT/v2-polls.txt" cohort="$ABS_OUT/v2-cohort.txt" warm="$ABS_OUT/v2-warm.txt" seats="$ABS_OUT/v2-seats.txt"
-  local secs=$(( V2_USERS / V2_FLOW_RATE )) warm_n=$(( V2_WARM_USERS )) warm_rate=$V2_WARM_RATE queue_specs=() note=""
+  local secs=$(( V2_USERS / V2_FLOW_RATE )) warm_n=$(( V2_WARM_USERS )) warm_rate=$V2_WARM_RATE queue_specs=() note="" bg_started
   export K6_DOCKER=${K6_DOCKER:-1}
   export APP_CPUS=2 QUEUE_MAX_WAITING=$V2_CAP
   [ "$V2_POLL_RATE" -eq 0 ] && note="$note, 순번 조회 끔"
@@ -1526,6 +1528,7 @@ stage_V2() {
   fi
   log "V2 2단계 가득 찬 대기열에서 순번 조회 ${V2_POLL_RATE}/s + 줄서기 ${V2_REG_RATE}/s + 승격 ${V2_FLOW_RATE}/s 홀드와 결제 + 읽기 ${V2_BROWSE_RATE}/s (${secs}초)"
   v2_background V2 "$secs"
+  bg_started=$(date +%s)
   sleep 5
   DB_STATS=1 K6_SCRIPT=k6/slo-flow.js k6run V2_flow -e SEATS_FILE="$seats" -e TOKENS_FILE="$cohort" -e FLOW_RATE="$V2_FLOW_RATE" -e BROWSE_RATE="$V2_BROWSE_RATE" -e DURATION=$secs -e PHONE_BASE=10000000
   [ "${#V2_BG_PIDS[@]}" -gt 0 ] && wait "${V2_BG_PIDS[@]}"
@@ -1547,7 +1550,8 @@ stage_V2() {
   echo "- 좌석 상태: $(psql_ -c "SELECT string_agg(status || ' ' || n, ', ') FROM (SELECT status, count(*) n FROM seat WHERE event_id=$EVENT_ID GROUP BY status) t")" | tee -a "$OUT/results.md"
   echo "- 대기자 $(rcli ZCARD "queue:$EVENT_ID:waiting")명, Redis used_memory $(( $(rcli INFO memory | awk -F: '/^used_memory:/{print $2}') / 1048576 ))MiB" | tee -a "$OUT/results.md"
   integrity_check
-  collect_logs V2_flow --k6 "$OUT/V2_flow.summary.json" "${queue_specs[@]}"
+  # 배경 부하의 요약(전체 요청 수)과 같은 구간의 로그를 모은다. 흐름이 시작된 때부터만 모으면 초기 요청이 분모에만 들어간다
+  COLLECT_SINCE=$bg_started collect_logs V2_flow --k6 "$OUT/V2_flow.summary.json" "${queue_specs[@]}"
   export QUEUE_MAX_WAITING=500000
 }
 
