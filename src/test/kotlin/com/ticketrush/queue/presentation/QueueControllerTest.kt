@@ -119,6 +119,7 @@ class QueueControllerTest {
             .perform(post("/api/events/{eventId}/queues", 30L))
             .andExpect(status().isTooManyRequests)
             .andExpect(header().string("Retry-After", "42"))
+            .andExpect(header().doesNotExist("Cache-Control"))
             .andExpect(jsonPath("$.code").value("QUEUE_REGISTER_RATE_LIMITED"))
     }
 
@@ -130,6 +131,7 @@ class QueueControllerTest {
             .perform(post("/api/events/{eventId}/queues", 40L))
             .andExpect(status().isServiceUnavailable)
             .andExpect(header().string("Retry-After", "7"))
+            .andExpect(header().string("Cache-Control", "max-age=1"))
             .andExpect(jsonPath("$.code").value("QUEUE_FULL"))
     }
 

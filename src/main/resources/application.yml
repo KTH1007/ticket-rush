@@ -64,6 +64,12 @@ management:
   metrics:
     tags:
       instance: ${INSTANCE_ID:local}
+    distribution:
+      # p95, p99를 계산하려면 버킷이 필요하다. 버킷 경계는 SLO 지연 임계값(100ms, 200ms, 300ms, 500ms, 1s, 3s)에 맞춘다
+      percentiles-histogram:
+        http.server.requests: true
+      slo:
+        http.server.requests: 50ms, 100ms, 200ms, 300ms, 500ms, 1s, 3s
   info:
     env:
       enabled: true   # 아래 info 설정을 /actuator/info로 노출한다
@@ -96,6 +102,10 @@ resilience4j:
 
 # 운영 중 조정 대상은 전부 여기로. k6 결과로 재배포 없이 바꾼다
 ticket-rush:
+  warmup: ## 기동 직후 예열(readiness가 UP이 되기 전에 읽기 경로를 자기 자신에게 불러 데운다)
+    enabled: false # 기본은 끈다. 켜면 readiness가 duration만큼 늦게 UP이 된다
+    duration: 20s # 앞단의 헬스체크 허용 시간(compose healthcheck의 start_period와 retries)보다 짧아야 한다
+    concurrency: 8
   queue: ## 대기열
     token-ttl: 15m # 마지막 순번 조회로부터 이 시간 동안 조회가 없으면 대기 토큰이 만료된다(조회할 때마다 다시 늘어남)
     active-ttl: 2m

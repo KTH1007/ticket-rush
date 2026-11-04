@@ -1,0 +1,33 @@
+# e2e는 스케줄러가 실제로 돌아야 하므로 test 프로필이 늘려 둔 주기를 짧게 되돌린다
+server:
+  forward-headers-strategy: native   # X-Forwarded-For로 테스트마다 다른 사용자 IP를 흉내 낸다
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      paymentGateway:
+        waitDurationInOpenState: 1s
+
+ticket-rush:
+  payment:
+    gateway: toss
+    stale-claim-timeout: 2s
+    reclaim-interval: 500ms
+    min-hold-remaining: 3s   # Toss 호출 두 번(연결+읽기의 두 배) 이상이어야 기동한다
+    refund-retry-delay: 1s
+    refund-retry-interval: 500ms
+    refund-backlog-refresh-interval: 1s
+  toss:
+    connect-timeout: 300ms
+    read-timeout: 700ms
+    secret-key: test-secret-key
+  seat:
+    hold-ttl: 10s
+    payment-failed-hold-ttl: 5s
+    hold-expiry-interval: 500ms
+  queue:
+    promotion-interval: 200ms
+    promotion-budget-per-second: 100
+  seat-map:
+    status-refresh-interval: 500ms
+    status-max-stale: 2s

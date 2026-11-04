@@ -5,7 +5,6 @@ import io.lettuce.core.RedisCommandTimeoutException
 import io.lettuce.core.RedisConnectionException
 import org.springframework.data.redis.RedisConnectionFailureException
 
-private const val MAX_CAUSE_DEPTH = 10
 private const val SUMMARY_LENGTH = 120
 
 // 다시 시도하면 풀릴 수 있는 Redis 장애인지 가른다. 스크립트 오류나 WRONGTYPE 같은 버그는 해당하지 않는다.
@@ -14,10 +13,11 @@ internal object RedisFailures {
     // 서버가 돌려주는 오류 접두어. OOM은 maxmemory, LOADING은 데이터 적재 중, BUSY는 긴 스크립트 실행 중, MISCONF는 스냅샷 저장 실패로 쓰기 중단
     private val TRANSIENT_ERROR_PREFIXES = listOf("OOM ", "LOADING ", "BUSY ", "MISCONF ")
 
-    fun isTransient(e: Throwable): Boolean = causes(e).any(::isTransientCause)
+    fun isTransient(e: Throwable): Boolean = e.causeChain().any(::isTransientCause)
 
     fun summary(e: Throwable): String =
-        causes(e)
+        e
+            .causeChain()
             .last()
             .message
             .orEmpty()
@@ -29,7 +29,4 @@ internal object RedisFailures {
             is RedisCommandExecutionException -> TRANSIENT_ERROR_PREFIXES.any { cause.message.orEmpty().startsWith(it) }
             else -> false
         }
-
-    private fun causes(e: Throwable): List<Throwable> =
-        generateSequence(e) { it.cause?.takeIf { next -> next !== it } }.take(MAX_CAUSE_DEPTH).toList()
 }

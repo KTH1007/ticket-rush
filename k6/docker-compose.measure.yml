@@ -13,12 +13,14 @@ services:
   postgres:
     image: postgres:18-alpine
     mem_limit: 1g
-    cpus: 2
+    # 기본 2코어. 앱을 늘렸을 때 DB의 CPU 할당량이 병목인지 가리려고 PG_CPUS로 바꿔 비교한다
+    cpus: ${PG_CPUS:-2}
     environment:
       POSTGRES_DB: ticketrush
       POSTGRES_USER: ticketrush
       POSTGRES_PASSWORD: measurepw
-    command: [postgres, -c, max_connections=200]
+    # 100ms 이상 걸린 쿼리와 잠금 대기를 로그에 남겨 부하 중 느린 쿼리를 찾고, 쿼리별 누적 시간은 pg_stat_statements로 본다
+    command: [postgres, -c, max_connections=200, -c, log_min_duration_statement=100, -c, log_lock_waits=on, -c, shared_preload_libraries=pg_stat_statements, -c, pg_stat_statements.track=all]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ticketrush -d ticketrush"]
       interval: 3s
@@ -89,6 +91,11 @@ services:
       TICKET_RUSH_QUEUE_REGISTER_LIMIT_MAX_PER_IP: ${REGISTER_LIMIT_MAX_PER_IP:-1000000}
       TICKET_RUSH_QUEUE_MAX_WAITING: ${QUEUE_MAX_WAITING:-500000}
       TICKET_RUSH_RESERVATION_LOOKUP_IP_MAX_ATTEMPTS: ${LOOKUP_IP_MAX_ATTEMPTS:-1000000}
+      # nginx의 느린 요청 기준(100ms)과 맞춘다
+      TICKET_RUSH_OBSERVABILITY_SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-100}
+      # 기동 직후 예열. 측정은 기본으로 끄고(예열 없는 앱을 재려고), 켜서 효과를 볼 때만 WARMUP_ENABLED=true로 넘긴다
+      TICKET_RUSH_WARMUP_ENABLED: ${WARMUP_ENABLED:-false}
+      TICKET_RUSH_WARMUP_DURATION: ${WARMUP_DURATION:-20s}
     # 부하는 nginx(18080)로 보내고, 이 포트는 헬스와 지표 조회, 앱을 직접 칠 때만 쓴다
     ports:
       - "127.0.0.1:18081:8080"
@@ -126,6 +133,11 @@ services:
       TICKET_RUSH_QUEUE_REGISTER_LIMIT_MAX_PER_IP: ${REGISTER_LIMIT_MAX_PER_IP:-1000000}
       TICKET_RUSH_QUEUE_MAX_WAITING: ${QUEUE_MAX_WAITING:-500000}
       TICKET_RUSH_RESERVATION_LOOKUP_IP_MAX_ATTEMPTS: ${LOOKUP_IP_MAX_ATTEMPTS:-1000000}
+      # nginx의 느린 요청 기준(100ms)과 맞춘다
+      TICKET_RUSH_OBSERVABILITY_SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-100}
+      # 기동 직후 예열. 측정은 기본으로 끄고(예열 없는 앱을 재려고), 켜서 효과를 볼 때만 WARMUP_ENABLED=true로 넘긴다
+      TICKET_RUSH_WARMUP_ENABLED: ${WARMUP_ENABLED:-false}
+      TICKET_RUSH_WARMUP_DURATION: ${WARMUP_DURATION:-20s}
     ports:
       - "127.0.0.1:18082:8080"
 

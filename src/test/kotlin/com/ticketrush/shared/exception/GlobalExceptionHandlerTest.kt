@@ -204,6 +204,39 @@ class GlobalExceptionHandlerTest {
         assertThat(body.detail).isEqualTo("샘플 서비스를 쓸 수 없습니다")
         assertThat(body.properties?.get("code")).isEqualTo("SAMPLE_UNAVAILABLE")
         assertThat(result.response.getHeader("Retry-After")).isNull()
+        assertThat(result.response.getHeader("Cache-Control")).isNull()
+    }
+
+    @Test
+    fun `재사용 시간이 있는 503은 앞단 캐시가 그동안 쓰도록 Cache-Control max-age를 붙인다`() {
+        // when
+        val result = mockMvc.perform(post("/test/service-unavailable").param("reusableMillis", "1000")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(503)
+        assertThat(result.response.getHeader("Cache-Control")).isEqualTo("max-age=1")
+    }
+
+    @Test
+    fun `재사용되는 503의 본문에는 요청별 traceId를 넣지 않고 재사용하지 않는 503에는 넣는다`() {
+        // when
+        val reusable = mockMvc.perform(post("/test/service-unavailable").param("reusableMillis", "1000")).andReturn()
+        val plain = mockMvc.perform(post("/test/service-unavailable")).andReturn()
+
+        // then
+        assertThat(reusable.response.contentAsString).doesNotContain("traceId")
+        assertThat(plain.response.contentAsString).containsPattern("\"traceId\":\"[0-9a-f-]{36}\"")
+    }
+
+    @Test
+    fun `일시적인 인프라 장애의 503에는 Cache-Control을 붙이지 않는다`() {
+        // when
+        val redis = mockMvc.perform(post("/test/redis-oom")).andReturn()
+        val pool = mockMvc.perform(post("/test/db-pool-exhausted")).andReturn()
+
+        // then
+        assertThat(redis.response.getHeader("Cache-Control")).isNull()
+        assertThat(pool.response.getHeader("Cache-Control")).isNull()
     }
 
     @Test
@@ -244,6 +277,30 @@ class GlobalExceptionHandlerTest {
     fun `일시적이지 않은 Redis 오류는 그대로 500을 반환한다`() {
         // when
         val result = mockMvc.perform(post("/test/redis-wrong-type")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(500)
+        assertThat(result.response.getHeader("Retry-After")).isNull()
+    }
+
+    @Test
+    fun `DB 연결 풀이 바닥나면 503과 Retry-After를 반환하고 원인을 노출하지 않는다`() {
+        // when
+        val result = mockMvc.perform(post("/test/db-pool-exhausted")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(503)
+        val body = objectMapper.readValue(result.response.contentAsString, ProblemDetail::class.java)
+        assertThat(body.title).isEqualTo("Service Unavailable")
+        assertThat(body.properties?.get("code")).isEqualTo("TEMPORARILY_UNAVAILABLE")
+        assertThat(result.response.contentAsString).doesNotContain("Hikari", "JDBC", "EntityManager")
+        assertThat(result.response.getHeader("Retry-After")!!.toLong()).isBetween(5L, 10L)
+    }
+
+    @Test
+    fun `연결과 무관한 DB 오류는 그대로 500을 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/db-constraint")).andReturn()
 
         // then
         assertThat(result.response.status).isEqualTo(500)
