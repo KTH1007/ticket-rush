@@ -219,9 +219,8 @@ class SeatRepositoryTest : IntegrationTest() {
                 ).joinToString("\n") { it.values.first().toString() }
 
         // then
-        // ix_seat_event_status(event_id, status)가 아니라 uk_seat_position
-        // (event_id, section, row_label, seat_no)이 잡힌다. 컬럼 순서가 이 쿼리의
-        // WHERE+ORDER BY와 정확히 일치해서 별도 Sort 없이 처리되는 더 나은 플랜이다.
+        // uk_seat_position(event_id, section, row_label, seat_no)이 잡힌다. 컬럼 순서가
+        // 이 쿼리의 WHERE+ORDER BY와 정확히 일치해서 별도 Sort 없이 처리된다.
         assertThat(plan).contains("Index Scan")
         assertThat(plan).doesNotContain("Seq Scan")
     }
