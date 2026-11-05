@@ -2,7 +2,7 @@
 
 ## 좌석 지도 (`seat-map.js`)
 
-`GET /api/events/{id}/seats/layout`과 `seats/status`를 반복 호출한다. 이슈 #127의 측정에 쓴 스크립트다.
+`GET /api/events/{id}/seats/layout`과 `seats/status`를 반복 호출한다.
 
 ```bash
 k6 run --summary-export=result.json \
@@ -155,9 +155,9 @@ PG_CPUS=4 STAGES=V1 V1_PARTS="flow two" V1_FLOW_RATES=120 ./k6/measure-queue.sh 
 
 ## 측정 결과
 
-이슈 #127 본문에 기존 `/seats`와 새 구조의 비교, 갱신 주기 수정 전후 결과를 적었다.
+좌석 지도의 기존 `/seats`와 새 구조의 비교, 갱신 주기 수정 전후 결과는 이 문서에 옮기지 않았다.
 
-대기열은 이슈 #130 본문에 단계별 결과와 한계를 적었다. 앱 1대(2코어, 힙 512MiB), Postgres 2코어(풀 20) 기준의 요약:
+대기열의 단계별 결과 요약이다. 앱 1대(2코어, 힙 512MiB), Postgres 2코어(풀 20) 기준:
 
 | 항목 | 결과 |
 |---|---|
