@@ -274,6 +274,16 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    fun `Redis 연결이 재설정돼도 503과 Retry-After를 반환한다`() {
+        // when
+        val result = mockMvc.perform(post("/test/redis-connection-reset")).andReturn()
+
+        // then
+        assertThat(result.response.status).isEqualTo(503)
+        assertThat(result.response.getHeader("Retry-After")!!.toLong()).isBetween(5L, 10L)
+    }
+
+    @Test
     fun `일시적이지 않은 Redis 오류는 그대로 500을 반환한다`() {
         // when
         val result = mockMvc.perform(post("/test/redis-wrong-type")).andReturn()
