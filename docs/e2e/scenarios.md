@@ -42,7 +42,7 @@
 | E04 | 오픈 전 줄서기 | 409 `QUEUE_NOT_OPEN` | `QueueControllerTest` | `QueueE2eTest` |
 | E05 | 공연 시작 뒤 줄서기 | 409 `QUEUE_CLOSED` | `QueueControllerTest` | `QueueE2eTest` |
 | E06 | 없는 공연에 줄서기 | 404 `EVENT_NOT_FOUND` | `QueueControllerTest` | `QueueE2eTest` |
-| E07 | 대기열이 상한에 닿음 | 503 `QUEUE_FULL`과 `Retry-After` 5~10초와 `Cache-Control: max-age=1`(nginx가 1~2초 동안 같은 거절을 재사용), 이미 선 사람의 조회는 계속 200 | `QueueRegisterCapTest`, `QueueRegisterCapConcurrencyTest` | `QueueLimitsE2eTest` |
+| E07 | 대기열이 상한에 닿음 | 503 `QUEUE_FULL`과 `Retry-After` 5\~10초와 `Cache-Control: max-age=1`(nginx가 1\~2초 동안 같은 거절을 재사용), 이미 선 사람의 조회는 계속 200 | `QueueRegisterCapTest`, `QueueRegisterCapConcurrencyTest` | `QueueLimitsE2eTest` |
 | E08 | 같은 IP가 한도를 넘겨 줄서기 | 429 `QUEUE_REGISTER_RATE_LIMITED`와 `Retry-After` | `QueueRegisterIpLimitTest` | `QueueLimitsE2eTest` |
 | E09 | 없는 대기 토큰으로 순번 조회 | 401 `INVALID_QUEUE_TOKEN` | `QueueQueryServiceTest`, `QueueControllerTest` | `QueueE2eTest` |
 | E10 | 승격 전에 좌석 홀드 | 403 `QUEUE_NOT_ACTIVE` | `QueueCommandServiceAdmitTest`, `SeatHoldControllerTest` | `QueueLimitsE2eTest` |
@@ -84,4 +84,4 @@
 |---|---|---|---|---|
 | E26 | Redis가 메모리 한도에 닿아 쓰기를 거부 | 새 줄서기 503 `TEMPORARILY_UNAVAILABLE`과 `Retry-After`, 이미 선 사람의 조회는 200, 풀리면 바로 회복 | `GlobalExceptionHandlerTest`, `RedisFailuresTest`(단위) | `RedisFailureE2eTest` |
 | E27 | Redis가 재시작돼도 대기 순번이 유지됨 | 재시작 뒤 같은 토큰으로 조회 가능 | 수동 스크립트 `scripts/redis-lab/app-aof.sh` | 자동화하지 않음(볼륨이 있는 컨테이너 재시작을 Testcontainers로 흉내 내기 어려워 수동 스크립트 유지) |
-| E31 | DB 연결 풀이 바닥남(테스트가 풀의 연결을 모두 쥠) | 503 `TEMPORARILY_UNAVAILABLE`과 `Retry-After` 5~10초, 풀리면 바로 회복 | `GlobalExceptionHandlerTest`, `DatabaseFailuresTest`(단위) | `DbPoolExhaustionE2eTest` |
+| E31 | DB 연결 풀이 바닥남(테스트가 풀의 연결을 모두 쥠) | 503 `TEMPORARILY_UNAVAILABLE`과 `Retry-After` 5\~10초, 풀리면 바로 회복 | `GlobalExceptionHandlerTest`, `DatabaseFailuresTest`(단위) | `DbPoolExhaustionE2eTest` |
