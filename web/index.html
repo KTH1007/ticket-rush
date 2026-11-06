@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ticket-rush 테스트 페이지</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>ticket-rush 테스트 페이지</h1>
+    <p>백엔드 흐름을 직접 눌러 확인하는 용도입니다. 오른쪽 로그에 요청마다 상태 코드, 지연, 주요 헤더가 쌓입니다.</p>
+  </header>
+
+  <div class="layout">
+    <main>
+      <section id="s-event">
+        <h2>1. 공연</h2>
+        <div class="row">
+          <select id="event-select"></select>
+          <button id="event-reload" type="button">새로고침</button>
+          <button id="btn-reset" type="button">처음부터</button>
+        </div>
+        <p id="event-info" class="msg"></p>
+      </section>
+
+      <section id="s-queue">
+        <h2>2. 줄서기와 순번</h2>
+        <div class="row">
+          <button id="btn-register" type="button" disabled>줄서기</button>
+          <span>토큰 <code id="queue-token">-</code></span>
+        </div>
+        <div class="row options">
+          <label><input id="opt-interval" type="checkbox" checked> 서버가 알려 준 조회 간격을 따른다(끄면 0.5초 간격)</label>
+          <label><input id="opt-retry-after" type="checkbox" checked> Retry-After를 지킨다(끄면 3초 뒤 재시도)</label>
+        </div>
+        <p id="queue-status" class="status">순번 정보 없음</p>
+        <p id="queue-msg" class="msg"></p>
+      </section>
+
+      <section id="s-seat">
+        <h2>3. 좌석 선택과 홀드</h2>
+        <div id="seat-legend" class="legend"></div>
+        <div class="canvas-wrap"><canvas id="seat-canvas" width="10" height="10"></canvas></div>
+        <p id="seat-info" class="status">좌석 위에 마우스를 올리면 정보가 보입니다</p>
+        <p id="seat-summary" class="status">상태 정보 없음</p>
+        <div class="row options">
+          <label><input id="opt-stale-guard" type="checkbox" checked> 더 오래된 builtAt의 스냅샷은 무시한다</label>
+        </div>
+        <div class="row">
+          <button id="btn-auto" type="button" disabled>가능한 좌석 2개 선택</button>
+          <button id="btn-clear" type="button" disabled>선택 해제</button>
+          <span id="seat-selected">선택한 좌석 없음</span>
+        </div>
+        <div class="row">
+          <label>휴대폰 번호 <input id="phone" type="text" inputmode="numeric" maxlength="11"></label>
+          <button id="btn-phone-random" type="button">임의 번호</button>
+          <button id="btn-hold" type="button" disabled>홀드</button>
+        </div>
+        <p id="hold-msg" class="msg"></p>
+      </section>
+
+      <section id="s-pay">
+        <h2>4. 결제 (가짜 PG)</h2>
+        <p id="hold-info" class="status">홀드 정보 없음</p>
+        <div class="row">
+          <button id="btn-pay" type="button" disabled>결제</button>
+        </div>
+        <p id="pay-msg" class="msg"></p>
+      </section>
+
+      <section id="s-lookup">
+        <h2>5. 예약 조회와 취소</h2>
+        <div class="row">
+          <label>예매번호 <input id="lookup-no" type="text"></label>
+          <label>휴대폰 번호 <input id="lookup-phone" type="text" inputmode="numeric" maxlength="11"></label>
+        </div>
+        <div class="row">
+          <button id="btn-lookup" type="button">조회</button>
+          <button id="btn-cancel" type="button">취소</button>
+        </div>
+        <pre id="lookup-result" class="result"></pre>
+        <p id="lookup-msg" class="msg"></p>
+      </section>
+    </main>
+
+    <aside>
+      <div class="log-head">
+        <h2>요청 로그</h2>
+        <button id="log-clear" type="button">지우기</button>
+      </div>
+      <div class="log-wrap">
+        <table id="log">
+          <thead>
+            <tr><th>시각</th><th>요청</th><th>상태</th><th>ms</th><th>헤더와 코드</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </aside>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
