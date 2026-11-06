@@ -3,9 +3,11 @@ package com.ticketrush.shared.exception
 import io.lettuce.core.RedisCommandExecutionException
 import io.lettuce.core.RedisCommandTimeoutException
 import io.lettuce.core.RedisConnectionException
+import io.lettuce.core.RedisException
 import org.assertj.core.api.Assertions.assertThat
 import org.springframework.data.redis.RedisConnectionFailureException
 import org.springframework.data.redis.RedisSystemException
+import java.net.SocketException
 import kotlin.test.Test
 
 class RedisFailuresTest {
@@ -30,6 +32,37 @@ class RedisFailuresTest {
         assertThat(RedisFailures.isTransient(RedisConnectionFailureException("끊김"))).isTrue()
         assertThat(RedisFailures.isTransient(RuntimeException(RedisConnectionException("연결 못함")))).isTrue()
         assertThat(RedisFailures.isTransient(RedisSystemException("timeout", RedisCommandTimeoutException("시간 초과")))).isTrue()
+    }
+
+    @Test
+    fun `Redis 예외가 IO 오류를 감싼 연결 재설정은 일시적이다`() {
+        // given
+        val e = RedisSystemException("Redis exception", RedisException(SocketException("Connection reset")))
+
+        // when & then
+        assertThat(RedisFailures.isTransient(e)).isTrue()
+    }
+
+    @Test
+    fun `연결이 닫혔거나 끊긴 상태에서 거절된 명령은 일시적이다`() {
+        listOf(
+            "Connection closed",
+            "Connection disconnected",
+            "Connection is closed",
+            "Currently not connected. Commands are rejected.",
+        ).forEach { message ->
+            // given
+            val e = RedisSystemException("Redis exception", RedisException(message))
+
+            // when & then
+            assertThat(RedisFailures.isTransient(e)).`as`(message).isTrue()
+        }
+    }
+
+    @Test
+    fun `Redis와 무관한 IO 오류와 원인을 모르는 Redis 예외는 일시적이지 않다`() {
+        assertThat(RedisFailures.isTransient(RuntimeException(SocketException("Connection reset")))).isFalse()
+        assertThat(RedisFailures.isTransient(RedisSystemException("Redis exception", RedisException("알 수 없는 오류")))).isFalse()
     }
 
     @Test

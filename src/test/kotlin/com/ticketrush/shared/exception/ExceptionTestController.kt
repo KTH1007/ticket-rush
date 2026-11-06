@@ -1,6 +1,7 @@
 package com.ticketrush.shared.exception
 
 import io.lettuce.core.RedisCommandExecutionException
+import io.lettuce.core.RedisException
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import org.hibernate.exception.JDBCConnectionException
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.net.SocketException
 import java.sql.SQLTransientConnectionException
 import java.time.Duration
 
@@ -62,6 +64,9 @@ class ExceptionTestController {
 
     @PostMapping("/redis-connection-failure")
     fun redisConnectionFailure(): Nothing = throw RedisConnectionFailureException("Unable to connect to Redis")
+
+    @PostMapping("/redis-connection-reset")
+    fun redisConnectionReset(): Nothing = throw RedisSystemException("Redis exception", RedisException(SocketException("Connection reset")))
 
     @PostMapping("/db-pool-exhausted")
     fun dbPoolExhausted(): Nothing =
