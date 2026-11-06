@@ -130,8 +130,12 @@ export class SeatMap {
     return { stale: false, builtAt, counts };
   }
 
-  selectedIds() {
-    return [...this.selected].map((ordinal) => this.seats[ordinal].id);
+  selectedOrdinals() {
+    return [...this.selected];
+  }
+
+  idsOf(ordinals) {
+    return ordinals.map((ordinal) => this.seats[ordinal].id);
   }
 
   selectedCount() {
@@ -161,9 +165,11 @@ export class SeatMap {
     this.handlers.onChange();
   }
 
-  markSelectedAsMine() {
-    this.selected.forEach((ordinal) => this.mine.add(ordinal));
-    this.selected.clear();
+  markAsMine(ordinals) {
+    for (const ordinal of ordinals) {
+      this.mine.add(ordinal);
+      this.selected.delete(ordinal);
+    }
     this.draw();
     this.handlers.onChange();
   }

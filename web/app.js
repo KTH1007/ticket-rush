@@ -17,7 +17,12 @@ const state = {
   paid: false,
   countdown: null,
   statusTimer: null,
+  holding: false,
+  paying: false,
 };
+
+// 응답이 어느 흐름의 것인지 가린다. 초기화, 공연 전환, 줄서기를 다시 누르면 바뀐다
+let flowSeq = 0;
 
 const seatMap = new SeatMap($('seat-canvas'), {
   onChange: () => render(),
@@ -93,9 +98,10 @@ function stopStatusRefresh() {
 }
 
 function resetFlow() {
+  flowSeq += 1;
   stopPolling();
   stopCountdown();
-  Object.assign(state, { token: null, active: false, hold: null, paid: false });
+  Object.assign(state, { token: null, active: false, hold: null, paid: false, holding: false, paying: false });
   $('queue-token').textContent = '-';
   $('queue-status').textContent = '순번 정보 없음';
   $('hold-info').textContent = '홀드 정보 없음';
@@ -125,8 +131,8 @@ function render() {
   $('btn-auto').disabled = !ready;
   $('btn-clear').disabled = seatMap.selectedCount() === 0;
   $('seat-selected').textContent = seatMap.describeSelection();
-  $('btn-hold').disabled = !(state.token && state.active && seatMap.selectedCount() > 0 && !state.hold);
-  $('btn-pay').disabled = !(state.hold && !state.paid);
+  $('btn-hold').disabled = !(state.token && state.active && seatMap.selectedCount() > 0 && !state.hold) || state.holding;
+  $('btn-pay').disabled = !(state.hold && !state.paid) || state.paying;
 }
 
 async function loadEvents() {
@@ -253,7 +259,9 @@ $('btn-reset').addEventListener('click', () => {
 $('btn-register').addEventListener('click', async () => {
   stopPolling();
   Object.assign(state, { token: null, active: false });
+  const flow = ++flowSeq;
   const response = await register(state.eventId);
+  if (flow !== flowSeq) return;
   if (response.status !== 201 || !response.token) {
     say('queue-msg', describe(response), 'bad');
     render();
@@ -273,34 +281,64 @@ $('btn-phone-random').addEventListener('click', () => {
 });
 
 $('btn-hold').addEventListener('click', async () => {
-  const response = await payment.hold(state.eventId, state.token, seatMap.selectedIds(), $('phone').value.trim());
-  if (response.status !== 201) {
-    say('hold-msg', describe(response), 'bad');
-    if (response.status === 409) refreshStatus();
-    return;
-  }
-  state.hold = response.data;
-  state.paid = false;
-  seatMap.markSelectedAsMine();
-  say('hold-msg', `홀드에 성공했습니다(예약 ${state.hold.reservationId})`, 'ok');
-  startCountdown();
+  if (state.holding) return;
+  const flow = flowSeq;
+  const ordinals = seatMap.selectedOrdinals();
+  state.holding = true;
   render();
+  try {
+    const response = await payment.hold(state.eventId, state.token, seatMap.idsOf(ordinals), $('phone').value.trim());
+    if (flow !== flowSeq) {
+      if (response.status === 201) {
+        say('hold-msg', `이전 흐름에서 보낸 홀드가 성공했습니다(예약 ${response.data.reservationId}). 만료되면 풀립니다`, 'warn');
+      }
+      return;
+    }
+    if (response.status !== 201) {
+      say('hold-msg', describe(response), 'bad');
+      if (response.status === 409) refreshStatus();
+      return;
+    }
+    state.hold = response.data;
+    state.paid = false;
+    seatMap.markAsMine(ordinals);
+    say('hold-msg', `홀드에 성공했습니다(예약 ${state.hold.reservationId})`, 'ok');
+    startCountdown();
+  } finally {
+    if (flow === flowSeq) state.holding = false;
+    render();
+  }
 });
 
 $('btn-pay').addEventListener('click', async () => {
-  const response = await payment.confirm(state.hold.reservationId, state.hold);
-  if (response.status !== 201) {
-    say('pay-msg', describe(response), 'bad');
-    return;
-  }
-  state.paid = true;
-  stopCountdown();
-  renderHoldInfo(0);
-  say('pay-msg', `결제가 완료되었습니다. 예매번호 ${response.data.reservationNo}`, 'ok');
-  $('lookup-no').value = response.data.reservationNo;
-  $('lookup-phone').value = $('phone').value.trim();
-  refreshStatus();
+  if (state.paying) return;
+  const flow = flowSeq;
+  const hold = state.hold;
+  state.paying = true;
   render();
+  try {
+    const response = await payment.confirm(hold.reservationId, hold);
+    if (flow !== flowSeq) {
+      if (response.status === 201) {
+        say('lookup-msg', `이전 흐름의 결제가 완료되었습니다. 예매번호 ${response.data.reservationNo}`, 'warn');
+      }
+      return;
+    }
+    if (response.status !== 201) {
+      say('pay-msg', describe(response), 'bad');
+      return;
+    }
+    state.paid = true;
+    stopCountdown();
+    renderHoldInfo(0);
+    say('pay-msg', `결제가 완료되었습니다. 예매번호 ${response.data.reservationNo}`, 'ok');
+    $('lookup-no').value = response.data.reservationNo;
+    $('lookup-phone').value = $('phone').value.trim();
+    refreshStatus();
+  } finally {
+    if (flow === flowSeq) state.paying = false;
+    render();
+  }
 });
 
 async function lookupOrCancel(action) {
