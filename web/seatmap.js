@@ -18,6 +18,7 @@ export class SeatMap {
     this.ctx = canvas.getContext('2d');
     this.handlers = handlers;
     this.ratio = window.devicePixelRatio || 1;
+    this.loadSeq = 0;
     this.reset();
     canvas.addEventListener('click', (event) => this.onClick(event));
     canvas.addEventListener('mousemove', (event) => this.handlers.onHover(this.describeAt(event)));
@@ -40,9 +41,10 @@ export class SeatMap {
   }
 
   async load(eventId) {
+    const seq = ++this.loadSeq;
     this.reset();
     const response = await request('GET', `/api/events/${eventId}/seats/layout`);
-    if (!response.ok) return response;
+    if (seq !== this.loadSeq || !response.ok) return response;
 
     const { seatCount, grades, seats } = response.data;
     this.seats = new Array(seatCount);

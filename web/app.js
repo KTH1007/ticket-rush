@@ -150,12 +150,16 @@ async function loadEvents() {
   await selectEvent(Number(select.value));
 }
 
+let selectSeq = 0;
+
 async function selectEvent(eventId) {
+  const seq = ++selectSeq;
   resetFlow();
   stopStatusRefresh();
   state.eventId = eventId;
   say('event-info', '좌석 배치를 불러오는 중입니다');
   const response = await seatMap.load(eventId);
+  if (seq !== selectSeq) return;
   if (!response.ok) {
     say('event-info', describe(response), 'bad');
     render();
@@ -164,13 +168,16 @@ async function selectEvent(eventId) {
   renderLegend();
   say('event-info', `좌석 ${seatMap.seats.length}석을 불러왔습니다`, 'ok');
   await refreshStatus();
+  if (seq !== selectSeq) return;
   state.statusTimer = setInterval(refreshStatus, STATUS_REFRESH_MS);
   render();
 }
 
 async function refreshStatus() {
-  if (state.eventId === null) return;
-  const response = await request('GET', `/api/events/${state.eventId}/seats/status`);
+  const eventId = state.eventId;
+  if (eventId === null) return;
+  const response = await request('GET', `/api/events/${eventId}/seats/status`);
+  if (eventId !== state.eventId) return;
   const summary = $('seat-summary');
   if (!response.ok) {
     summary.textContent = `상태 조회 실패: ${describe(response)}`;
