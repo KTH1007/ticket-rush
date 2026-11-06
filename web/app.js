@@ -106,6 +106,7 @@ function resetFlow() {
   $('queue-status').textContent = '순번 정보 없음';
   $('hold-info').textContent = '홀드 정보 없음';
   for (const id of ['queue-msg', 'hold-msg', 'pay-msg', 'lookup-msg']) say(id, '');
+  render();
 }
 
 function renderLegend() {
@@ -257,9 +258,8 @@ $('btn-reset').addEventListener('click', () => {
 });
 
 $('btn-register').addEventListener('click', async () => {
-  stopPolling();
-  Object.assign(state, { token: null, active: false });
-  const flow = ++flowSeq;
+  resetFlow();
+  const flow = flowSeq;
   const response = await register(state.eventId);
   if (flow !== flowSeq) return;
   if (response.status !== 201 || !response.token) {
