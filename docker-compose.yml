@@ -128,7 +128,7 @@ services:
     depends_on: [prometheus]
 
   redis-insight:
-    image: redis/redisinsight:3.8
+    image: redis/redisinsight:3.10
     container_name: tr-redisinsight
     mem_limit: 256m
     profiles: ["tools"]
